@@ -8842,7 +8842,6 @@ function makeBrowser() {
   return null;
 }
 var browser = makeBrowser();
-var statusEl = document.getElementById("status");
 var pubkeyLabel = document.getElementById("pubkeyLabel");
 var contactsBody = document.getElementById("contactsBody");
 var keySelect = document.getElementById("keySelect");
@@ -8856,6 +8855,8 @@ var relayList = document.getElementById("relayList");
 var contactPub = document.getElementById("contactPub");
 var contactNick = document.getElementById("contactNick");
 var contactError = document.getElementById("contactError");
+var saveStatus = document.getElementById("saveStatus");
+var editTimers = /* @__PURE__ */ new WeakMap();
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
   for (let i2 = 0; i2 < attempts; i2++) {
@@ -8871,6 +8872,26 @@ async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   }
   throw lastErr;
 }
+function setSaveStatus(message, tone = "muted") {
+  if (!saveStatus)
+    return;
+  saveStatus.textContent = message;
+  saveStatus.dataset.tone = tone;
+  saveStatus.classList.remove("flash");
+  void saveStatus.offsetWidth;
+  saveStatus.classList.add("flash");
+}
+function syncFloatingState(el) {
+  if (!el)
+    return;
+  const field = el.closest(".field");
+  if (!field)
+    return;
+  if (el.value?.trim())
+    field.classList.add("filled");
+  else
+    field.classList.remove("filled");
+}
 saveBtn.addEventListener("click", save);
 document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
@@ -8884,6 +8905,13 @@ keySelect.addEventListener("change", async () => {
   const nsec = keySelect.value;
   if (nsec)
     await switchKey(nsec);
+  syncFloatingState(keySelect);
+});
+[keyNicknameEl, relayInput, contactPub, contactNick].forEach((el) => {
+  if (!el)
+    return;
+  el.addEventListener("input", () => syncFloatingState(el));
+  el.addEventListener("blur", () => syncFloatingState(el));
 });
 init();
 async function init() {
@@ -8909,6 +8937,13 @@ async function init() {
     populateKeys(keys, state.pubkey);
     fillKeyNickname(keys, state.pubkey);
     saveBtn.disabled = true;
+    saveBtn.textContent = "Save";
+    setSaveStatus("All changes saved", "muted");
+    syncFloatingState(keySelect);
+    syncFloatingState(keyNicknameEl);
+    syncFloatingState(relayInput);
+    syncFloatingState(contactPub);
+    syncFloatingState(contactNick);
   } catch (err) {
     console.error("[pushstr][options] render failed", err, state);
   }
@@ -8947,10 +8982,17 @@ function derivePubkeyFromNsec(nsec) {
   }
 }
 async function save() {
+  if (saveBtn.disabled) {
+    setSaveStatus("No changes to save", "muted");
+    return;
+  }
   const relays = readRelays();
   const recipients = readContacts();
   const keyNickname = keyNicknameEl.value.trim();
   try {
+    setSaveStatus("Saving...", "warn");
+    saveBtn.textContent = "Saving...";
+    saveBtn.disabled = true;
     await safeSend({
       type: "save-settings",
       relays,
@@ -8960,19 +9002,36 @@ async function save() {
       keyNickname
     });
     saveBtn.textContent = "Saved";
-    saveBtn.disabled = true;
+    setSaveStatus("Saved", "success");
     setTimeout(() => {
       saveBtn.textContent = "Save";
+      setSaveStatus("All changes saved", "muted");
     }, 2e3);
     await init();
   } catch (err) {
     console.error("Save failed", err);
+    saveBtn.textContent = "Save";
+    saveBtn.disabled = false;
+    setSaveStatus("Save failed", "warn");
   }
 }
-function status(msg) {
+function status(msg, tone = "warn") {
+  setSaveStatus(msg, tone);
 }
 function markDirty() {
   saveBtn.disabled = false;
+  saveBtn.textContent = "Save";
+  setSaveStatus("Unsaved changes", "warn");
+}
+function showEditedTag(wrapper) {
+  if (!wrapper)
+    return;
+  wrapper.classList.add("just-edited");
+  const existing = editTimers.get(wrapper);
+  if (existing)
+    clearTimeout(existing);
+  const timer = setTimeout(() => wrapper.classList.remove("just-edited"), 1800);
+  editTimers.set(wrapper, timer);
 }
 async function regen() {
   try {
@@ -8990,10 +9049,10 @@ function renderContacts(list, initial = false) {
 }
 function addContactRow(nickname = "", pubkey = "") {
   const tr = document.createElement("tr");
-  const tdNick = document.createElement("td");
-  tdNick.className = "nickcol";
   const tdPub = document.createElement("td");
   tdPub.className = "pubcol";
+  const tdNick = document.createElement("td");
+  tdNick.className = "nickcol";
   const tdDel = document.createElement("td");
   tdDel.className = "delcol";
   const hiddenPub = document.createElement("input");
@@ -9001,16 +9060,39 @@ function addContactRow(nickname = "", pubkey = "") {
   hiddenPub.value = pubkey || "";
   const nickInput = document.createElement("input");
   nickInput.type = "text";
+  nickInput.placeholder = "Nickname";
   nickInput.value = nickname || "";
-  nickInput.addEventListener("input", markDirty);
+  const nickId = `nick-${Math.random().toString(36).slice(2, 8)}`;
+  nickInput.id = nickId;
+  const nickLabel = document.createElement("label");
+  nickLabel.htmlFor = nickId;
+  nickLabel.textContent = "Nickname";
+  const nickField = document.createElement("div");
+  nickField.className = "field floating";
+  nickField.appendChild(nickInput);
+  nickField.appendChild(nickLabel);
+  const nickWrap = document.createElement("div");
+  nickWrap.className = "nick-wrapper";
+  nickWrap.appendChild(nickField);
+  const editedTag = document.createElement("span");
+  editedTag.className = "edit-indicator";
+  editedTag.textContent = "Edited";
+  nickWrap.appendChild(editedTag);
+  nickInput.addEventListener("input", () => {
+    markDirty();
+    syncFloatingState(nickInput);
+    showEditedTag(nickWrap);
+  });
   const pubLabel = document.createElement("span");
   pubLabel.className = "truncate";
   const fullNpub = toNpub(pubkey);
   pubLabel.textContent = fullNpub || pubkey;
   pubLabel.title = fullNpub || pubkey;
   const delBtn = document.createElement("button");
-  delBtn.className = "remove-btn";
-  delBtn.textContent = "Remove";
+  delBtn.type = "button";
+  delBtn.className = "icon-btn danger";
+  delBtn.setAttribute("aria-label", "Remove contact");
+  delBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6a1 1 0 0 1 1 1v2h3v2h-1v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8H5V6h3V4a1 1 0 0 1 1-1zm1 3h4V5h-4zm-1 4v7h2v-7zm4 0v7h2v-7z"/></svg>';
   delBtn.addEventListener("click", () => {
     if (!confirm("Remove this contact?"))
       return;
@@ -9019,12 +9101,13 @@ function addContactRow(nickname = "", pubkey = "") {
   });
   tdPub.appendChild(pubLabel);
   tdPub.appendChild(hiddenPub);
-  tdNick.appendChild(nickInput);
+  tdNick.appendChild(nickWrap);
   tdDel.appendChild(delBtn);
   tr.appendChild(tdPub);
   tr.appendChild(tdNick);
   tr.appendChild(tdDel);
   contactsBody.appendChild(tr);
+  syncFloatingState(nickInput);
 }
 function readContacts() {
   const rows = Array.from(contactsBody.querySelectorAll("tr"));
@@ -9059,6 +9142,8 @@ function addContactFromForm() {
   addContactRow(nickname, normalized);
   contactPub.value = "";
   contactNick.value = "";
+  syncFloatingState(contactPub);
+  syncFloatingState(contactNick);
   markDirty();
 }
 async function importNsec() {
@@ -9182,12 +9267,17 @@ function populateKeys(keys = [], currentPub) {
   if (!keySelect.value && unique[0])
     keySelect.value = unique[0].nsec;
   if (currentPub)
-    pubkeyLabel.textContent = `Active npub:`;
+    pubkeyLabel.textContent = `Active npub: ${shortKey(currentPub)}`;
+  syncFloatingState(keySelect);
 }
 relayInput?.addEventListener("input", () => {
   relayError.textContent = "";
+  syncFloatingState(relayInput);
 });
-keyNicknameEl.addEventListener("input", markDirty);
+keyNicknameEl.addEventListener("input", () => {
+  markDirty();
+  syncFloatingState(keyNicknameEl);
+});
 async function switchKey() {
   const nsec = keySelect.value;
   if (!nsec)
@@ -9231,6 +9321,7 @@ function shortKey(pk) {
 function fillKeyNickname(keys, currentPub) {
   const entry = (keys || []).find((k) => k.pubkey === currentPub);
   keyNicknameEl.value = entry?.nickname || "";
+  syncFloatingState(keyNicknameEl);
 }
 function flashButton(btn, label = "Copied") {
   if (!btn)
@@ -9265,19 +9356,29 @@ function renderRelays(relays = [], initial = false) {
 function renderRelayRow(relay) {
   const row = document.createElement("div");
   row.className = "relay-row";
+  const info = document.createElement("div");
+  info.className = "relay-info";
+  const statusDot = document.createElement("span");
+  statusDot.className = "status-dot status-idle";
+  statusDot.title = "Status unknown";
   const span = document.createElement("span");
+  span.className = "relay-url";
   span.textContent = relay;
   span.title = relay;
+  info.appendChild(statusDot);
+  info.appendChild(span);
   const btn = document.createElement("button");
-  btn.className = "remove-btn";
-  btn.textContent = "Remove";
+  btn.className = "icon-btn danger";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Remove relay");
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6a1 1 0 0 1 1 1v2h3v2h-1v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8H5V6h3V4a1 1 0 0 1 1-1zm1 3h4V5h-4zm-1 4v7h2v-7zm4 0v7h2v-7z"/></svg>';
   btn.addEventListener("click", () => {
     if (!confirm("Remove this relay?"))
       return;
     row.remove();
     markDirty();
   });
-  row.appendChild(span);
+  row.appendChild(info);
   row.appendChild(btn);
   return row;
 }
@@ -9295,10 +9396,11 @@ function addRelayFromInput() {
   }
   relayList.appendChild(renderRelayRow(val));
   relayInput.value = "";
+  syncFloatingState(relayInput);
   markDirty();
 }
 function readRelays() {
-  return Array.from(relayList.querySelectorAll(".relay-row span")).map((s) => s.textContent).filter(Boolean);
+  return Array.from(relayList.querySelectorAll(".relay-row .relay-url")).map((s) => s.textContent).filter(Boolean);
 }
 function normalizePubkeyInput(input) {
   const trimmed = input.trim();

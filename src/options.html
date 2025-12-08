@@ -6,68 +6,115 @@
   <title>Pushstr Settings</title>
 </head>
 <body>
-  <h1>Pushstr Settings</h1>
-  <div class="card">
-    <h2>Active Key & Actions</h2>
-    <div class="keyops top">
-      <label id="pubkeyLabel" for="keySelect"></label>
-      <select id="keySelect"></select>
-      <input id="keyNickname" type="text" placeholder="Profile nickname (optional)" />
-      <button id="showNpubQr">Show nPub QR</button>
+  <header class="settings-header">
+    <div class="title-stack">
+      <p class="eyebrow">Settings</p>
+      <h1>Pushstr</h1>
+      <p class="subtitle">Manage keys, relays, and contacts</p>
     </div>
-    <div class="keyops top actions split-actions">
-      <div class="left-actions">
-        <button id="regen">New Key</button>
-        <button id="import">Import nSec</button>
-        <button id="export">Copy nSec</button>
-        <button id="exportNpub">Copy nPub</button>
-      </div>
-      <div class="right-actions">
-        <button id="removeProfile" class="remove-btn">Remove Profile</button>
-      </div>
+    <div class="save-stack">
+      <span id="saveStatus" class="save-status" data-tone="muted">All changes saved</span>
+      <button id="save" class="primary" disabled>Save</button>
     </div>
-  </div>
+  </header>
 
-  <div class="card">
-    <h2>Relays</h2>
-    <div class="relay-add">
-      <input id="relayInput" type="text" placeholder="wss://relay.example.com" />
-      <button id="addRelay">Add</button>
+  <div class="page">
+    <div class="card key-card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Keyring</p>
+          <h2>Active Key & Actions</h2>
+        </div>
+        <span id="pubkeyLabel" class="pill subtle"></span>
+      </div>
+      <div class="key-grid">
+        <div class="field floating select-field">
+          <select id="keySelect"></select>
+          <label for="keySelect">Active profile</label>
+        </div>
+        <div class="field floating">
+          <input id="keyNickname" type="text" placeholder="Profile nickname (optional)" />
+          <label for="keyNickname">Profile nickname (optional)</label>
+        </div>
+      </div>
+      <div class="action-groups">
+        <div class="action-cluster">
+          <div class="cluster-label">Key management</div>
+          <div class="button-row">
+            <button id="regen">New Key</button>
+            <button id="import">Import nSec</button>
+          </div>
+        </div>
+        <div class="action-cluster">
+          <div class="cluster-label">Utilities</div>
+          <div class="button-row">
+            <button id="export">Copy nSec</button>
+            <button id="exportNpub">Copy nPub</button>
+            <button class="ghost-btn" id="showNpubQr">Show QR</button>
+          </div>
+        </div>
+        <div class="action-cluster danger">
+          <div class="cluster-label">Profile housekeeping</div>
+          <div class="button-row">
+            <button id="removeProfile" class="ghost-btn danger">Remove Profile</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Connectivity</p>
+          <h2>Relays</h2>
+        </div>
+        <span class="pill subtle alt">Lower latency with closer relays</span>
+      </div>
+      <div class="relay-add">
+        <div class="field floating stretch">
+          <input id="relayInput" type="text" placeholder="wss://relay.example.com" />
+          <label for="relayInput">Relay URL</label>
+        </div>
+        <button id="addRelay" class="primary ghost">Add</button>
+      </div>
       <span id="relayError" class="helper error"></span>
+      <div id="relayList" class="relay-list"></div>
     </div>
-    <div id="relayList" class="relay-list"></div>
-  </div>
 
-  <div class="card">
-    <div class="contacts-head">
-      <div>
-        <h2>Contacts</h2>
-        <p class="helper">Add npub or pubkey hex</p>
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">People</p>
+          <h2>Contacts</h2>
+          <p class="helper">Add npub or pubkey hex</p>
+        </div>
+      </div>
+      <div class="contact-form">
+        <div class="field floating">
+          <input id="contactPub" type="text" placeholder="npub1... or hex" />
+          <label for="contactPub">Pubkey</label>
+        </div>
+        <div class="field floating">
+          <input id="contactNick" type="text" placeholder="Display name (optional)" />
+          <label for="contactNick">Nickname</label>
+        </div>
+        <button id="addContact" class="primary ghost">Add Contact</button>
+      </div>
+      <span id="contactError" class="helper error"></span>
+      <div class="table-wrapper">
+        <table id="contactsTable">
+          <colgroup>
+            <col class="pubcol" />
+            <col class="nickcol" />
+            <col class="delcol" />
+          </colgroup>
+          <thead>
+            <tr><th class="pubcol">Pubkey</th><th class="nickcol">Nickname</th><th class="delcol"></th></tr>
+          </thead>
+          <tbody id="contactsBody"></tbody>
+        </table>
       </div>
     </div>
-    <div class="contact-form">
-      <input id="contactPub" type="text" placeholder="Pubkey (npub or hex)" />
-      <input id="contactNick" type="text" placeholder="Nickname (optional)" />
-      <button id="addContact">Add Contact</button>
-      <span id="contactError" class="helper error"></span>
-    </div>
-    <div class="table-wrapper">
-      <table id="contactsTable">
-        <colgroup>
-          <col class="pubcol" />
-          <col class="nickcol" />
-          <col class="delcol" />
-        </colgroup>
-        <thead>
-          <tr><th class="pubcol">Pubkey</th><th class="nickcol">Nickname</th><th class="delcol"></th></tr>
-        </thead>
-        <tbody id="contactsBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="footer">
-    <button id="save" class="primary" disabled>Save</button>
   </div>
   <script type="module" src="options.js"></script>
 </body>
