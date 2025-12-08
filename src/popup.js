@@ -1156,6 +1156,8 @@ function friendlyTime(ts) {
   if (!ts) return "";
   const date = new Date(ts * 1000);
   const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs < 60 * 1000) return "Just now";
   const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const todayStart = midnight(now);
   const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;

@@ -1745,6 +1745,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
     final now = DateTime.now();
+    final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
 
     // Helper to get midnight of a date
     DateTime midnight(DateTime d) => DateTime(d.year, d.month, d.day);
