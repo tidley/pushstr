@@ -1574,6 +1574,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _handleSharedPayload(dynamic payload) {
     if (payload is! Map) return;
     final text = payload['text']?.toString() ?? '';
+    final bytes = _asUint8List(payload['bytes']);
+    final mime = payload['type']?.toString() ?? '';
+    final name = payload['name']?.toString();
+
+    if (bytes != null && bytes.isNotEmpty) {
+      final resolvedMime = mime.isNotEmpty ? mime : (lookupMimeType(name ?? '', headerBytes: bytes) ?? 'application/octet-stream');
+      final filename = (name != null && name.isNotEmpty) ? name : 'shared.${extensionFromMime(resolvedMime)}';
+      setState(() {
+        _pendingAttachment = _PendingAttachment(
+          bytes: bytes,
+          mime: resolvedMime,
+          name: filename,
+        );
+        if (text.isNotEmpty) {
+          messageCtrl.text = text;
+        }
+      });
+      _messageFocus.requestFocus();
+      _scrollToBottom();
+      return;
+    }
+
     if (text.isNotEmpty) {
       setState(() {
         messageCtrl.text = text;
