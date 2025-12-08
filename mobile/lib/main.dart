@@ -1706,12 +1706,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final cleaned = _stripNip18(content?.toString() ?? '');
       final parsed = jsonDecode(cleaned);
       if (parsed is Map) {
-        if (parsed['url'] is String && _isBlossomLink(parsed['url'] as String, parsed)) {
-          return parsed['url'] as String;
+        final map = Map<String, dynamic>.from(parsed);
+        final topUrl = map['url'];
+        if (topUrl is String && _isBlossomLink(topUrl, map)) {
+          return topUrl;
         }
-        if (parsed['media'] is Map && (parsed['media']['url'] is String)) {
-          final url = parsed['media']['url'] as String;
-          if (_isBlossomLink(url, parsed['media'] as Map<String, dynamic>)) return url;
+        if (map['media'] is Map) {
+          final media = Map<String, dynamic>.from(map['media'] as Map);
+          final url = media['url'];
+          if (url is String && _isBlossomLink(url, media)) return url;
         }
       }
     } catch (_) {
