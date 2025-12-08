@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
-  "name": "Pushstr Gift DM",
-  "description": "Pushbullet-style notifier over Nostr DMs.",
+  "name": "Pushstr",
+  "description": "Secure messaging via Nostr",
   "version": "0.1.1",
   "icons": {
     "48": "pushtr_48.png",
