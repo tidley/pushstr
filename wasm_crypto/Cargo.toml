@@ -1,0 +1,19 @@
+[package]
+name = "wasm_crypto"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+aes-gcm = { version = "0.10", features = ["aes"] }
+sha2 = "0.10"
+getrandom = { version = "0.2", features = ["js"] }
+# NIP-44 dependencies
+secp256k1 = { version = "0.29", features = ["hashes", "rand"] }
+hkdf = "0.12"
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+hex = "0.4"

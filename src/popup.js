@@ -1,0 +1,1148 @@
+import { nip19, getPublicKey } from "nostr-tools";
+
+function makeBrowser() {
+  if (globalThis.browser) return globalThis.browser;
+  if (globalThis.chrome) {
+    const c = globalThis.chrome;
+    const promisify = (api, fn) => (...args) =>
+      new Promise((resolve, reject) => {
+        try {
+          fn.apply(api, [
+            ...args,
+            (result) => {
+              const err = c.runtime?.lastError;
+              if (err) reject(new Error(err.message || String(err)));
+              else resolve(result);
+            }
+          ]);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    return {
+      ...c,
+      runtime: {
+        ...c.runtime,
+        sendMessage: promisify(c.runtime, c.runtime.sendMessage),
+        getURL: (...args) => c.runtime.getURL(...args),
+        onMessage: c.runtime.onMessage
+      },
+      storage: c.storage
+        ? {
+            ...c.storage,
+            local: {
+              ...c.storage.local,
+              get: promisify(c.storage.local, c.storage.local.get),
+              set: promisify(c.storage.local, c.storage.local.set),
+              remove: promisify(c.storage.local, c.storage.local.remove)
+            }
+          }
+        : undefined,
+      downloads: c.downloads
+        ? {
+            ...c.downloads,
+            download: promisify(c.downloads, c.downloads.download)
+          }
+        : undefined
+    };
+  }
+  return null;
+}
+
+const browser = makeBrowser();
+const messageInput = document.getElementById("message");
+const statusEl = document.getElementById("status");
+const pubkeyEl = document.getElementById("pubkey");
+const contactsEl = document.getElementById("contacts");
+const historyEl = document.getElementById("history");
+const attachBtn = document.getElementById("attach");
+const sendBtn = document.getElementById("send");
+const previewEl = document.getElementById("preview");
+const previewContentEl = document.getElementById("previewContent");
+const clearPreviewBtn = document.getElementById("clearPreview");
+const warningEl = document.getElementById("upload-warning");
+
+async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await browser.runtime.sendMessage(message);
+    } catch (err) {
+      lastErr = err;
+      const msg = err?.message || "";
+      if (!/port closed/i.test(msg)) break;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
+const BLOSSOM_SERVER = "https://blossom.primal.net";
+
+let state = { messages: [], recipients: [], pubkey: null };
+let selectedContact = null;
+let pendingFile = null;
+const localPreviewCache = {};
+// Session cache for decrypted media (blob URLs)
+const decryptedMediaCache = new Map();
+// Track messages received in current session
+const sessionMessages = new Set();
+const sessionStartTime = Date.now();
+const params = new URLSearchParams(window.location.search);
+const isPopout = params.get("popout") === "1";
+document.body.classList.add(isPopout ? "popout" : "popup");
+
+document.getElementById("send").addEventListener("click", send);
+document.getElementById("attach").addEventListener("click", attachFile);
+const popoutBtn = document.getElementById("popout");
+if (isPopout) {
+  popoutBtn.style.display = "none";
+} else {
+  popoutBtn.addEventListener("click", popout);
+}
+clearPreviewBtn.addEventListener("click", clearPreview);
+document.getElementById("dismiss-warning")?.addEventListener("click", () => {
+  warningEl.classList.add("hidden");
+  localStorage.setItem("pushstr_upload_warn_dismissed", "1");
+});
+messageInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+messageInput.addEventListener("paste", handlePaste);
+messageInput.addEventListener("input", updateComposerMode);
+
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "incoming") {
+    console.log("[pushstr][popup] incoming message", msg);
+    const other = msg.event.pubkey || "unknown";
+    if (!selectedContact) selectedContact = other;
+    // Mark as session message (received while app is running)
+    if (msg.event.id) sessionMessages.add(msg.event.id);
+    refreshState().catch(err => {
+      console.error("[pushstr][popup] refreshState failed after incoming", err);
+    });
+  }
+});
+
+init();
+
+async function init() {
+  try {
+    state = await safeSend({ type: "get-state" }) || {};
+    console.info("[pushstr][popup] state", state);
+  } catch (err) {
+    console.error("[pushstr][popup] get-state failed", err);
+    state = (await loadStateFallback()) || {};
+  }
+  const dismissed = localStorage.getItem("pushstr_upload_warn_dismissed") === "1";
+  if (!dismissed) warningEl.classList.remove("hidden");
+  if (!state.pubkey) {
+    try {
+      await safeSend({ type: "generate-key" });
+      state = (await safeSend({ type: "get-state" })) || {};
+    } catch (err) {
+      console.error("[pushstr][popup] generate-key failed", err);
+      status("Unable to initialize key");
+    }
+  }
+  if (!state.pubkey) {
+    status("No key");
+    return;
+  }
+  pubkeyEl.textContent = state.pubkey ? `npub: ${short(state.pubkey)}` : "No key";
+  if (!selectedContact) {
+    const recipients = Array.isArray(state.recipients) ? state.recipients : [];
+    selectedContact = state.lastRecipient || (recipients[0] && recipients[0].pubkey) || null;
+  }
+  render();
+  updateComposerMode();
+}
+
+function render() {
+  renderContacts();
+  renderHistory();
+  requestAnimationFrame(() => {
+    historyEl.scrollTop = historyEl.scrollHeight;
+  });
+}
+
+function renderContacts() {
+  const contacts = buildContacts();
+  contactsEl.innerHTML = "";
+  contacts.forEach((c) => {
+    const el = document.createElement("div");
+    el.className = "contact" + (selectedContact === c.id ? " active" : "");
+    el.addEventListener("click", () => {
+      selectedContact = c.id;
+      browser.runtime.sendMessage({ type: "set-last-recipient", recipient: selectedContact });
+      render();
+    });
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = c.label[0].toUpperCase();
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const name = document.createElement("p");
+    name.className = "name";
+    name.textContent = c.label;
+    const snippet = document.createElement("p");
+    snippet.className = "snippet";
+    snippet.textContent = c.snippet || "";
+    meta.appendChild(name);
+    meta.appendChild(snippet);
+    el.appendChild(avatar);
+    el.appendChild(meta);
+    contactsEl.appendChild(el);
+  });
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "add-contact-btn";
+  addBtn.textContent = "+ Add Contact";
+  addBtn.addEventListener("click", showAddContactDialog);
+  contactsEl.appendChild(addBtn);
+}
+
+function renderHistory() {
+  historyEl.innerHTML = "";
+  if (!selectedContact) {
+    historyEl.innerHTML = "<p style='color:#555;'>Pick a contact to start chatting.</p>";
+    return;
+  }
+  console.log("[pushstr][popup] renderHistory: total messages:", state.messages?.length, "selected:", selectedContact);
+  const convo = state.messages.filter((m) => otherParty(m) === selectedContact);
+  console.log("[pushstr][popup] renderHistory: filtered to", convo.length, "messages for contact");
+  convo.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+  convo.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "msg-row " + (m.direction === "out" ? "out" : "in");
+    const bubble = document.createElement("div");
+    bubble.className = "bubble " + (m.direction === "out" ? "out" : "in");
+    const senderPubkey = m.direction === "out" ? (m.to || selectedContact || state.lastRecipient) : (m.from || state.pubkey);
+    const actions = renderBubbleContent(bubble, m.content, senderPubkey, m.direction === "out", m.id);
+    const metaRow = document.createElement("div");
+    metaRow.className = "meta-row";
+    const meta = document.createElement("div");
+    meta.className = "meta external";
+    meta.textContent = friendlyTime(m.created_at);
+    metaRow.appendChild(meta);
+    if (m.direction !== "out") {
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "copy-btn";
+      copyBtn.title = "Copy message";
+      copyBtn.textContent = "⧉";
+      copyBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(m.content || "");
+        } catch (_) {
+          prompt("Copy message:", m.content || "");
+        }
+      });
+      metaRow.appendChild(copyBtn);
+    }
+    if (actions) {
+      metaRow.appendChild(actions);
+    }
+    row.appendChild(bubble);
+    row.appendChild(metaRow);
+    historyEl.appendChild(row);
+  });
+  requestAnimationFrame(() => {
+    historyEl.scrollTop = historyEl.scrollHeight;
+  });
+}
+
+function createDownloadButton(url, mime, size, sha, extraMeta) {
+  const inferredName = extraMeta?.filename || filenameFromUrl(url, mime);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.title = inferredName ? `Download ${inferredName}` : "Download";
+  btn.className = "download-btn icon";
+  btn.textContent = "⬇";
+  btn.disabled = true;
+  let decryptHandler = null;
+  const clickHandler = async (targetUrl, targetName) => {
+    const toDataUrlIfNeeded = async (u) => {
+      if (!u) return null;
+      if (u.startsWith("data:")) return u;
+      if (u.startsWith("blob:")) {
+        try {
+          const res = await fetch(u);
+          const blob = await res.blob();
+          return await blobToDataUrl(blob);
+        } catch (_) {
+          return null;
+        }
+      }
+      return u;
+    };
+
+    // Prefer background download so popup context doesn't get closed/blocked
+    try {
+      const finalUrl = await toDataUrlIfNeeded(targetUrl);
+      const res = await browser.runtime.sendMessage({
+        type: "download-url",
+        url: finalUrl || targetUrl,
+        filename: targetName || undefined
+      });
+      if (!res?.error) return;
+    } catch (_) {
+      // fall back below
+    }
+
+    // Fallback: direct download from popup context
+    const href = (await toDataUrlIfNeeded(targetUrl)) || targetUrl;
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = targetName || "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+  const setTarget = (targetUrl, targetName) => {
+    btn.dataset.url = targetUrl;
+    btn.dataset.filename = targetName || inferredName || "";
+    btn.disabled = false;
+  };
+  const setDecryptHandler = (fn) => {
+    decryptHandler = fn;
+    btn.disabled = false;
+  };
+  if (url) setTarget(url, inferredName);
+  else btn.disabled = true;
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    let targetUrl = btn.dataset.url;
+    let targetName = btn.dataset.filename;
+    if (!targetUrl && decryptHandler) {
+      await decryptHandler();
+      targetUrl = btn.dataset.url;
+      targetName = btn.dataset.filename;
+    }
+    if (!targetUrl) return;
+    clickHandler(targetUrl, targetName);
+  });
+  return { btn, setTarget, setDecryptHandler };
+}
+
+function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragMeta, downloadCtrl, isOut = false, messageId = null) {
+  // Create cache key
+  const cacheKey = media.cipher_sha256 || media.url;
+
+  // Try to use cached preview for sender (check both in-memory and localStorage)
+  const cached = localPreviewCache[fallbackUrl] || localPreviewCache[media.url] ||
+                 localStorage.getItem(`pushstr_preview_${fallbackUrl}`) ||
+                 localStorage.getItem(`pushstr_preview_${media.url}`);
+
+  if (isOut && cached) {
+    // Sender preview: use local cached data URL and skip decrypting own upload
+    container.innerHTML = "";
+    const mime = media.mime || fragMeta.mime || "";
+    if (mime.startsWith("image")) {
+      const img = document.createElement("img");
+      img.src = cached;
+      img.style.maxWidth = "180px";
+      img.style.maxHeight = "180px";
+      img.style.display = "block";
+      container.appendChild(img);
+    } else {
+      const info = document.createElement("div");
+      info.textContent = media.filename || "Attachment";
+      info.style.fontSize = "13px";
+      container.appendChild(info);
+    }
+    if (downloadCtrl) downloadCtrl.setTarget(cached, media.filename);
+    return;
+  }
+
+  // Check if already decrypted in this session
+  const cachedBlob = decryptedMediaCache.get(cacheKey);
+  if (cachedBlob) {
+    displayDecryptedMedia(container, cachedBlob, media, fragMeta, downloadCtrl);
+    return;
+  }
+
+  // Check persisted decrypted media
+  const stored = loadPersistedMedia(cacheKey, media.mime || fragMeta.mime, media.filename);
+  if (stored) {
+    decryptedMediaCache.set(cacheKey, stored);
+    displayDecryptedMedia(container, stored, media, fragMeta, downloadCtrl);
+    return;
+  }
+
+  // Check if this is an old message (not from current session)
+  const isOldMessage = messageId && !sessionMessages.has(messageId);
+
+  if (isOldMessage) {
+    // Show decrypt button for old messages
+    container.innerHTML = "";
+    const filename = media.filename || "attachment";
+    const decryptBtn = document.createElement("button");
+    decryptBtn.textContent = `🔓 Decrypt: ${filename}`;
+    decryptBtn.className = "decrypt-btn";
+    decryptBtn.style.cssText = "padding:8px 12px;background:#374151;border:1px solid #4b5563;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;";
+    decryptBtn.title = filename; // Show full filename on hover
+    decryptBtn.onclick = () => decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl);
+    if (downloadCtrl) {
+      downloadCtrl.setDecryptHandler(() => decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl));
+    }
+    container.appendChild(decryptBtn);
+    return;
+  }
+
+  // Auto-decrypt for new messages
+  decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl);
+}
+
+async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl) {
+  container.innerHTML = "<div style='color:#9ca3af;font-size:12px;'>Decrypting attachment…</div>";
+  try {
+    const res = await browser.runtime.sendMessage({
+      type: "decrypt-media",
+      descriptor: media,
+      senderPubkey
+    });
+    if (!res || res.error || !res.base64) {
+      container.innerHTML = `<div style='color:#ef4444;font-size:12px;'>Failed to decrypt: ${res?.error || 'unknown error'}</div>`;
+      return;
+    }
+    const bytes = b64ToBytes(res.base64);
+    const blob = new Blob([bytes], { type: res.mime || media.mime || "application/octet-stream" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    // Cache the decrypted blob URL
+    const cached = { blobUrl, mime: res.mime || media.mime, filename: media.filename, base64: res.base64 };
+    decryptedMediaCache.set(cacheKey, cached);
+    persistDecryptedMedia(cacheKey, res.base64, cached.mime, cached.filename);
+
+    displayDecryptedMedia(container, cached, media, fragMeta, downloadCtrl);
+  } catch (err) {
+    container.innerHTML = `<div style='color:#ef4444;font-size:12px;'>Error: ${err.message}</div>`;
+  }
+}
+
+function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadCtrl) {
+  container.innerHTML = "";
+  const mime = cachedData.mime || media.mime || fragMeta.mime;
+  if (mime && mime.startsWith("image")) {
+    const img = document.createElement("img");
+    img.src = cachedData.blobUrl;
+    img.style.maxWidth = "180px";
+    img.style.maxHeight = "180px";
+    img.style.display = "block";
+    container.appendChild(img);
+  } else {
+    const info = document.createElement("div");
+    info.textContent = cachedData.filename || media.filename || "Attachment";
+    info.style.fontSize = "13px";
+    container.appendChild(info);
+  }
+  if (downloadCtrl) downloadCtrl.setTarget(cachedData.blobUrl, cachedData.filename || media.filename);
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const out = new Uint8Array(len);
+  for (let i = 0; i < len; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result?.toString() || null);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function persistDecryptedMedia(cacheKey, base64, mime, filename) {
+  if (!cacheKey || !base64) return;
+  const payload = { b64: base64, mime: mime || "application/octet-stream", filename: filename || "" };
+  try {
+    localStorage.setItem(`pushstr_media_${cacheKey}`, JSON.stringify(payload));
+  } catch (_) {
+    // ignore quota errors
+  }
+}
+
+function loadPersistedMedia(cacheKey, fallbackMime, fallbackFilename) {
+  if (!cacheKey) return null;
+  try {
+    const raw = localStorage.getItem(`pushstr_media_${cacheKey}`);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data?.b64) return null;
+    const bytes = b64ToBytes(data.b64);
+    const mime = data.mime || fallbackMime || "application/octet-stream";
+    const blob = new Blob([bytes], { type: mime });
+    const blobUrl = URL.createObjectURL(blob);
+    return { blobUrl, mime, filename: data.filename || fallbackFilename || "attachment" };
+  } catch (_) {
+    return null;
+  }
+}
+
+function filenameFromUrl(url, mime) {
+  try {
+    const u = new URL(url, window.location.href);
+    const base = u.pathname.split("/").filter(Boolean).pop();
+    if (base) return base;
+  } catch (_) {
+    // ignore
+  }
+  if (mime && mime.startsWith("image/")) {
+    const ext = mime.split("/")[1] || "bin";
+    return `attachment.${ext}`;
+  }
+  return "attachment";
+}
+
+function buildContacts() {
+  const counts = {};
+  const recips = Array.isArray(state.recipients) ? state.recipients : [];
+  recips.forEach((r) => (counts[r.pubkey] = counts[r.pubkey] || { id: r.pubkey, last: 0, snippet: "", nickname: r.nickname }));
+  (state.messages || []).forEach((m) => {
+    const other = otherParty(m);
+    const entry = counts[other] || { id: other, last: 0, snippet: "", nickname: "" };
+    entry.last = Math.max(entry.last, m.created_at || 0);
+    entry.snippet = truncateSnippet(stripNip18(m.content || ""));
+    counts[other] = entry;
+  });
+  return Object.values(counts)
+    .sort((a, b) => (b.last || 0) - (a.last || 0))
+    .map((c) => ({ ...c, label: c.nickname || short(c.id) }));
+}
+
+function otherParty(m) {
+  return m.direction === "out" ? m.to : m.from;
+}
+
+async function loadStateFallback() {
+  try {
+    const stored = await browser.storage.local.get();
+    if (!stored) return null;
+    const pubkey = stored.pubkey || derivePubkeyFromNsec(stored.nsec);
+    return { ...stored, pubkey };
+  } catch (err) {
+    console.error("[pushstr][popup] fallback load failed", err);
+    return null;
+  }
+}
+
+function derivePubkeyFromNsec(nsec) {
+  if (!nsec) return null;
+  try {
+    const dec = nip19.decode(nsec);
+    const priv = dec.type === "nsec" ? dec.data : nsec;
+    return getPublicKey(priv);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function send() {
+  const content = messageInput.value.trim();
+  const fileToSend = pendingFile;
+  if (!selectedContact) {
+    status("Pick a contact first");
+    return;
+  }
+  if (!content && !fileToSend) {
+    status("Nothing to send");
+    return;
+  }
+  status("Sending...");
+  try {
+    if (content) {
+      await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content });
+    }
+    if (fileToSend) {
+      const arrayBuf = await fileToSend.arrayBuffer();
+      const res = await browser.runtime.sendMessage({
+        type: "upload-blossom",
+        data: arrayBuf,
+        recipient: selectedContact,
+        mime: fileToSend.type,
+        filename: fileToSend.name || undefined
+      });
+      if (!res || res.error) throw new Error(res?.error || "upload failed");
+      // Cache preview for images (check both file type and returned mime type)
+      const isImage = (fileToSend.type?.startsWith("image") || res.mime?.startsWith("image"));
+      if (isImage) {
+        const dataUrl = await fileToDataUrl(fileToSend);
+        localPreviewCache[res.url] = dataUrl;
+        try {
+          localStorage.setItem(`pushstr_preview_${res.url}`, dataUrl);
+        } catch (_) {
+          // ignore storage errors
+        }
+      }
+      const payload = JSON.stringify({ media: res });
+      await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content: payload });
+      showUploadedPreview(res.url, res.mime || fileToSend.type);
+    }
+    messageInput.value = "";
+    pendingFile = null;
+    clearPreview(!!fileToSend);
+    updateComposerMode();
+    await refreshState();
+    status("Sent");
+  } catch (err) {
+    status("Failed: " + err.message);
+  }
+}
+
+async function refreshState() {
+  try {
+    const newState = await browser.runtime.sendMessage({ type: "get-state" });
+    console.log("[pushstr][popup] refreshState got state:", newState?.messages?.length, "messages");
+    if (newState) {
+      state = newState;
+      render();
+    } else {
+      console.warn("[pushstr][popup] refreshState: no state returned");
+      status("Background unavailable");
+    }
+  } catch (err) {
+    console.error("[pushstr][popup] refreshState error:", err);
+    status("Background unavailable");
+  }
+}
+
+async function regen() {
+  await browser.runtime.sendMessage({ type: "generate-key" });
+  await refreshState();
+}
+
+async function importNsec() {
+  const val = prompt("Paste nsec...");
+  if (!val) return;
+  await browser.runtime.sendMessage({ type: "import-nsec", value: val.trim() });
+  await refreshState();
+}
+
+async function exportNsec() {
+  const res = await browser.runtime.sendMessage({ type: "export-nsec" });
+  if (!res?.nsec) {
+    status("No key to export");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(res.nsec);
+    status("Copied nsec to clipboard");
+  } catch (err) {
+    prompt("Your nsec (keep secret):", res.nsec);
+    status("Copy failed; shown in prompt");
+  }
+}
+
+async function exportNpub() {
+  const res = await browser.runtime.sendMessage({ type: "export-npub" });
+  if (!res?.npub) {
+    status("No key to export");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(res.npub);
+    status("Copied npub to clipboard");
+  } catch (err) {
+    prompt("Your npub:", res.npub);
+    status("Copy failed; shown in prompt");
+  }
+}
+
+async function copyContact() {
+  if (!selectedContact) {
+    status("No contact selected");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(toNpub(selectedContact));
+    status("Contact pubkey copied");
+  } catch (err) {
+    prompt("Contact pubkey:", toNpub(selectedContact));
+    status("Copy failed; shown in prompt");
+  }
+}
+
+function toNpub(pk) {
+  if (!pk) return "";
+  if (pk.startsWith("npub")) return pk;
+  try {
+    const decoded = nip19.decode(pk);
+    if (decoded.type === "nprofile" && decoded.data?.pubkey) {
+      return nip19.npubEncode(decoded.data.pubkey);
+    }
+    if (decoded.type === "npub" && typeof decoded.data === "string") {
+      return pk;
+    }
+  } catch (_) {
+    // fall through to encode attempt
+  }
+  try {
+    return nip19.npubEncode(pk);
+  } catch (_) {
+    return pk;
+  }
+}
+
+function short(pk) {
+  const npub = toNpub(pk);
+  if (!npub) return "unknown";
+  if (npub.length <= 12) return npub;
+  return npub.slice(0, 8) + "..." + npub.slice(-4);
+}
+
+function normalizePubkeyInput(input) {
+  if (!input) throw new Error("Missing pubkey");
+  const trimmed = input.trim();
+  try {
+    const decoded = nip19.decode(trimmed);
+    if (decoded.type === "npub" && typeof decoded.data === "string") return decoded.data;
+    if (decoded.type === "nprofile" && decoded.data?.pubkey) return decoded.data.pubkey;
+  } catch (_) {
+    // fall through to hex handling
+  }
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return trimmed.toLowerCase();
+  throw new Error("Enter a valid npub or hex pubkey");
+}
+
+function status(msg) {
+  // Suppress UI toast; keep console only
+  if (msg) console.info("[pushstr]", msg);
+}
+
+function showModal(title, contentNode) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "modal-dialog";
+    const header = document.createElement("div");
+    header.className = "modal-header";
+    header.textContent = title;
+    const body = document.createElement("div");
+    body.className = "modal-body";
+    body.appendChild(contentNode);
+    const footer = document.createElement("div");
+    footer.className = "modal-footer";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    const ok = document.createElement("button");
+    ok.textContent = "Add";
+    ok.className = "modal-primary";
+    cancel.addEventListener("click", () => {
+      overlay.remove();
+      resolve(false);
+    });
+    ok.addEventListener("click", () => {
+      overlay.remove();
+      resolve(true);
+    });
+    footer.appendChild(cancel);
+    footer.appendChild(ok);
+    dialog.appendChild(header);
+    dialog.appendChild(body);
+    dialog.appendChild(footer);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    ok.focus();
+  });
+}
+async function showAddContactDialog() {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
+      <label style="font-size:12px;color:#9ca3af;">Nickname (optional)</label>
+      <input type="text" id="ac_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
+      <label style="font-size:12px;color:#9ca3af;">npub or hex pubkey</label>
+      <input type="text" id="ac_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
+    </div>
+  `;
+  const nickInput = wrapper.querySelector("#ac_nick");
+  const pubInput = wrapper.querySelector("#ac_pub");
+
+  const result = await showModal("Add Contact", wrapper);
+  if (!result) return;
+  const nickname = nickInput.value.trim();
+  const pubkey = pubInput.value.trim();
+  if (!pubkey) return;
+  let normalized;
+  try {
+    normalized = normalizePubkeyInput(pubkey);
+  } catch (err) {
+    status(err?.message || "Invalid pubkey");
+    return;
+  }
+  const recipients = (state.recipients || []).map((r) => ({ ...r }));
+  recipients.push({ nickname, pubkey: normalized });
+  try {
+    await browser.runtime.sendMessage({ type: "save-settings", recipients });
+    selectedContact = normalized;
+    await browser.runtime.sendMessage({ type: "set-last-recipient", recipient: normalized });
+    await refreshState();
+  } catch (err) {
+    status("Add contact failed");
+  }
+}
+function popout() {
+  const url = browser.runtime.getURL("popup.html?popout=1");
+  const existing = window.popoutWindow;
+  if (existing && !existing.closed) {
+    existing.focus();
+    return;
+  }
+  window.popoutWindow = window.open(url, "pushstr-popout", "noopener,noreferrer,width=800,height=640");
+}
+
+function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
+  const cleaned = stripNip18(content);
+  const renderTextIfAny = (urlToStrip = null) => {
+    let txt = cleaned;
+    if (urlToStrip) {
+      txt = txt.replace(urlToStrip, "").trim();
+    }
+    if (txt) {
+      renderTextWithReadMore(container, txt);
+    }
+  };
+  let jsonPart = cleaned;
+  let fragPart = "";
+  if (cleaned.includes("#")) {
+    const idx = cleaned.indexOf("#");
+    jsonPart = cleaned.slice(0, idx);
+    fragPart = cleaned.slice(idx + 1);
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(jsonPart);
+  } catch (_) {
+    parsed = null;
+    // Try decoding URI-encoded JSON then parse
+    try {
+      const decoded = decodeURIComponent(jsonPart.replace(/\+/g, "%20"));
+      const trimmed = decoded.replace(/^"+|"+$/g, "");
+      parsed = JSON.parse(trimmed);
+    } catch (_) {
+      parsed = null;
+    }
+  }
+
+  const fragMeta = parseFragmentMeta(fragPart);
+  if (parsed?.media?.url) {
+    const media = parsed.media;
+    const fullUrl = fragPart ? `${media.url}#${fragPart}` : media.url;
+    const actionHolder = document.createElement("div");
+    actionHolder.className = "actions-col";
+    const downloadCtrl = createDownloadButton(null, media.mime || fragMeta.mime, media.size || fragMeta.size, media.sha256 || fragMeta.sha256, {
+      ...fragMeta,
+      filename: media.filename
+    });
+    actionHolder.appendChild(downloadCtrl.btn);
+    // Check if media is encrypted (has encryption marker and IV)
+    const isEncrypted = (media.encryption === "aes-gcm" || media.cipher_sha256) && media.iv;
+    if (isEncrypted) {
+      renderEncryptedMedia(container, media, senderPubkey, fullUrl, fragMeta, downloadCtrl, isOut, messageId);
+    } else {
+      // Preview inside bubble (unencrypted)
+      if ((media.mime || "").startsWith("image")) {
+        const img = document.createElement("img");
+        img.src = fullUrl;
+        img.style.maxWidth = "180px";
+        img.style.maxHeight = "180px";
+        img.style.display = "block";
+        container.appendChild(img);
+      } else {
+        const info = document.createElement("div");
+        info.textContent = media.filename || "Attachment";
+        info.style.fontSize = "13px";
+        container.appendChild(info);
+      }
+      downloadCtrl.setTarget(fullUrl, media.filename);
+    }
+    return actionHolder;
+  }
+  if (parsed && parsed.url) {
+    const fullUrl = fragPart ? `${parsed.url}#${fragPart}` : parsed.url;
+    const actionHolder = document.createElement("div");
+    actionHolder.className = "actions-col";
+    const dl = createDownloadButton(fullUrl, parsed.type || fragMeta.mime, parsed.size || fragMeta.size, parsed.sha256 || fragMeta.sha256, {
+      ...fragMeta,
+      filename: parsed.filename
+    });
+    actionHolder.appendChild(dl.btn);
+    if (fragMeta.isImage || /\.(png|jpe?g|gif|webp)$/i.test(parsed.url)) {
+      const img = document.createElement("img");
+      img.src = fullUrl;
+      img.style.maxWidth = "180px";
+      img.style.maxHeight = "180px";
+      img.style.display = "block";
+      container.appendChild(img);
+    }
+    renderTextIfAny(fullUrl);
+    return actionHolder;
+  }
+
+  const meta = parseUrlMeta(cleaned);
+  if (meta) {
+    const actionHolder = document.createElement("div");
+    actionHolder.className = "actions-col";
+    const dl = createDownloadButton(meta.url, meta.mime, meta.size, null, meta);
+    actionHolder.appendChild(dl.btn);
+    if (meta.isImage) {
+      const img = document.createElement("img");
+      img.src = meta.url;
+      img.style.maxWidth = "180px";
+      img.style.maxHeight = "180px";
+      img.style.display = "block";
+      container.appendChild(img);
+    }
+    renderTextIfAny(meta.url);
+    return actionHolder;
+  }
+
+  const urlMatch = cleaned.match(/https?:\/\/\S+/i);
+  if (urlMatch) {
+    const metaFromUrl = parseUrlMeta(urlMatch[0]);
+    if (metaFromUrl) {
+      const actionHolder = document.createElement("div");
+      actionHolder.className = "actions-col";
+      const dl = createDownloadButton(metaFromUrl.url, metaFromUrl.mime, metaFromUrl.size, null, metaFromUrl);
+      actionHolder.appendChild(dl.btn);
+      if (metaFromUrl.isImage) {
+        const img = document.createElement("img");
+        img.src = metaFromUrl.url;
+        img.style.maxWidth = "180px";
+        img.style.maxHeight = "180px";
+        img.style.display = "block";
+        container.appendChild(img);
+      }
+      renderTextIfAny(metaFromUrl.url);
+      return actionHolder;
+    }
+  }
+
+  renderTextWithReadMore(container, cleaned);
+  return null;
+}
+
+function updateComposerMode() {
+  const hasContent = messageInput.value.trim().length > 0 || pendingFile;
+  if (hasContent) {
+    attachBtn.classList.add("hidden");
+    sendBtn.classList.remove("hidden");
+  } else {
+    attachBtn.classList.remove("hidden");
+    sendBtn.classList.add("hidden");
+  }
+}
+
+function attachFile() {
+  if (!isPopout) {
+    // Attachments are more reliable in the popout; open it and let the user retry there.
+    popout();
+    status("Opened popout for attachments");
+    return;
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    await handleFileAttachment(file);
+  };
+  input.click();
+}
+
+async function handlePaste(event) {
+  const items = event.clipboardData?.items || [];
+  let handled = false;
+  for (const item of items) {
+    if (item.kind === "file") {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (file) await handleFileAttachment(file);
+      handled = true;
+      break;
+    }
+  }
+  if (handled) return;
+}
+
+async function handleFileAttachment(file) {
+  showPreview(file);
+  try {
+    pendingFile = file;
+    const dismissed = localStorage.getItem("pushstr_upload_warn_dismissed") === "1";
+    if (!dismissed) warningEl.classList.remove("hidden");
+    updateComposerMode();
+  } catch (err) {
+    status(`Attachment failed: ${err.message}`);
+    clearPreview();
+  }
+}
+
+
+function showPreview(file) {
+  previewEl.classList.remove("uploaded");
+  clearPreviewBtn.classList.remove("hidden");
+  if (file) {
+    if (file.type.startsWith("image")) {
+      const url = URL.createObjectURL(file);
+      previewContentEl.innerHTML = `<img src="${url}" alt="preview" />`;
+    } else {
+      const sizeLabel = formatSize(file.size);
+      previewContentEl.innerHTML = `<div class="file-chip">${file.name || "attachment"} (${sizeLabel})</div>`;
+    }
+    previewEl.style.display = "block";
+  } else {
+    previewContentEl.innerHTML = "";
+    previewEl.style.display = "none";
+  }
+}
+
+function clearPreview(keepUploaded = false) {
+  if (keepUploaded && previewEl.classList.contains("uploaded")) {
+    // Leave uploaded preview visible
+    return;
+  }
+  previewContentEl.innerHTML = "";
+  previewEl.style.display = "none";
+  previewEl.classList.remove("uploaded");
+  clearPreviewBtn.classList.remove("hidden");
+  pendingFile = null;
+  updateComposerMode();
+}
+
+function contactLabel(pk) {
+  if (!pk) return "";
+  const found = (state.recipients || []).find((r) => r.pubkey === pk);
+  return found?.nickname || short(pk);
+}
+
+function stripNip18(text) {
+  if (!text) return "";
+  return text.replace(/^\[\/\/\]:\s*#\s*\(nip18\)\s*/i, "").trim();
+}
+
+function parseUrlMeta(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  const [base, frag] = trimmed.split("#", 2);
+  let mime = "";
+  let size = "";
+  if (frag) {
+    const params = new URLSearchParams(frag);
+    mime = params.get("m") || "";
+    size = params.get("size") || "";
+  }
+  const isImage = (mime && mime.startsWith && mime.startsWith("image")) || /\.(png|jpe?g|gif|webp)$/i.test(base);
+  return { url: base + (frag ? "#" + frag : ""), isImage, size };
+}
+
+function parseFragmentMeta(frag) {
+  if (!frag) return {};
+  const params = new URLSearchParams(frag);
+  const mime = params.get("m") || "";
+  const size = params.get("size") || "";
+  const sha256 = params.get("x") || "";
+  const isImage = mime.startsWith("image");
+  return { mime, size, sha256, isImage };
+}
+
+function formatSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+function friendlyTime(ts) {
+  if (!ts) return "";
+  const date = new Date(ts * 1000);
+  const now = new Date();
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const todayStart = midnight(now);
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const dateStart = midnight(date);
+  const timePart = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  if (dateStart === todayStart) return `Today at ${timePart}`;
+  if (dateStart === yesterdayStart) return `Yesterday at ${timePart}`;
+
+  const opts = { weekday: "long", month: "long", day: "numeric" };
+  const base = date.toLocaleDateString(undefined, opts);
+  return `${base} at ${timePart}`;
+}
+
+function truncateSnippet(text) {
+  if (!text) return "";
+  const max = 80;
+  return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
+function renderTextWithReadMore(container, text) {
+  const MAX_LEN = 400;
+  if (!text || text.length <= MAX_LEN) {
+    container.textContent = text;
+    return;
+  }
+  const short = text.slice(0, MAX_LEN) + "…";
+  const fullSpan = document.createElement("span");
+  fullSpan.textContent = text;
+  fullSpan.style.display = "none";
+
+  const shortSpan = document.createElement("span");
+  shortSpan.textContent = short + " ";
+
+  const link = document.createElement("a");
+  link.href = "#";
+  link.textContent = "Read more";
+  link.classList.add("read-more");
+  link.style.fontWeight = "700";
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    const expanded = fullSpan.style.display !== "none";
+    if (expanded) {
+      fullSpan.style.display = "none";
+      shortSpan.style.display = "inline";
+      link.textContent = "Read more";
+    } else {
+      fullSpan.style.display = "inline";
+      shortSpan.style.display = "none";
+      link.textContent = "Show less";
+      link.classList.add("expanded");
+    }
+  });
+
+  container.appendChild(shortSpan);
+  container.appendChild(fullSpan);
+  container.appendChild(link);
+}
+
+function showUploadedPreview(url, mime = "") {
+  // For now we clear the preview once sent to avoid lingering chips.
+  clearPreview();
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}

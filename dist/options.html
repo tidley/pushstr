@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="options.css" />
+  <title>Pushstr Settings</title>
+</head>
+<body>
+  <h1>Pushstr Settings</h1>
+  <div class="card">
+    <h2>Active Key & Actions</h2>
+    <div class="keyops top">
+      <label id="pubkeyLabel" for="keySelect"></label>
+      <select id="keySelect"></select>
+      <input id="keyNickname" type="text" placeholder="Profile nickname (optional)" />
+      <button id="showNpubQr">Show nPub QR</button>
+    </div>
+    <div class="keyops top actions split-actions">
+      <div class="left-actions">
+        <button id="regen">New Key</button>
+        <button id="import">Import nSec</button>
+        <button id="export">Copy nSec</button>
+        <button id="exportNpub">Copy nPub</button>
+      </div>
+      <div class="right-actions">
+        <button id="removeProfile" class="remove-btn">Remove Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Relays</h2>
+    <div class="relay-add">
+      <input id="relayInput" type="text" placeholder="wss://relay.example.com" />
+      <button id="addRelay">Add</button>
+      <span id="relayError" class="helper error"></span>
+    </div>
+    <div id="relayList" class="relay-list"></div>
+  </div>
+
+  <div class="card">
+    <div class="contacts-head">
+      <div>
+        <h2>Contacts</h2>
+        <p class="helper">Add npub or pubkey hex</p>
+      </div>
+    </div>
+    <div class="contact-form">
+      <input id="contactPub" type="text" placeholder="Pubkey (npub or hex)" />
+      <input id="contactNick" type="text" placeholder="Nickname (optional)" />
+      <button id="addContact">Add Contact</button>
+      <span id="contactError" class="helper error"></span>
+    </div>
+    <div class="table-wrapper">
+      <table id="contactsTable">
+        <colgroup>
+          <col class="pubcol" />
+          <col class="nickcol" />
+          <col class="delcol" />
+        </colgroup>
+        <thead>
+          <tr><th class="pubcol">Pubkey</th><th class="nickcol">Nickname</th><th class="delcol"></th></tr>
+        </thead>
+        <tbody id="contactsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button id="save" class="primary" disabled>Save</button>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

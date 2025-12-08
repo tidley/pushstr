@@ -1,0 +1,47 @@
+{
+  "name": "pushstr",
+  "version": "0.1.0",
+  "description": "Pushbullet-style notifier over Nostr DMs",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "node scripts/build.js",
+    "build:prod": "NODE_ENV=production node scripts/build.js",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "package": "npm run build:prod && node scripts/package.js",
+    "prepare": "husky install"
+  },
+  "dependencies": {
+    "nostr-tools": "^2.18.2",
+    "pako": "^2.1.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/firefox-webext-browser": "^120.0.0",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "esbuild": "^0.19.8",
+    "eslint": "^8.55.0",
+    "eslint-plugin-security": "^1.7.1",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.7",
+    "vitest": "^1.0.0"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  }
+}

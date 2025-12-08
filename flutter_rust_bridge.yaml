@@ -1,0 +1,4 @@
+rust_input: crate::api
+rust_root: pushstr_rust/
+dart_output: mobile/lib/bridge_generated.dart
+dart_format_line_length: 120

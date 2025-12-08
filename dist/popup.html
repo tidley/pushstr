@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>Pushstr</title>
+</head>
+<body>
+  <main>
+    <aside id="contacts-pane">
+      <header class="topbar">
+        <a class="brand-btn" href="options.html" target="_blank" title="Settings" aria-label="Settings">
+          <div class="brand-text">
+            <h1>Pushstr</h1>
+            <p id="pubkey"></p>
+          </div>
+          <span class="brand-cog">⚙</span>
+        </a>
+      </header>
+      <div id="contacts"></div>
+    </aside>
+    <section id="chat">
+      <button id="popout" class="icon-btn popout-float" title="Pop out" aria-label="Pop out">↗</button>
+      <div id="history"></div>
+      <div id="composer">
+        <div id="upload-warning" class="hidden">
+          <span>Attachments upload unencrypted; encrypt sensitive data yourself.</span>
+          <button id="dismiss-warning">Don’t show again</button>
+        </div>
+        <div id="input-row">
+          <button id="attach" title="Attach file" aria-label="Attach file">📎</button>
+          <button id="send" class="hidden" title="Send" aria-label="Send">➤</button>
+          <textarea id="message" rows="3" placeholder="Type a message, press enter to send"></textarea>
+        </div>
+        <div id="preview">
+          <button id="clearPreview" title="Remove attachment" aria-label="Remove attachment">✕</button>
+          <div id="previewContent"></div>
+        </div>
+        <div id="upload-progress"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

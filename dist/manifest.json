@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Pushstr Gift DM",
+  "description": "Pushbullet-style notifier over Nostr DMs.",
+  "version": "0.1.0",
+  "icons": {
+    "48": "pushtr_orange.png",
+    "96": "pushtr_orange.png",
+    "128": "pushtr_orange.png"
+  },
+  "permissions": [
+    "storage",
+    "notifications",
+    "contextMenus",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://blossom.primal.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Pushstr",
+    "default_popup": "popup.html",
+    "default_icon": "pushtr_orange.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/nostr-tools.bundle.js",
+        "wasm_crypto.js",
+        "wasm_crypto_bg.wasm"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}
