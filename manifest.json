@@ -17,7 +17,12 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "pushstr@local"
+      "id": "pushstr@local",
+      "data_collection_permissions": {
+        "required": [
+          "personalCommunications"
+        ]
+      }
     }
   },
   "background": {

@@ -7254,6 +7254,22 @@ function short(pk) {
     return npub;
   return npub.slice(0, 8) + "..." + npub.slice(-4);
 }
+function normalizePubkeyInput(input) {
+  if (!input)
+    throw new Error("Missing pubkey");
+  const trimmed = input.trim();
+  try {
+    const decoded = nip19_exports.decode(trimmed);
+    if (decoded.type === "npub" && typeof decoded.data === "string")
+      return decoded.data;
+    if (decoded.type === "nprofile" && decoded.data?.pubkey)
+      return decoded.data.pubkey;
+  } catch (_) {
+  }
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed))
+    return trimmed.toLowerCase();
+  throw new Error("Enter a valid npub or hex pubkey");
+}
 function status(msg) {
   if (msg)
     console.info("[pushstr]", msg);
@@ -7314,11 +7330,19 @@ async function showAddContactDialog() {
   const pubkey = pubInput.value.trim();
   if (!pubkey)
     return;
-  const trimmed = pubkey.trim();
+  let normalized;
+  try {
+    normalized = normalizePubkeyInput(pubkey);
+  } catch (err) {
+    status(err?.message || "Invalid pubkey");
+    return;
+  }
   const recipients = (state.recipients || []).map((r) => ({ ...r }));
-  recipients.push({ nickname, pubkey: trimmed });
+  recipients.push({ nickname, pubkey: normalized });
   try {
     await browser.runtime.sendMessage({ type: "save-settings", recipients });
+    selectedContact = normalized;
+    await browser.runtime.sendMessage({ type: "set-last-recipient", recipient: normalized });
     await refreshState();
   } catch (err) {
     status("Add contact failed");
