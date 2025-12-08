@@ -445,6 +445,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _editContact(BuildContext context, Map<String, dynamic> contact) async {
+    final nicknameCtrl = TextEditingController(text: contact['nickname']?.toString() ?? _short(contact['pubkey'] ?? ''));
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit nickname'),
+        content: TextField(
+          controller: nicknameCtrl,
+          decoration: const InputDecoration(labelText: 'Nickname'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final updatedNick = nicknameCtrl.text.trim();
+    setState(() {
+      for (final c in contacts) {
+        if (c['pubkey'] == contact['pubkey']) {
+          c['nickname'] = updatedNick.isEmpty ? _short(c['pubkey'] ?? '') : updatedNick;
+          break;
+        }
+      }
+    });
+    await _saveContacts();
+  }
+
   Future<void> _scanContactQr() async {
     final scanned = await _scanQrRaw();
     if (scanned == null || scanned.trim().isEmpty) return;
@@ -913,17 +942,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     setState(() => selectedContact = contact['pubkey']);
                     Navigator.pop(context);
                   },
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete),
-                    onPressed: () async {
-                      setState(() {
-                        contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
-                        if (selectedContact == contact['pubkey']) {
-                          selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-                        }
-                      });
-                      await _saveContacts();
-                    },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        tooltip: 'Edit nickname',
+                        onPressed: () => _editContact(context, contact),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete),
+                        onPressed: () async {
+                          setState(() {
+                            contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
+                            if (selectedContact == contact['pubkey']) {
+                              selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+                            }
+                          });
+                          await _saveContacts();
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ),
