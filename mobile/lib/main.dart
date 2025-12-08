@@ -221,6 +221,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _saveMessages();
   }
 
+  Future<void> _deleteConversationFor(String? pubkey) async {
+    if (pubkey == null || pubkey.isEmpty) return;
+    final label = contacts.firstWhere(
+      (c) => c['pubkey'] == pubkey,
+      orElse: () => <String, dynamic>{},
+    )['nickname'] as String? ??
+        _short(pubkey);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete conversation?'),
+        content: Text('Remove local history with $label?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      messages.removeWhere((m) =>
+          (m['direction'] == 'out' && m['to'] == pubkey) ||
+          (m['direction'] == 'in' && m['from'] == pubkey));
+    });
+    await _saveMessages();
+    if (selectedContact == pubkey) {
+      setState(() {
+        selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+      });
+    }
+  }
+
   Future<void> _saveContacts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -860,11 +892,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: const Text('Pushstr'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_forever),
-            tooltip: 'Delete conversation',
-            onPressed: selectedContact == null ? null : _deleteConversation,
-          ),
-          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _fetchMessages,
             tooltip: 'Refresh messages',
@@ -945,6 +972,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      IconButton(
+                        icon: const Icon(Icons.delete_forever),
+                        tooltip: 'Delete conversation',
+                        onPressed: () => _deleteConversationFor(contact['pubkey']),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.edit),
                         tooltip: 'Edit nickname',
@@ -1212,15 +1244,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   return Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: messageCtrl,
-                          focusNode: _messageFocus,
-                          maxLines: null,
-                          decoration: const InputDecoration(
-                            hintText: 'Message',
-                            filled: true,
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxHeight: 180,
+                          ),
+                          child: TextField(
+                            controller: messageCtrl,
+                            focusNode: _messageFocus,
+                            keyboardType: TextInputType.multiline,
+                            minLines: 1,
+                            maxLines: null, // allow scrolling inside the field
+                            decoration: const InputDecoration(
+                              hintText: 'Message',
+                              filled: true,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
                           ),
                         ),
                       ),

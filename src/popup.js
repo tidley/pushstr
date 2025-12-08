@@ -57,7 +57,6 @@ const contactsEl = document.getElementById("contacts");
 const historyEl = document.getElementById("history");
 const attachBtn = document.getElementById("attach");
 const sendBtn = document.getElementById("send");
-const deleteConversationBtn = document.getElementById("deleteConversation");
 const previewEl = document.getElementById("preview");
 const previewContentEl = document.getElementById("previewContent");
 const clearPreviewBtn = document.getElementById("clearPreview");
@@ -101,7 +100,6 @@ if (isPopout) {
 } else {
   popoutBtn.addEventListener("click", popout);
 }
-deleteConversationBtn.addEventListener("click", deleteConversation);
 clearPreviewBtn.addEventListener("click", clearPreview);
 document.getElementById("dismiss-warning")?.addEventListener("click", () => {
   warningEl.classList.add("hidden");
@@ -166,7 +164,6 @@ async function init() {
 function render() {
   renderContacts();
   renderHistory();
-  deleteConversationBtn.disabled = !selectedContact;
   requestAnimationFrame(() => {
     historyEl.scrollTop = historyEl.scrollHeight;
   });
@@ -196,8 +193,24 @@ function renderContacts() {
     snippet.textContent = c.snippet || "";
     meta.appendChild(name);
     meta.appendChild(snippet);
+    const actions = document.createElement("div");
+    actions.className = "contact-actions";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "icon-btn danger";
+    del.title = "Delete conversation";
+    del.textContent = "🗑";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = confirm(`Delete conversation with ${c.label}? This removes local history only.`);
+      if (!ok) return;
+      await browser.runtime.sendMessage({ type: "delete-conversation", recipient: c.id });
+      await refreshState();
+    });
+    actions.appendChild(del);
     el.appendChild(avatar);
     el.appendChild(meta);
+    el.appendChild(actions);
     contactsEl.appendChild(el);
   });
 

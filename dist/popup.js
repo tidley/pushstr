@@ -6708,7 +6708,6 @@ var contactsEl = document.getElementById("contacts");
 var historyEl = document.getElementById("history");
 var attachBtn = document.getElementById("attach");
 var sendBtn = document.getElementById("send");
-var deleteConversationBtn = document.getElementById("deleteConversation");
 var previewEl = document.getElementById("preview");
 var previewContentEl = document.getElementById("previewContent");
 var clearPreviewBtn = document.getElementById("clearPreview");
@@ -6746,7 +6745,6 @@ if (isPopout) {
 } else {
   popoutBtn.addEventListener("click", popout);
 }
-deleteConversationBtn.addEventListener("click", deleteConversation);
 clearPreviewBtn.addEventListener("click", clearPreview);
 document.getElementById("dismiss-warning")?.addEventListener("click", () => {
   warningEl.classList.add("hidden");
@@ -6809,7 +6807,6 @@ async function init() {
 function render() {
   renderContacts();
   renderHistory();
-  deleteConversationBtn.disabled = !selectedContact;
   requestAnimationFrame(() => {
     historyEl.scrollTop = historyEl.scrollHeight;
   });
@@ -6838,8 +6835,25 @@ function renderContacts() {
     snippet.textContent = c.snippet || "";
     meta.appendChild(name);
     meta.appendChild(snippet);
+    const actions = document.createElement("div");
+    actions.className = "contact-actions";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "icon-btn danger";
+    del.title = "Delete conversation";
+    del.textContent = "\u{1F5D1}";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = confirm(`Delete conversation with ${c.label}? This removes local history only.`);
+      if (!ok)
+        return;
+      await browser.runtime.sendMessage({ type: "delete-conversation", recipient: c.id });
+      await refreshState();
+    });
+    actions.appendChild(del);
     el.appendChild(avatar);
     el.appendChild(meta);
+    el.appendChild(actions);
     contactsEl.appendChild(el);
   });
   const addBtn = document.createElement("button");
@@ -7602,26 +7616,6 @@ function clearPreview(keepUploaded = false) {
   clearPreviewBtn.classList.remove("hidden");
   pendingFile = null;
   updateComposerMode();
-}
-async function deleteConversation() {
-  if (!selectedContact)
-    return;
-  const label = contactLabel(selectedContact) || short(selectedContact);
-  const ok = confirm(`Delete conversation with ${label}? This removes local history only.`);
-  if (!ok)
-    return;
-  try {
-    await browser.runtime.sendMessage({ type: "delete-conversation", recipient: selectedContact });
-    await refreshState();
-  } catch (err) {
-    status(`Delete failed: ${err?.message || err}`);
-  }
-}
-function contactLabel(pk) {
-  if (!pk)
-    return "";
-  const found = (state.recipients || []).find((r) => r.pubkey === pk);
-  return found?.nickname || short(pk);
 }
 function stripNip18(text) {
   if (!text)

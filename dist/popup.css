@@ -196,7 +196,8 @@ main {
   padding: 7px 8px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: center;
   min-height: 42px;
@@ -229,6 +230,31 @@ main {
 
 .contact .meta {
   flex: 1;
+}
+
+.contact-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn.danger {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #ffffff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 20px;
+}
+
+.icon-btn.danger:hover {
+  border-color: #f87171;
 }
 
 .contact .name {
