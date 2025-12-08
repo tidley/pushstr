@@ -11936,6 +11936,16 @@ async function handleMessage(msg) {
   if (msg.type === "decrypt-media") {
     return decryptMediaDescriptor(msg.descriptor, msg.senderPubkey);
   }
+  if (msg.type === "delete-conversation") {
+    const target = normalizePubkey(msg.recipient);
+    if (!target)
+      return { error: "missing recipient" };
+    const before = messages2.length;
+    messages2 = messages2.filter((m) => m.from !== target && m.to !== target);
+    messageIds = new Set(messages2.map((m) => m.id).filter(Boolean));
+    await persistSettings();
+    return { ok: true, removed: before - messages2.length };
+  }
   return { ok: true };
 }
 async function loadSettings() {

@@ -214,6 +214,16 @@ async function handleMessage(msg) {
     return decryptMediaDescriptor(msg.descriptor, msg.senderPubkey);
   }
 
+  if (msg.type === "delete-conversation") {
+    const target = normalizePubkey(msg.recipient);
+    if (!target) return { error: "missing recipient" };
+    const before = messages.length;
+    messages = messages.filter((m) => m.from !== target && m.to !== target);
+    messageIds = new Set(messages.map((m) => m.id).filter(Boolean));
+    await persistSettings();
+    return { ok: true, removed: before - messages.length };
+  }
+
   return { ok: true };
 }
 

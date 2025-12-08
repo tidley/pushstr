@@ -273,6 +273,29 @@ main {
   min-height: 0;
 }
 
+.ghost-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ghost-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+#chat-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 8px 12px 0 12px;
+  gap: 8px;
+}
+
 .msg-row {
   display: flex;
   flex-direction: column;
@@ -325,6 +348,12 @@ main {
   font-size: 10px;
   color: var(--muted);
   margin-top: 4px;
+}
+
+.inline-link {
+  color: #93c5fd;
+  text-decoration: underline;
+  word-break: break-all;
 }
 
 .meta.external {

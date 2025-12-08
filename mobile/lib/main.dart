@@ -194,6 +194,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _deleteConversation() async {
+    if (selectedContact == null) return;
+    final label = contacts.firstWhere(
+      (c) => c['pubkey'] == selectedContact,
+      orElse: () => <String, dynamic>{},
+    )['nickname'] as String? ??
+        _short(selectedContact!);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete conversation?'),
+        content: Text('Remove local history with $label?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      messages.removeWhere((m) =>
+          (m['direction'] == 'out' && m['to'] == selectedContact) ||
+          (m['direction'] == 'in' && m['from'] == selectedContact));
+    });
+    await _saveMessages();
+  }
+
   Future<void> _saveContacts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -804,6 +831,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: const Text('Pushstr'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.delete_forever),
+            tooltip: 'Delete conversation',
+            onPressed: selectedContact == null ? null : _deleteConversation,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _fetchMessages,
             tooltip: 'Refresh messages',
@@ -983,6 +1015,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
         final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
+        final blossomUrl = _extractBlossomUrl(m['content']);
         final actions = !isOut
             ? Column(
                 mainAxisSize: MainAxisSize.min,
@@ -998,13 +1031,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       );
                     },
                   ),
-                  if (_extractDownloadUrl(m['content']) != null)
+                  if (blossomUrl != null)
                     IconButton(
                       icon: const Icon(Icons.download, size: 18),
                       tooltip: 'Download',
                       onPressed: () {
-                        final url = _extractDownloadUrl(m['content']);
-                        if (url != null) _launchUrl(url);
+                        _launchUrl(blossomUrl);
                       },
                     ),
                 ],
@@ -1360,6 +1392,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final url = media['url'].toString();
       final filename = media['filename']?.toString() ?? 'Attachment';
       final mime = media['mime']?.toString() ?? 'application/octet-stream';
+      final isBlossom = _isBlossomLink(url, media);
       final isImage = mime.startsWith('image/') || RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1379,9 +1412,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.download, size: 20),
-                color: Colors.white,
+              TextButton.icon(
+                icon: Icon(isBlossom ? Icons.download : Icons.open_in_new, size: 18),
+                label: Text(isBlossom ? 'Download' : 'Open link'),
                 onPressed: () => _launchUrl(url),
               ),
               IconButton(
@@ -1416,6 +1449,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (url != null) {
       final isImage = RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(url);
       final textPart = cleaned.replaceFirst(url, '').trim();
+      final isBlossom = _isBlossomLink(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1424,6 +1458,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               textPart,
               style: const TextStyle(fontSize: 15),
             ),
+          TextButton(
+            onPressed: () => _launchUrl(url),
+            child: Text(
+              url,
+              style: const TextStyle(
+                decoration: TextDecoration.underline,
+                color: Colors.lightBlueAccent,
+              ),
+            ),
+          ),
           if (isImage)
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -1437,9 +1481,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.download, size: 20),
-                color: Colors.white,
+              TextButton.icon(
+                icon: Icon(isBlossom ? Icons.download : Icons.open_in_new, size: 18),
+                label: Text(isBlossom ? 'Download' : 'Open link'),
                 onPressed: () => _launchUrl(url),
               ),
               IconButton(
@@ -1553,6 +1597,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return match?.group(0);
   }
 
+  bool _isBlossomLink(String url, [Map<String, dynamic>? meta]) {
+    final uri = Uri.tryParse(url);
+    final hostHasBlossom = uri?.host.contains('blossom') ?? false;
+    final frag = uri?.fragment ?? '';
+    final fragHasMeta = frag.contains('m=') || frag.contains('size=') || frag.contains('x=');
+    final hasMeta = (meta?['sha256']?.toString().isNotEmpty ?? false) ||
+        (meta?['cipher_sha256']?.toString().isNotEmpty ?? false) ||
+        (meta?['iv']?.toString().isNotEmpty ?? false) ||
+        (meta?['mime']?.toString().isNotEmpty ?? false) ||
+        (meta?['size'] != null);
+    return hasMeta && (hostHasBlossom || fragHasMeta);
+  }
+
   Future<void> _initShareListener() async {
     try {
       // Handle initial share when app is launched from share sheet
@@ -1644,16 +1701,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return '$weekday, $month $day at $timePart';
   }
 
-  String? _extractDownloadUrl(dynamic content) {
+  String? _extractBlossomUrl(dynamic content) {
     try {
       final cleaned = _stripNip18(content?.toString() ?? '');
       final parsed = jsonDecode(cleaned);
       if (parsed is Map) {
-        if (parsed['url'] is String) {
+        if (parsed['url'] is String && _isBlossomLink(parsed['url'] as String, parsed)) {
           return parsed['url'] as String;
         }
         if (parsed['media'] is Map && (parsed['media']['url'] is String)) {
-          return parsed['media']['url'] as String;
+          final url = parsed['media']['url'] as String;
+          if (_isBlossomLink(url, parsed['media'] as Map<String, dynamic>)) return url;
         }
       }
     } catch (_) {

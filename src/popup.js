@@ -57,6 +57,7 @@ const contactsEl = document.getElementById("contacts");
 const historyEl = document.getElementById("history");
 const attachBtn = document.getElementById("attach");
 const sendBtn = document.getElementById("send");
+const deleteConversationBtn = document.getElementById("deleteConversation");
 const previewEl = document.getElementById("preview");
 const previewContentEl = document.getElementById("previewContent");
 const clearPreviewBtn = document.getElementById("clearPreview");
@@ -100,6 +101,7 @@ if (isPopout) {
 } else {
   popoutBtn.addEventListener("click", popout);
 }
+deleteConversationBtn.addEventListener("click", deleteConversation);
 clearPreviewBtn.addEventListener("click", clearPreview);
 document.getElementById("dismiss-warning")?.addEventListener("click", () => {
   warningEl.classList.add("hidden");
@@ -164,6 +166,7 @@ async function init() {
 function render() {
   renderContacts();
   renderHistory();
+  deleteConversationBtn.disabled = !selectedContact;
   requestAnimationFrame(() => {
     historyEl.scrollTop = historyEl.scrollHeight;
   });
@@ -819,7 +822,9 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       txt = txt.replace(urlToStrip, "").trim();
     }
     if (txt) {
-      renderTextWithReadMore(container, txt);
+      const target = container.childNodes.length ? document.createElement("div") : container;
+      renderTextWithReadMore(target, txt);
+      if (target !== container) container.appendChild(target);
     }
   };
   let jsonPart = cleaned;
@@ -881,50 +886,65 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
   }
   if (parsed && parsed.url) {
     const fullUrl = fragPart ? `${parsed.url}#${fragPart}` : parsed.url;
-    const actionHolder = document.createElement("div");
-    actionHolder.className = "actions-col";
-    const dl = createDownloadButton(fullUrl, parsed.type || fragMeta.mime, parsed.size || fragMeta.size, parsed.sha256 || fragMeta.sha256, {
+    const meta = {
       ...fragMeta,
+      url: fullUrl,
+      mime: parsed.type || fragMeta.mime,
+      size: parsed.size || fragMeta.size,
+      sha256: parsed.sha256 || fragMeta.sha256,
       filename: parsed.filename
-    });
-    actionHolder.appendChild(dl.btn);
-    if (fragMeta.isImage || /\.(png|jpe?g|gif|webp)$/i.test(parsed.url)) {
-      const img = document.createElement("img");
-      img.src = fullUrl;
-      img.style.maxWidth = "180px";
-      img.style.maxHeight = "180px";
-      img.style.display = "block";
-      container.appendChild(img);
+    };
+    if (isBlossomLink(fullUrl, meta)) {
+      const actionHolder = document.createElement("div");
+      actionHolder.className = "actions-col";
+      const dl = createDownloadButton(fullUrl, meta.mime, meta.size, meta.sha256, meta);
+      actionHolder.appendChild(dl.btn);
+      if (meta.isImage || /\.(png|jpe?g|gif|webp)$/i.test(parsed.url)) {
+        const img = document.createElement("img");
+        img.src = fullUrl;
+        img.style.maxWidth = "180px";
+        img.style.maxHeight = "180px";
+        img.style.display = "block";
+        container.appendChild(img);
+      }
+      renderTextIfAny(fullUrl);
+      return actionHolder;
     }
+    renderLink(container, fullUrl);
     renderTextIfAny(fullUrl);
-    return actionHolder;
+    return null;
   }
 
   const meta = parseUrlMeta(cleaned);
   if (meta) {
-    const actionHolder = document.createElement("div");
-    actionHolder.className = "actions-col";
-    const dl = createDownloadButton(meta.url, meta.mime, meta.size, null, meta);
-    actionHolder.appendChild(dl.btn);
-    if (meta.isImage) {
-      const img = document.createElement("img");
-      img.src = meta.url;
-      img.style.maxWidth = "180px";
-      img.style.maxHeight = "180px";
-      img.style.display = "block";
-      container.appendChild(img);
+    if (isBlossomLink(meta.url, meta)) {
+      const actionHolder = document.createElement("div");
+      actionHolder.className = "actions-col";
+      const dl = createDownloadButton(meta.url, meta.mime, meta.size, meta.sha256, meta);
+      actionHolder.appendChild(dl.btn);
+      if (meta.isImage) {
+        const img = document.createElement("img");
+        img.src = meta.url;
+        img.style.maxWidth = "180px";
+        img.style.maxHeight = "180px";
+        img.style.display = "block";
+        container.appendChild(img);
+      }
+      renderTextIfAny(meta.url);
+      return actionHolder;
     }
+    renderLink(container, meta.url);
     renderTextIfAny(meta.url);
-    return actionHolder;
+    return null;
   }
 
   const urlMatch = cleaned.match(/https?:\/\/\S+/i);
   if (urlMatch) {
     const metaFromUrl = parseUrlMeta(urlMatch[0]);
-    if (metaFromUrl) {
+    if (metaFromUrl && isBlossomLink(metaFromUrl.url, metaFromUrl)) {
       const actionHolder = document.createElement("div");
       actionHolder.className = "actions-col";
-      const dl = createDownloadButton(metaFromUrl.url, metaFromUrl.mime, metaFromUrl.size, null, metaFromUrl);
+      const dl = createDownloadButton(metaFromUrl.url, metaFromUrl.mime, metaFromUrl.size, metaFromUrl.sha256, metaFromUrl);
       actionHolder.appendChild(dl.btn);
       if (metaFromUrl.isImage) {
         const img = document.createElement("img");
@@ -937,6 +957,9 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       renderTextIfAny(metaFromUrl.url);
       return actionHolder;
     }
+    renderLink(container, urlMatch[0]);
+    renderTextIfAny(urlMatch[0]);
+    return null;
   }
 
   renderTextWithReadMore(container, cleaned);
@@ -1038,6 +1061,19 @@ function clearPreview(keepUploaded = false) {
   updateComposerMode();
 }
 
+async function deleteConversation() {
+  if (!selectedContact) return;
+  const label = contactLabel(selectedContact) || short(selectedContact);
+  const ok = confirm(`Delete conversation with ${label}? This removes local history only.`);
+  if (!ok) return;
+  try {
+    await browser.runtime.sendMessage({ type: "delete-conversation", recipient: selectedContact });
+    await refreshState();
+  } catch (err) {
+    status(`Delete failed: ${err?.message || err}`);
+  }
+}
+
 function contactLabel(pk) {
   if (!pk) return "";
   const found = (state.recipients || []).find((r) => r.pubkey === pk);
@@ -1056,13 +1092,15 @@ function parseUrlMeta(text) {
   const [base, frag] = trimmed.split("#", 2);
   let mime = "";
   let size = "";
+  let sha256 = "";
   if (frag) {
     const params = new URLSearchParams(frag);
     mime = params.get("m") || "";
     size = params.get("size") || "";
+    sha256 = params.get("x") || params.get("sha256") || "";
   }
   const isImage = (mime && mime.startsWith && mime.startsWith("image")) || /\.(png|jpe?g|gif|webp)$/i.test(base);
-  return { url: base + (frag ? "#" + frag : ""), isImage, size };
+  return { url: base + (frag ? "#" + frag : ""), isImage, size, mime, sha256 };
 }
 
 function parseFragmentMeta(frag) {
@@ -1073,6 +1111,20 @@ function parseFragmentMeta(frag) {
   const sha256 = params.get("x") || "";
   const isImage = mime.startsWith("image");
   return { mime, size, sha256, isImage };
+}
+
+function isBlossomLink(url, meta = {}) {
+  const hasMeta = Boolean(meta.sha256 || meta.mime || meta.size || meta.iv || meta.cipher_sha256);
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const hostMatches = parsed.hostname.includes("blossom");
+    const frag = parsed.hash || "";
+    const fragHasMeta = frag.includes("m=") || frag.includes("size=") || frag.includes("x=");
+    return hasMeta && (hostMatches || fragHasMeta);
+  } catch (_) {
+    return hasMeta;
+  }
 }
 
 function formatSize(bytes) {
@@ -1113,6 +1165,10 @@ function truncateSnippet(text) {
 
 function renderTextWithReadMore(container, text) {
   const MAX_LEN = 400;
+  if (/https?:\/\/\S+/i.test(text)) {
+    renderTextWithLinks(container, text);
+    return;
+  }
   if (!text || text.length <= MAX_LEN) {
     container.textContent = text;
     return;
@@ -1148,6 +1204,41 @@ function renderTextWithReadMore(container, text) {
   container.appendChild(shortSpan);
   container.appendChild(fullSpan);
   container.appendChild(link);
+}
+
+function renderTextWithLinks(container, text) {
+  container.replaceChildren();
+  const parts = text.split(/(https?:\/\/\S+)/gi);
+  for (const part of parts) {
+    if (!part) continue;
+    if (/^https?:\/\/\S+/i.test(part)) {
+      const a = document.createElement("a");
+      a.href = part;
+      a.target = "_blank";
+      a.rel = "noreferrer noopener";
+      a.textContent = part;
+      a.className = "inline-link";
+      container.appendChild(a);
+    } else {
+      container.appendChild(document.createTextNode(part));
+    }
+  }
+}
+
+function renderLink(container, url, label = null) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noreferrer noopener";
+  link.textContent = label || url;
+  link.className = "inline-link";
+  if (container.childNodes.length) {
+    const spacer = document.createElement("div");
+    spacer.appendChild(link);
+    container.appendChild(spacer);
+  } else {
+    container.appendChild(link);
+  }
 }
 
 function showUploadedPreview(url, mime = "") {
