@@ -351,13 +351,21 @@ async function showNpubQr() {
     const dataUrl = await QRCode.toDataURL(npub, { margin: 1, scale: 6 });
     const overlay = document.createElement("div");
     overlay.className = "qr-overlay";
-    overlay.innerHTML = `
-      <div class="qr-card">
-        <img src="${dataUrl}" alt="npub QR" />
-        <p>${npub}</p>
-        <button type="button" class="close-qr">Close</button>
-      </div>
-    `;
+    const card = document.createElement("div");
+    card.className = "qr-card";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = "npub QR";
+    const label = document.createElement("p");
+    label.textContent = npub;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close-qr";
+    closeBtn.textContent = "Close";
+    card.appendChild(img);
+    card.appendChild(label);
+    card.appendChild(closeBtn);
+    overlay.appendChild(card);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay || e.target.classList.contains("close-qr")) {
         overlay.remove();

@@ -428,7 +428,7 @@ function notify(title, message) {
   try {
     browser.notifications.create({
       type: "basic",
-      iconUrl: browser.runtime.getURL("pushtr_orange.png"),
+      iconUrl: browser.runtime.getURL("pushtr_96.png"),
       title,
       message
     });

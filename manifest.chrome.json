@@ -4,9 +4,9 @@
   "description": "Pushbullet-style notifier over Nostr DMs.",
   "version": "0.1.0",
   "icons": {
-    "48": "pushtr_orange.png",
-    "96": "pushtr_orange.png",
-    "128": "pushtr_orange.png"
+    "48": "pushtr_48.png",
+    "96": "pushtr_96.png",
+    "128": "pushtr_128.png"
   },
   "permissions": [
     "storage",
@@ -24,7 +24,11 @@
   "action": {
     "default_title": "Pushstr",
     "default_popup": "popup.html",
-    "default_icon": "pushtr_orange.png"
+    "default_icon": {
+      "48": "pushtr_48.png",
+      "96": "pushtr_96.png",
+      "128": "pushtr_128.png"
+    }
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

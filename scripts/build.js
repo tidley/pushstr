@@ -36,7 +36,9 @@ for (const file of [
   "src/popup.css",
   "src/options.css",
   "src/icon.png",
-  "icon/pushtr_orange.png"
+  "icon/pushtr_48.png",
+  "icon/pushtr_96.png",
+  "icon/pushtr_128.png"
 ]) {
   const dest = path.join(outdir, path.basename(file === manifestFile ? "manifest.json" : file));
   fs.copyFileSync(file, dest);

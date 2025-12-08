@@ -379,7 +379,7 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
 
   if (isOldMessage) {
     // Show decrypt button for old messages
-    container.innerHTML = "";
+    container.replaceChildren();
     const filename = media.filename || "attachment";
     const decryptBtn = document.createElement("button");
     decryptBtn.textContent = `🔓 Decrypt: ${filename}`;
@@ -399,7 +399,7 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
 }
 
 async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl) {
-  container.innerHTML = "<div style='color:#9ca3af;font-size:12px;'>Decrypting attachment…</div>";
+  renderContainerMessage(container, "Decrypting attachment…", "#9ca3af");
   try {
     const res = await browser.runtime.sendMessage({
       type: "decrypt-media",
@@ -407,7 +407,8 @@ async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMet
       senderPubkey
     });
     if (!res || res.error || !res.base64) {
-      container.innerHTML = `<div style='color:#ef4444;font-size:12px;'>Failed to decrypt: ${res?.error || 'unknown error'}</div>`;
+      const errMsg = res?.error || "unknown error";
+      renderContainerMessage(container, `Failed to decrypt: ${errMsg}`, "#ef4444");
       return;
     }
     const bytes = b64ToBytes(res.base64);
@@ -421,12 +422,21 @@ async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMet
 
     displayDecryptedMedia(container, cached, media, fragMeta, downloadCtrl);
   } catch (err) {
-    container.innerHTML = `<div style='color:#ef4444;font-size:12px;'>Error: ${err.message}</div>`;
+    renderContainerMessage(container, `Error: ${err.message}`, "#ef4444");
   }
 }
 
+function renderContainerMessage(container, message, color = "#9ca3af") {
+  container.replaceChildren();
+  const msgEl = document.createElement("div");
+  msgEl.style.color = color;
+  msgEl.style.fontSize = "12px";
+  msgEl.textContent = message;
+  container.appendChild(msgEl);
+}
+
 function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadCtrl) {
-  container.innerHTML = "";
+  container.replaceChildren();
   const mime = cachedData.mime || media.mime || fragMeta.mime;
   if (mime && mime.startsWith("image")) {
     const img = document.createElement("img");
@@ -993,17 +1003,24 @@ async function handleFileAttachment(file) {
 function showPreview(file) {
   previewEl.classList.remove("uploaded");
   clearPreviewBtn.classList.remove("hidden");
+  previewContentEl.replaceChildren();
   if (file) {
     if (file.type.startsWith("image")) {
       const url = URL.createObjectURL(file);
-      previewContentEl.innerHTML = `<img src="${url}" alt="preview" />`;
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "preview";
+      previewContentEl.appendChild(img);
     } else {
       const sizeLabel = formatSize(file.size);
-      previewContentEl.innerHTML = `<div class="file-chip">${file.name || "attachment"} (${sizeLabel})</div>`;
+      const chip = document.createElement("div");
+      chip.className = "file-chip";
+      chip.textContent = `${file.name || "attachment"} (${sizeLabel})`;
+      previewContentEl.appendChild(chip);
     }
     previewEl.style.display = "block";
   } else {
-    previewContentEl.innerHTML = "";
+    previewContentEl.textContent = "";
     previewEl.style.display = "none";
   }
 }
@@ -1013,7 +1030,7 @@ function clearPreview(keepUploaded = false) {
     // Leave uploaded preview visible
     return;
   }
-  previewContentEl.innerHTML = "";
+  previewContentEl.textContent = "";
   previewEl.style.display = "none";
   previewEl.classList.remove("uploaded");
   clearPreviewBtn.classList.remove("hidden");
