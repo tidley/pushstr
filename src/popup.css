@@ -424,23 +424,9 @@ main {
   background: rgba(34, 197, 94, 0.18);
   color: #d1fae5;
   box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
-  animation: copyFlash 1.6s ease-out forwards;
+  animation: none;
 }
 
-@keyframes copyFlash {
-  0% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  60% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0.85;
-    background: var(--panel);
-    box-shadow: none;
-  }
-}
 
 .read-more {
   margin-left: 4px;

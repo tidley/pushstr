@@ -7387,10 +7387,13 @@ function popout() {
 function flashCopyButton(btn) {
   if (!btn)
     return;
-  btn.classList.remove("copied");
-  void btn.offsetWidth;
+  const original = btn.textContent;
+  btn.textContent = "\u2714";
   btn.classList.add("copied");
-  setTimeout(() => btn.classList.remove("copied"), 1600);
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove("copied");
+  }, 1800);
 }
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
   const cleaned = stripNip18(content);
