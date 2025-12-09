@@ -2677,7 +2677,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
                               ? _shortNpub(profileNpubs[idx])
                               : '';
-                          final label = npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}';
+                          final nickname = (profile['nickname'] ?? '').trim();
+                          final baseLabel = npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}';
+                          final label = nickname.isNotEmpty ? '$baseLabel · $nickname' : baseLabel;
 
                           return DropdownMenuItem(
                             value: idx,
