@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:bech32/bech32.dart';
+import 'package:convert/convert.dart';
+import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -1952,6 +1956,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final cachedNpubs = prefs.getStringList('profile_npubs_cache') ?? [];
 
     // Load profiles
     final profilesList = prefs.getStringList('profiles') ?? [];
@@ -1994,9 +1999,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       relays = loadedRelays;
       nicknameCtrl.text = currentNickname;
       currentNpub = npub;
+      profileNpubs = _padNpubs(cachedNpubs, loadedProfiles.length);
+      if (selectedProfileIndex < profileNpubs.length && profileNpubs[selectedProfileIndex].isNotEmpty) {
+        currentNpub = profileNpubs[selectedProfileIndex];
+      }
     });
 
-    await _refreshProfileNpubs();
+    unawaited(_refreshProfileNpubs());
     if (mounted) {
       setState(() {
         _hasPendingChanges = false;
@@ -2278,40 +2287,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  bool _refreshingNpubs = false;
+
   Future<void> _refreshProfileNpubs() async {
-    if (profiles.isEmpty) return;
-    final current = (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
-        ? profiles[selectedProfileIndex]['nsec'] ?? ''
-        : '';
-    final npubs = <String>[];
-    for (final profile in profiles) {
-      final nsec = profile['nsec'] ?? '';
-      if (nsec.isEmpty) {
-        npubs.add('');
-        continue;
+    if (_refreshingNpubs || profiles.isEmpty) return;
+    _refreshingNpubs = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final npubs = _padNpubs(profileNpubs, profiles.length);
+      await prefs.setStringList('profile_npubs_cache', npubs);
+
+      if (mounted) {
+        setState(() {
+          profileNpubs = List<String>.from(npubs);
+          if (selectedProfileIndex < profileNpubs.length && profileNpubs[selectedProfileIndex].isNotEmpty) {
+            currentNpub = profileNpubs[selectedProfileIndex];
+          }
+        });
       }
-      try {
-        final npub = api.initNostr(nsec: nsec);
-        npubs.add(npub);
-      } catch (_) {
-        npubs.add('');
-      }
-    }
-    if (current.isNotEmpty) {
-      try {
-        api.initNostr(nsec: current);
-      } catch (_) {
-        // ignore restore errors
-      }
-    }
-    if (mounted) {
-      setState(() {
-        profileNpubs = npubs;
-        if (selectedProfileIndex < profileNpubs.length) {
-          currentNpub = profileNpubs[selectedProfileIndex];
+
+      for (var i = 0; i < profiles.length; i++) {
+        if (npubs[i].isNotEmpty) continue;
+        final nsec = profiles[i]['nsec'] ?? '';
+        final derived = _deriveNpubFromNsec(nsec);
+        if (derived != null && derived.isNotEmpty) {
+          npubs[i] = derived;
+          await prefs.setStringList('profile_npubs_cache', npubs);
+          if (mounted) {
+            setState(() {
+              profileNpubs = List<String>.from(npubs);
+              if (i == selectedProfileIndex) {
+                currentNpub = derived;
+              }
+            });
+          }
         }
-      });
+      }
+    } finally {
+      _refreshingNpubs = false;
     }
+  }
+
+  List<String> _padNpubs(List<String> source, int length) {
+    final npubs = List<String>.from(source);
+    if (npubs.length < length) {
+      npubs.addAll(List.filled(length - npubs.length, ''));
+    } else if (npubs.length > length) {
+      npubs.removeRange(length, npubs.length);
+    }
+    return npubs;
+  }
+
+  String? _deriveNpubFromNsec(String nsec) {
+    if (nsec.isEmpty) return null;
+    try {
+      final decoded = const Bech32Codec().decode(nsec);
+      if (decoded.hrp != 'nsec') return null;
+      final seed = _convertBits(decoded.data, 5, 8, false);
+      if (seed.length != ed.SeedSize) return null;
+      final priv = ed.newKeyFromSeed(Uint8List.fromList(seed));
+      final pubKey = ed.public(priv).bytes;
+      final hexPub = hex.encode(pubKey);
+      return api.hexToNpub(hex: hexPub);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<int> _convertBits(List<int> data, int from, int to, bool pad) {
+    var acc = 0;
+    var bits = 0;
+    final result = <int>[];
+    final maxv = (1 << to) - 1;
+
+    for (final v in data) {
+      if (v < 0 || (v >> from) != 0) {
+        throw Exception('invalid value while converting bits');
+      }
+      acc = (acc << from) | v;
+      bits += from;
+      while (bits >= to) {
+        bits -= to;
+        result.add((acc >> bits) & maxv);
+      }
+    }
+
+    if (pad) {
+      if (bits > 0) {
+        result.add((acc << (to - bits)) & maxv);
+      }
+    } else if (bits >= from) {
+      throw Exception('illegal zero padding');
+    } else if (((acc << (to - bits)) & maxv) != 0) {
+      throw Exception('non zero padding');
+    }
+
+    return result;
   }
 
   String _shortNpub(String value) {

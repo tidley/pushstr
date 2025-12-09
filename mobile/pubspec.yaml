@@ -51,6 +51,8 @@ dependencies:
   qr_flutter: ^4.1.0
   qr_code_scanner: ^1.0.1
   permission_handler: ^11.3.1
+  bech32: ^0.2.2
+  ed25519_edwards: ^0.3.1
   # receive_sharing_intent: ^1.6.1  # Commented out - causes JVM compatibility issues
 
 dependency_overrides:
