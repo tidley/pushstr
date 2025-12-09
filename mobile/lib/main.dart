@@ -2120,18 +2120,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setInt('selected_profile_index', selectedProfileIndex);
 
       if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-        await prefs.setString('nostr_nsec', profiles[selectedProfileIndex]['nsec']!);
+        final selectedNsec = profiles[selectedProfileIndex]['nsec']!;
+        await prefs.setString('nostr_nsec', selectedNsec);
         profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
+
+        // Ensure the selected profile is active in Rust
+        try {
+          api.initNostr(nsec: selectedNsec);
+          if (selectedProfileIndex < profileNpubs.length) {
+            setState(() => currentNpub = profileNpubs[selectedProfileIndex]);
+          }
+        } catch (e) {
+          print('Failed to activate profile: $e');
+        }
       }
 
       await prefs.setStringList('relays', relays);
-
-      try {
-        final npub = api.getNpub();
-        setState(() => currentNpub = npub);
-      } catch (_) {
-        // ignore
-      }
 
       // No need to refresh npubs on every save - they're cached
       if (!mounted) return;
@@ -2664,7 +2668,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           );
                         }).toList(),
                         onChanged: (idx) {
-                          if (idx != null) {
+                          if (idx != null && idx < profiles.length) {
+                            final nsec = profiles[idx]['nsec'] ?? '';
+                            if (nsec.isNotEmpty) {
+                              // Switch the active key in Rust
+                              try {
+                                api.initNostr(nsec: nsec);
+                              } catch (e) {
+                                print('Failed to switch profile: $e');
+                              }
+                            }
                             setState(() {
                               selectedProfileIndex = idx;
                               profileNickname = profiles[idx]['nickname'] ?? '';
