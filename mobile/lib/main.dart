@@ -2042,6 +2042,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       npub = '';
     }
 
+    // Load cached npubs to avoid recomputing on every load
+    final cachedNpubs = prefs.getStringList('profile_npubs_cache') ?? [];
+
     setState(() {
       profiles = loadedProfiles;
       selectedProfileIndex = selectedIndex;
@@ -2049,9 +2052,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       relays = loadedRelays;
       nicknameCtrl.text = currentNickname;
       currentNpub = npub;
+      profileNpubs = cachedNpubs.length == loadedProfiles.length
+          ? cachedNpubs
+          : [];
     });
 
-    await _refreshProfileNpubs();
+    // Only refresh npubs if cache is missing or invalid
+    if (profileNpubs.isEmpty && profiles.isNotEmpty) {
+      await _refreshProfileNpubs();
+    }
+
     if (mounted) {
       setState(() {
         _hasPendingChanges = false;
@@ -2123,7 +2133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // ignore
       }
 
-      await _refreshProfileNpubs();
+      // No need to refresh npubs on every save - they're cached
       if (!mounted) return;
       setState(() {
         _isSaving = false;
@@ -2368,6 +2378,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
 
+    // Cache the computed npubs
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('profile_npubs_cache', npubs);
+    } catch (e) {
+      print('Failed to cache npubs: $e');
+    }
+
     if (mounted) {
       setState(() {
         profileNpubs = npubs;
@@ -2600,7 +2618,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Profile & npub',
+                  'Profile',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
@@ -2729,7 +2747,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Key Actions',
+                  'Profile Actions',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
