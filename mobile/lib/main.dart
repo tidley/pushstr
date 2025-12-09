@@ -19,6 +19,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
 
+String _initNostrInIsolate(String nsec) {
+  try {
+    RustLib.init();
+  } catch (_) {
+    // ignore double-init warnings in isolate
+  }
+  return api.initNostr(nsec: nsec);
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ExternalLibrary? externalLibrary;
@@ -1290,8 +1299,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
-    // Reload after returning from settings
-    await _init();
+    await _applySettingsChanges();
+  }
+
+  Future<void> _applySettingsChanges() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedNsec = prefs.getString('nostr_nsec') ?? '';
+    if (savedNsec.isEmpty) return;
+
+    final hasChangedKey = nsec == null || nsec != savedNsec;
+
+    if (!hasChangedKey) {
+      // No key change; just refresh cached npub
+      try {
+        final refreshedNpub = api.getNpub();
+        if (mounted) setState(() => npub = refreshedNpub);
+      } catch (_) {
+        // ignore
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        isConnected = false;
+        lastError = null;
+      });
+    }
+
+    try {
+      final newNpub = await Isolate.run<String>(() => _initNostrInIsolate(savedNsec));
+      if (!mounted) return;
+
+      _listening = false; // restart listener with new key
+      setState(() {
+        nsec = savedNsec;
+        npub = newNpub;
+        isConnected = true;
+      });
+      _startDmListener();
+      _fetchMessages();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        lastError = 'Re-init failed: $e';
+        isConnected = false;
+      });
+    }
   }
 
   Future<void> _showMyNpubQr() async {
