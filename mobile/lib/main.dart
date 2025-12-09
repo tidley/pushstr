@@ -1191,6 +1191,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onRemove: () => setState(() => _pendingAttachment = null),
             ),
           ),
+        const SizedBox(height: 6),
         Container(
           padding: const EdgeInsets.all(8.0),
           decoration: BoxDecoration(
@@ -1284,6 +1285,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
+        const SizedBox(height: 12),
       ],
     );
   }
