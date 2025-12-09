@@ -2340,17 +2340,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ? profiles[selectedProfileIndex]['nsec'] ?? ''
         : '';
 
-    final nsecs = profiles.map((p) => p['nsec'] ?? '').toList();
+    final npubs = <String>[];
 
-    // Compute npubs for all profiles in parallel using isolates (non-blocking)
-    final futures = nsecs.map((nsec) {
+    // Compute npubs sequentially to avoid key-switching race conditions
+    for (final profile in profiles) {
+      final nsec = profile['nsec'] ?? '';
       if (nsec.isEmpty) {
-        return Future.value('');
+        npubs.add('');
+        continue;
       }
-      return compute(_deriveNpub, nsec);
-    }).toList();
-
-    final npubs = await Future.wait(futures);
+      try {
+        // Run in isolate to avoid blocking UI
+        final npub = await compute(_deriveNpub, nsec);
+        npubs.add(npub);
+      } catch (e) {
+        print('Failed to derive npub: $e');
+        npubs.add('');
+      }
+    }
 
     // Restore the current nsec
     if (current.isNotEmpty) {
