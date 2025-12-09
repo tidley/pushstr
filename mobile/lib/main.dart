@@ -2336,42 +2336,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _refreshProfileNpubs() async {
     if (profiles.isEmpty) return;
 
-    // Defer computation to avoid blocking UI
-    Future.microtask(() async {
-      final current = (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
-          ? profiles[selectedProfileIndex]['nsec'] ?? ''
-          : '';
+    final current = (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
+        ? profiles[selectedProfileIndex]['nsec'] ?? ''
+        : '';
 
-      final nsecs = profiles.map((p) => p['nsec'] ?? '').toList();
+    final nsecs = profiles.map((p) => p['nsec'] ?? '').toList();
 
-      // Compute npubs for all profiles in parallel using isolates
-      final futures = nsecs.map((nsec) {
-        if (nsec.isEmpty) {
-          return Future.value('');
-        }
-        return compute(_deriveNpub, nsec);
-      }).toList();
-
-      final npubs = await Future.wait(futures);
-
-      // Restore the current nsec
-      if (current.isNotEmpty) {
-        try {
-          await compute(_deriveNpub, current);
-        } catch (_) {
-          // ignore restore errors
-        }
+    // Compute npubs for all profiles in parallel using isolates (non-blocking)
+    final futures = nsecs.map((nsec) {
+      if (nsec.isEmpty) {
+        return Future.value('');
       }
+      return compute(_deriveNpub, nsec);
+    }).toList();
 
-      if (mounted) {
-        setState(() {
-          profileNpubs = npubs;
-          if (selectedProfileIndex < profileNpubs.length) {
-            currentNpub = profileNpubs[selectedProfileIndex];
-          }
-        });
+    final npubs = await Future.wait(futures);
+
+    // Restore the current nsec
+    if (current.isNotEmpty) {
+      try {
+        await compute(_deriveNpub, current);
+      } catch (_) {
+        // ignore restore errors
       }
-    });
+    }
+
+    if (mounted) {
+      setState(() {
+        profileNpubs = npubs;
+        if (selectedProfileIndex < profileNpubs.length) {
+          currentNpub = profileNpubs[selectedProfileIndex];
+        }
+      });
+    }
   }
 
   String _shortNpub(String value) {
