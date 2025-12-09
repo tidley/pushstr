@@ -2342,7 +2342,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final npubs = <String>[];
 
-    // Compute npubs sequentially to avoid key-switching race conditions
+    // Compute npubs on main thread to avoid isolate state confusion
+    // Crypto operations are fast enough for a few profiles
     for (final profile in profiles) {
       final nsec = profile['nsec'] ?? '';
       if (nsec.isEmpty) {
@@ -2350,8 +2351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         continue;
       }
       try {
-        // Run in isolate to avoid blocking UI
-        final npub = await compute(_deriveNpub, nsec);
+        final npub = api.initNostr(nsec: nsec);
         npubs.add(npub);
       } catch (e) {
         print('Failed to derive npub: $e');
@@ -2362,7 +2362,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Restore the current nsec
     if (current.isNotEmpty) {
       try {
-        await compute(_deriveNpub, current);
+        api.initNostr(nsec: current);
       } catch (_) {
         // ignore restore errors
       }
