@@ -1294,8 +1294,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
-    // Reload after returning from settings
-    await _init();
+    // Lightweight reload after returning from settings without blocking the UI.
+    unawaited(_handleSettingsReturn());
+  }
+
+  Future<void> _handleSettingsReturn() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedNsec = prefs.getString('nostr_nsec') ?? '';
+    final currentNsec = nsec ?? '';
+    if (savedNsec == currentNsec) return;
+
+    try {
+      await _ensureRustInitialized();
+    } catch (_) {
+      // ignore double-init warnings
+    }
+
+    if (mounted) {
+      setState(() {
+        isConnected = false;
+        lastError = null;
+      });
+    }
+
+    try {
+      final newNpub = await Isolate.run(() async {
+        try {
+          await RustLib.init();
+        } catch (_) {
+          // ignore double-init warnings inside isolate
+        }
+        return api.initNostr(nsec: savedNsec);
+      });
+
+      if (!mounted) return;
+      setState(() {
+        nsec = savedNsec;
+        npub = newNpub;
+        isConnected = true;
+      });
+      _startDmListener();
+      _fetchMessages();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        lastError = 'Re-init failed: $e';
+        isConnected = false;
+      });
+    }
   }
 
   Future<void> _showMyNpubQr() async {
