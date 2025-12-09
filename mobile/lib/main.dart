@@ -1051,7 +1051,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Icon(Icons.error, size: 16),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(lastError!, style: const TextStyle(fontSize: 12))),
+                  Expanded(
+                    child: Text(
+                      lastError!.replaceAll('\n', ' '),
+                      style: const TextStyle(fontSize: 12),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1319,12 +1326,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     try {
-      final newNpub = await Isolate.run(() async {
-        try {
-          await RustLib.init();
-        } catch (_) {
-          // ignore double-init warnings inside isolate
-        }
+      // Run the blocking init on a background isolate without async return types.
+      final newNpub = await Isolate.run<String>(() {
         return api.initNostr(nsec: savedNsec);
       });
 
