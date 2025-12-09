@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -18,6 +19,20 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
+
+// Top-level function for compute() to derive npub from nsec
+String _deriveNpub(String nsec) {
+  try {
+    RustLib.init();
+  } catch (_) {
+    // Ignore double-init in isolate
+  }
+  try {
+    return api.initNostr(nsec: nsec);
+  } catch (_) {
+    return '';
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1286,12 +1301,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _showSettings(BuildContext context) async {
+    final previousNsec = nsec;
+
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
-    // Reload after returning from settings
-    await _init();
+
+    // Lightweight reload - only re-init if nsec changed
+    final prefs = await SharedPreferences.getInstance();
+    final currentNsec = prefs.getString('nostr_nsec') ?? '';
+
+    if (currentNsec == previousNsec) {
+      // No change, no need to reload
+      return;
+    }
+
+    // nsec changed - re-init using compute() to avoid blocking UI
+    if (mounted) {
+      setState(() {
+        isConnected = false;
+        lastError = null;
+      });
+    }
+
+    try {
+      // Run init in background isolate
+      final newNpub = await compute(_deriveNpub, currentNsec);
+
+      if (!mounted) return;
+
+      setState(() {
+        nsec = currentNsec;
+        npub = newNpub;
+        isConnected = true;
+      });
+
+      // Restart listener and fetch messages
+      _startDmListener();
+      _fetchMessages();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        lastError = 'Re-init failed: $e';
+        isConnected = false;
+      });
+    }
   }
 
   Future<void> _showMyNpubQr() async {
@@ -2280,38 +2335,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _refreshProfileNpubs() async {
     if (profiles.isEmpty) return;
-    final current = (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
-        ? profiles[selectedProfileIndex]['nsec'] ?? ''
-        : '';
-    final npubs = <String>[];
-    for (final profile in profiles) {
-      final nsec = profile['nsec'] ?? '';
-      if (nsec.isEmpty) {
-        npubs.add('');
-        continue;
-      }
-      try {
-        final npub = api.initNostr(nsec: nsec);
-        npubs.add(npub);
-      } catch (_) {
-        npubs.add('');
-      }
-    }
-    if (current.isNotEmpty) {
-      try {
-        api.initNostr(nsec: current);
-      } catch (_) {
-        // ignore restore errors
-      }
-    }
-    if (mounted) {
-      setState(() {
-        profileNpubs = npubs;
-        if (selectedProfileIndex < profileNpubs.length) {
-          currentNpub = profileNpubs[selectedProfileIndex];
+
+    // Defer computation to avoid blocking UI
+    Future.microtask(() async {
+      final current = (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
+          ? profiles[selectedProfileIndex]['nsec'] ?? ''
+          : '';
+
+      final nsecs = profiles.map((p) => p['nsec'] ?? '').toList();
+
+      // Compute npubs for all profiles in parallel using isolates
+      final futures = nsecs.map((nsec) {
+        if (nsec.isEmpty) {
+          return Future.value('');
         }
-      });
-    }
+        return compute(_deriveNpub, nsec);
+      }).toList();
+
+      final npubs = await Future.wait(futures);
+
+      // Restore the current nsec
+      if (current.isNotEmpty) {
+        try {
+          await compute(_deriveNpub, current);
+        } catch (_) {
+          // ignore restore errors
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          profileNpubs = npubs;
+          if (selectedProfileIndex < profileNpubs.length) {
+            currentNpub = profileNpubs[selectedProfileIndex];
+          }
+        });
+      }
+    });
   }
 
   String _shortNpub(String value) {
