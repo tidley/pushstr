@@ -2341,7 +2341,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _refreshingNpubs = true;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final npubs = _padNpubs(profileNpubs, profiles.length);
+      final npubs = List<String>.filled(profiles.length, '');
+
+      for (var i = 0; i < profiles.length; i++) {
+        final nsec = profiles[i]['nsec'] ?? '';
+        final derived = _deriveNpubFromNsec(nsec);
+        if (derived != null && derived.isNotEmpty) {
+          npubs[i] = derived;
+        }
+      }
+
       await prefs.setStringList('profile_npubs_cache', npubs);
 
       if (mounted) {
@@ -2351,24 +2360,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             currentNpub = profileNpubs[selectedProfileIndex];
           }
         });
-      }
-
-      for (var i = 0; i < profiles.length; i++) {
-        if (npubs[i].isNotEmpty) continue;
-        final nsec = profiles[i]['nsec'] ?? '';
-        final derived = _deriveNpubFromNsec(nsec);
-        if (derived != null && derived.isNotEmpty) {
-          npubs[i] = derived;
-          await prefs.setStringList('profile_npubs_cache', npubs);
-          if (mounted) {
-            setState(() {
-              profileNpubs = List<String>.from(npubs);
-              if (i == selectedProfileIndex) {
-                currentNpub = derived;
-              }
-            });
-          }
-        }
       }
     } finally {
       _refreshingNpubs = false;
