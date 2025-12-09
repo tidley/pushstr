@@ -1301,51 +1301,68 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _showSettings(BuildContext context) async {
-    final previousNsec = nsec;
+    final prefs = await SharedPreferences.getInstance();
+    final previousNsec = nsec ?? '';
+    final previousProfileIndex = prefs.getInt('selected_profile_index') ?? 0;
 
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const SettingsScreen()),
     );
 
-    // Lightweight reload - only re-init if nsec changed
-    final prefs = await SharedPreferences.getInstance();
-    final currentNsec = prefs.getString('nostr_nsec') ?? '';
+    final updatedPrefs = await SharedPreferences.getInstance();
+    final currentNsec = updatedPrefs.getString('nostr_nsec') ?? '';
+    final currentProfileIndex = updatedPrefs.getInt('selected_profile_index') ?? 0;
+    final cachedNpubs = updatedPrefs.getStringList('profile_npubs_cache') ?? [];
+    final cachedNpub =
+        (currentProfileIndex < cachedNpubs.length) ? cachedNpubs[currentProfileIndex] : '';
+    final didProfileChange = currentNsec != previousNsec || currentProfileIndex != previousProfileIndex;
 
-    if (currentNsec == previousNsec) {
-      // No change, no need to reload
+    if (!didProfileChange && cachedNpub.isEmpty) {
+      // No profile change and nothing to refresh
       return;
     }
 
-    // nsec changed - re-init using compute() to avoid blocking UI
-    if (mounted) {
+    if (mounted && didProfileChange) {
       setState(() {
         isConnected = false;
         lastError = null;
       });
     }
 
-    try {
-      // Run init in background isolate
-      final newNpub = await compute(_deriveNpub, currentNsec);
+    var newNpub = cachedNpub;
+    if (newNpub.isEmpty && currentNsec.isNotEmpty) {
+      try {
+        newNpub = api.initNostr(nsec: currentNsec);
+      } catch (_) {
+        newNpub = '';
+      }
+    }
 
-      if (!mounted) return;
+    if (newNpub.isEmpty) {
+      try {
+        newNpub = api.getNpub();
+      } catch (_) {
+        // ignore
+      }
+    }
 
-      setState(() {
-        nsec = currentNsec;
+    if (!mounted) return;
+
+    setState(() {
+      nsec = currentNsec;
+      if (newNpub.isNotEmpty) {
         npub = newNpub;
+      }
+      if (didProfileChange) {
         isConnected = true;
-      });
+      }
+    });
 
+    if (didProfileChange) {
       // Restart listener and fetch messages
       _startDmListener();
       _fetchMessages();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        lastError = 'Re-init failed: $e';
-        isConnected = false;
-      });
     }
   }
 
@@ -2667,8 +2684,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             child: Text(label),
                           );
                         }).toList(),
-                        onChanged: (idx) {
-                          if (idx != null && idx < profiles.length) {
+                        onChanged: (idx) async {
+                          if (idx != null && idx < profiles.length && idx != selectedProfileIndex) {
                             final nsec = profiles[idx]['nsec'] ?? '';
                             if (nsec.isNotEmpty) {
                               // Switch the active key in Rust
@@ -2687,6 +2704,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               }
                             });
                             _markDirty();
+                            await _saveSettings();
                           }
                         },
                       ),
@@ -2743,7 +2761,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     if (selectedProfileIndex >= profiles.length) {
                                       selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
                                     }
-                                    profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                                    profileNickname =
+                                        profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
                                     nicknameCtrl.text = profileNickname;
                                   });
                                   _markDirty();
@@ -2759,22 +2778,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
                 ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            decoration: sectionDecoration,
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Profile Actions',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
                 actionGroup(
                   'Key management',
                   [
