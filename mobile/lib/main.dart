@@ -2361,6 +2361,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         });
       }
+
+      // Persist and reflect the active key selection
+      if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+        await prefs.setString('nostr_nsec', profiles[selectedProfileIndex]['nsec'] ?? '');
+        if (mounted && selectedProfileIndex < npubs.length && npubs[selectedProfileIndex].isNotEmpty) {
+          setState(() => currentNpub = npubs[selectedProfileIndex]);
+        }
+      }
     } finally {
       _refreshingNpubs = false;
     }
@@ -2664,15 +2672,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<int>(
-                        value: selectedProfileIndex,
+                        value: (selectedProfileIndex < profiles.length) ? selectedProfileIndex : 0,
                         isExpanded: true,
                         items: profiles.asMap().entries.map((entry) {
                           final idx = entry.key;
                           final profile = entry.value;
                           final nickname = profile['nickname'] ?? '';
-                          final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
-                              ? _shortNpub(profileNpubs[idx])
-                              : '';
+                          final npubValue = (idx < profileNpubs.length) ? profileNpubs[idx] : '';
+                          final npubLabel = npubValue.isNotEmpty ? _shortNpub(npubValue) : '';
                           final label = nickname.isNotEmpty
                               ? nickname
                               : (npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}');
@@ -2688,12 +2695,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               selectedProfileIndex = idx;
                               profileNickname = profiles[idx]['nickname'] ?? '';
                               nicknameCtrl.text = profileNickname;
-                              if (idx < profileNpubs.length) {
+                              if (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty) {
                                 currentNpub = profileNpubs[idx];
                               }
                             });
                             _markDirty();
                             await _saveSettings();
+                            await _refreshProfileNpubs();
                           }
                         },
                       ),
