@@ -22,6 +22,15 @@ import 'package:url_launcher/url_launcher.dart';
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
 
+String _initNostrInIsolate(String nsec) {
+  try {
+    RustLib.init();
+  } catch (_) {
+    // ignore double-init warnings in isolate
+  }
+  return api.initNostr(nsec: nsec);
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ExternalLibrary? externalLibrary;
@@ -1327,9 +1336,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       // Run the blocking init on a background isolate without async return types.
-      final newNpub = await Isolate.run<String>(() {
-        return api.initNostr(nsec: savedNsec);
-      });
+      final newNpub = await Isolate.run<String>(() => _initNostrInIsolate(savedNsec));
 
       if (!mounted) return;
       setState(() {
