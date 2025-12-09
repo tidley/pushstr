@@ -1928,6 +1928,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String relayError = '';
   String currentNpub = '';
   final TextEditingController nicknameCtrl = TextEditingController();
+  bool _isSaving = false;
+  bool _hasPendingChanges = false;
+  String _saveStatus = 'Saved';
+  Color _saveStatusColor = Colors.greenAccent.shade200;
 
   @override
   void initState() {
@@ -1989,37 +1993,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     await _refreshProfileNpubs();
+    if (mounted) {
+      setState(() {
+        _hasPendingChanges = false;
+        _isSaving = false;
+        _saveStatus = 'Saved';
+        _saveStatusColor = Colors.greenAccent.shade200;
+      });
+    }
+  }
+
+  void _markDirty() {
+    if (!mounted) return;
+    setState(() {
+      _hasPendingChanges = true;
+      _saveStatus = 'Unsaved changes';
+      _saveStatusColor = Colors.amber.shade300;
+    });
+  }
+
+  Future<void> _handleSaveAction() async {
+    if (_isSaving) return;
+    if (!_hasPendingChanges) {
+      if (mounted) {
+        setState(() {
+          _saveStatus = 'No changes';
+          _saveStatusColor = Colors.blueGrey.shade200;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No changes to save'),
+            duration: Duration(milliseconds: 1200),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    await _saveSettings();
   }
 
   Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Save profiles
-    await prefs.setStringList(
-      'profiles',
-      profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
-    );
-
-    // Save selected profile
-    await prefs.setInt('selected_profile_index', selectedProfileIndex);
-
-    // Update current nsec
-    if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-      await prefs.setString('nostr_nsec', profiles[selectedProfileIndex]['nsec']!);
-      profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
-    }
-
-    // Save relays
-    await prefs.setStringList('relays', relays);
-
+    if (!mounted) return;
+    setState(() {
+      _isSaving = true;
+      _saveStatus = 'Saving...';
+      _saveStatusColor = Colors.amber.shade300;
+    });
     try {
-      final npub = api.getNpub();
-      setState(() => currentNpub = npub);
-    } catch (_) {
-      // ignore
-    }
+      final prefs = await SharedPreferences.getInstance();
 
-    await _refreshProfileNpubs();
+      await prefs.setStringList(
+        'profiles',
+        profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
+      );
+      await prefs.setInt('selected_profile_index', selectedProfileIndex);
+
+      if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+        await prefs.setString('nostr_nsec', profiles[selectedProfileIndex]['nsec']!);
+        profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
+      }
+
+      await prefs.setStringList('relays', relays);
+
+      try {
+        final npub = api.getNpub();
+        setState(() => currentNpub = npub);
+      } catch (_) {
+        // ignore
+      }
+
+      await _refreshProfileNpubs();
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _hasPendingChanges = false;
+        _saveStatus = 'Saved';
+        _saveStatusColor = Colors.greenAccent.shade200;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Settings saved'),
+          duration: Duration(milliseconds: 1400),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _saveStatus = 'Save failed';
+        _saveStatusColor = Colors.amber.shade300;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: $e'),
+          duration: const Duration(milliseconds: 1600),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _addProfile() async {
@@ -2062,8 +2135,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   setState(() {
                     profiles.add({'nsec': nsec, 'nickname': nickname});
                   });
-                await _saveSettings();
-                await _refreshProfileNpubs();
+                  _markDirty();
+                  await _saveSettings();
+                  await _refreshProfileNpubs();
                 }
                 Navigator.pop(ctx);
               },
@@ -2099,6 +2173,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() {
                 profiles.add({'nsec': nsec, 'nickname': nickname});
               });
+              _markDirty();
               await _saveSettings();
               await _refreshProfileNpubs();
               Navigator.pop(ctx);
@@ -2255,239 +2330,443 @@ class _SettingsScreenState extends State<SettingsScreen> {
       relays.add(relay);
       relayInputCtrl.clear();
     });
+    _markDirty();
     await _saveSettings();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pushstr Settings'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Profile Section
-          const Text(
-            'Profile & npub',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          if (profiles.isNotEmpty && selectedProfileIndex < profiles.length)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade900,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButton<int>(
-                      value: selectedProfileIndex,
-                      isExpanded: true,
-                      underline: Container(),
-                      items: profiles.asMap().entries.map((entry) {
-                        final idx = entry.key;
-                        final profile = entry.value;
-                        final nickname = profile['nickname'] ?? '';
-                        final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
-                            ? _shortNpub(profileNpubs[idx])
-                            : '';
-                        final label = nickname.isNotEmpty
-                            ? nickname
-                            : (npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}');
+    final sectionDecoration = BoxDecoration(
+      color: Colors.grey.shade900,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.greenAccent.withOpacity(0.32)),
+      boxShadow: [
+        BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 8)),
+        BoxShadow(color: Colors.greenAccent.withOpacity(0.08), blurRadius: 10, spreadRadius: 1),
+      ],
+    );
 
-                        return DropdownMenuItem(
-                          value: idx,
-                          child: Text(label),
-                        );
-                      }).toList(),
-                      onChanged: (idx) {
-                        if (idx != null) {
-                          setState(() {
-                            selectedProfileIndex = idx;
-                            profileNickname = profiles[idx]['nickname'] ?? '';
-                            nicknameCtrl.text = profileNickname;
-                            if (idx < profileNpubs.length) {
-                              currentNpub = profileNpubs[idx];
-                            }
-                          });
-                          _saveSettings();
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Remove profile',
-                    onPressed: profiles.length <= 1
-                        ? null
-                        : () async {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Remove profile?'),
-                                content: const Text('This will remove the selected profile. Continue?'),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true) {
-                              final removing = selectedProfileIndex;
-                              setState(() {
-                                profiles.removeAt(removing);
-                                if (removing < profileNpubs.length) {
-                                  profileNpubs.removeAt(removing);
-                                }
-                                if (selectedProfileIndex >= profiles.length) {
-                                  selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                                }
-                                profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                                nicknameCtrl.text = profileNickname;
-                              });
-                              await _saveSettings();
-                              await _refreshProfileNpubs();
-                            }
-                          },
-                    icon: const Icon(Icons.delete),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: nicknameCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Profile nickname (optional)',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      ),
-                      onChanged: (value) {
-                        if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-                          profiles[selectedProfileIndex]['nickname'] = value;
-                          _saveSettings();
-                        }
-                      },
-                    ),
+    Widget statusChip() {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: _saveStatusColor.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: _saveStatusColor.withOpacity(0.7)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _hasPendingChanges ? Icons.circle : Icons.check_circle,
+              size: 16,
+              color: _saveStatusColor,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              _saveStatus,
+              style: TextStyle(color: _saveStatusColor, fontWeight: FontWeight.w700, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget actionGroup(String label, List<Widget> buttons) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 12,
+              letterSpacing: 0.08,
+              color: Colors.white70,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: buttons,
+          ),
+        ],
+      );
+    }
+
+    Widget relayRow(String relay) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.35),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.greenAccent.withOpacity(0.22)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.grey.shade500,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.greenAccent.withOpacity(0.12),
+                    blurRadius: 6,
+                    spreadRadius: 1,
                   ),
                 ],
               ),
             ),
-          if (currentNpub.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: SelectableText(
-                'npub: $currentNpub',
-                style: const TextStyle(fontSize: 13, color: Colors.white70),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                relay,
+                style: const TextStyle(fontSize: 13),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          const SizedBox(height: 12),
-
-          // Key Management Buttons
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ElevatedButton(
-                onPressed: _generateProfile,
-                child: const Text('New Key'),
+            IconButton(
+              tooltip: 'Remove relay',
+              icon: const Icon(Icons.delete_outline, size: 20),
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.08),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                visualDensity: VisualDensity.compact,
               ),
-              ElevatedButton(
-                onPressed: _addProfile,
-                child: const Text('Import nSec'),
-              ),
-              ElevatedButton(
-                onPressed: _exportCurrentKey,
-                child: const Text('Copy nSec'),
-              ),
-              ElevatedButton(
-                onPressed: _copyNpub,
-                child: const Text('Copy nPub'),
-              ),
-              ElevatedButton(
-                onPressed: _showNpubQr,
-                child: const Text('Show nPub QR'),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-          const Divider(),
-          const SizedBox(height: 16),
-
-          // Relays Section
-          const Text(
-            'Relays',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: relayInputCtrl,
-                  decoration: InputDecoration(
-                    hintText: 'wss://relay.example.com',
-                    border: const OutlineInputBorder(),
-                    errorText: relayError.isEmpty ? null : relayError,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              onPressed: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Remove relay?'),
+                    content: Text('Remove $relay?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+                    ],
                   ),
-                  onChanged: (_) {
-                    if (relayError.isNotEmpty) {
-                      setState(() => relayError = '');
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: _addRelay,
-                child: const Text('Add'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...relays.map((relay) => ListTile(
-                title: Text(relay, style: const TextStyle(fontSize: 14)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete, size: 20),
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Remove relay?'),
-                        content: Text('Remove $relay?'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
-                        ],
-                      ),
-                    );
-                    if (confirmed == true) {
-                      setState(() {
-                        relays.remove(relay);
-                      });
-                      await _saveSettings();
-                    }
-                  },
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              )),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(12),
-        color: Colors.black.withValues(alpha: 0.4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            ElevatedButton(
-              onPressed: _saveSettings,
-              child: const Text('Save'),
+                );
+                if (confirmed == true) {
+                  setState(() {
+                    relays.remove(relay);
+                  });
+                  _markDirty();
+                  await _saveSettings();
+                }
+              },
             ),
           ],
         ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Pushstr Settings'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilledButton.icon(
+              onPressed: _handleSaveAction,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.greenAccent.shade400,
+                foregroundColor: Colors.black,
+                minimumSize: const Size(94, 40),
+              ),
+              icon: _isSaving
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                      ),
+                    )
+                  : const Icon(Icons.save_outlined, size: 18),
+              label: Text(_isSaving ? 'Saving' : 'Save'),
+            ),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(
+            children: [
+              statusChip(),
+              const SizedBox(width: 10),
+              if (currentNpub.isNotEmpty)
+                Expanded(
+                  child: Text(
+                    'npub: $currentNpub',
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Profile & npub',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) ...[
+                  InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: 'Active profile',
+                      filled: true,
+                      fillColor: Colors.black.withOpacity(0.35),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: selectedProfileIndex,
+                        isExpanded: true,
+                        items: profiles.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final profile = entry.value;
+                          final nickname = profile['nickname'] ?? '';
+                          final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
+                              ? _shortNpub(profileNpubs[idx])
+                              : '';
+                          final label = nickname.isNotEmpty
+                              ? nickname
+                              : (npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}');
+
+                          return DropdownMenuItem(
+                            value: idx,
+                            child: Text(label),
+                          );
+                        }).toList(),
+                        onChanged: (idx) async {
+                          if (idx != null) {
+                            setState(() {
+                              selectedProfileIndex = idx;
+                              profileNickname = profiles[idx]['nickname'] ?? '';
+                              nicknameCtrl.text = profileNickname;
+                              if (idx < profileNpubs.length) {
+                                currentNpub = profileNpubs[idx];
+                              }
+                            });
+                            _markDirty();
+                            await _saveSettings();
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: nicknameCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Profile nickname (optional)',
+                            filled: true,
+                            fillColor: Colors.black.withOpacity(0.35),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+                              profiles[selectedProfileIndex]['nickname'] = value;
+                              _markDirty();
+                              _saveSettings();
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        tooltip: 'Remove profile',
+                        onPressed: profiles.length <= 1
+                            ? null
+                            : () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Remove profile?'),
+                                    content: const Text('This will remove the selected profile. Continue?'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+                                    ],
+                                  ),
+                                );
+                                if (confirmed == true) {
+                                  final removing = selectedProfileIndex;
+                                  setState(() {
+                                    profiles.removeAt(removing);
+                                    if (removing < profileNpubs.length) {
+                                      profileNpubs.removeAt(removing);
+                                    }
+                                    if (selectedProfileIndex >= profiles.length) {
+                                      selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+                                    }
+                                    profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                                    nicknameCtrl.text = profileNickname;
+                                  });
+                                  _markDirty();
+                                  await _saveSettings();
+                                  await _refreshProfileNpubs();
+                                }
+                              },
+                        icon: const Icon(Icons.delete_outline),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.06),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Key Actions',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                actionGroup(
+                  'Key management',
+                  [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _generateProfile,
+                      icon: const Icon(Icons.bolt_outlined),
+                      label: const Text('New Key'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _addProfile,
+                      icon: const Icon(Icons.input_outlined),
+                      label: const Text('Import nSec'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                actionGroup(
+                  'Utilities',
+                  [
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(140, 44),
+                        side: BorderSide(color: Colors.greenAccent.shade200),
+                      ),
+                      onPressed: _exportCurrentKey,
+                      icon: const Icon(Icons.copy_outlined),
+                      label: const Text('Copy nSec'),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(140, 44),
+                        side: BorderSide(color: Colors.greenAccent.shade200),
+                      ),
+                      onPressed: _copyNpub,
+                      icon: const Icon(Icons.key_outlined),
+                      label: const Text('Copy nPub'),
+                    ),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(140, 44),
+                        side: BorderSide(color: Colors.greenAccent.shade200),
+                      ),
+                      onPressed: _showNpubQr,
+                      icon: const Icon(Icons.qr_code_2),
+                      label: const Text('Show QR'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Relays',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Add relays and trim padding for faster connects.',
+                  style: TextStyle(fontSize: 12, color: Colors.white70),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: relayInputCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Relay URL',
+                          filled: true,
+                          fillColor: Colors.black.withOpacity(0.35),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                          ),
+                          errorText: relayError.isEmpty ? null : relayError,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        onChanged: (_) {
+                          if (relayError.isNotEmpty) {
+                            setState(() => relayError = '');
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: _addRelay,
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Add'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(90, 44),
+                        backgroundColor: Colors.greenAccent.shade400,
+                        foregroundColor: Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ...relays.map(relayRow),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
