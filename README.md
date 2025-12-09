@@ -36,6 +36,8 @@ flutter pub get
 flutter run
 # Android release APK
 flutter build apk --release
+# Load to connected mobile
+flutter install --use-application-binary build/app/outputs/flutter-apk/app-release.apk
 ```
 - Optional Rust rebuild (refresh FFI + native libs):
 ```bash
