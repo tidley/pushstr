@@ -2624,20 +2624,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         items: profiles.asMap().entries.map((entry) {
                           final idx = entry.key;
                           final profile = entry.value;
-                          final nickname = profile['nickname'] ?? '';
                           final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
                               ? _shortNpub(profileNpubs[idx])
                               : '';
-                          final label = nickname.isNotEmpty
-                              ? nickname
-                              : (npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}');
+                          final label = npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}';
 
                           return DropdownMenuItem(
                             value: idx,
                             child: Text(label),
                           );
                         }).toList(),
-                        onChanged: (idx) async {
+                        onChanged: (idx) {
                           if (idx != null) {
                             setState(() {
                               selectedProfileIndex = idx;
@@ -2648,7 +2645,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               }
                             });
                             _markDirty();
-                            await _saveSettings();
                           }
                         },
                       ),
@@ -2674,7 +2670,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
                               profiles[selectedProfileIndex]['nickname'] = value;
                               _markDirty();
-                              _saveSettings();
                             }
                           },
                         ),
