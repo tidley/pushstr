@@ -1911,6 +1911,8 @@ class _QrScanPageState extends State<_QrScanPage> {
 }
 
 // Settings Screen with Profile Management and Relays
+enum RelayStatus { loading, ok, warn }
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -1924,6 +1926,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int selectedProfileIndex = 0;
   String profileNickname = '';
   List<String> relays = [];
+  final Map<String, RelayStatus> relayStatuses = {};
+  final Map<String, DateTime> relayStatusCheckedAt = {};
   final TextEditingController relayInputCtrl = TextEditingController();
   String relayError = '';
   String currentNpub = '';
@@ -2001,6 +2005,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _saveStatusColor = Colors.greenAccent.shade200;
       });
     }
+    _probeAllRelays(loadedRelays);
   }
 
   void _markDirty() {
@@ -2332,6 +2337,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
     _markDirty();
     await _saveSettings();
+    _probeRelay(relay);
+  }
+
+  void _probeAllRelays(List<String> list) {
+    for (final relay in list) {
+      _probeRelay(relay);
+    }
+  }
+
+  void _probeRelay(String relay) {
+    final now = DateTime.now();
+    final last = relayStatusCheckedAt[relay];
+    if (last != null && now.difference(last).inSeconds < 10) return;
+    relayStatusCheckedAt[relay] = now;
+    setState(() {
+      relayStatuses[relay] = RelayStatus.loading;
+    });
+    WebSocket.connect(relay).timeout(const Duration(seconds: 4)).then((ws) {
+      relayStatuses[relay] = RelayStatus.ok;
+      relayStatusCheckedAt[relay] = DateTime.now();
+      ws.close();
+      if (mounted) setState(() {});
+    }).catchError((_) {
+      relayStatuses[relay] = RelayStatus.warn;
+      relayStatusCheckedAt[relay] = DateTime.now();
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -2345,32 +2377,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         BoxShadow(color: Colors.greenAccent.withOpacity(0.08), blurRadius: 10, spreadRadius: 1),
       ],
     );
-
-    Widget statusChip() {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: _saveStatusColor.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: _saveStatusColor.withOpacity(0.7)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              _hasPendingChanges ? Icons.circle : Icons.check_circle,
-              size: 16,
-              color: _saveStatusColor,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              _saveStatus,
-              style: TextStyle(color: _saveStatusColor, fontWeight: FontWeight.w700, fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    }
 
     Widget actionGroup(String label, List<Widget> buttons) {
       return Column(
@@ -2395,6 +2401,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
+    Color _relayColor(String relay) {
+      final status = relayStatuses[relay];
+      switch (status) {
+        case RelayStatus.ok:
+          return Colors.greenAccent;
+        case RelayStatus.warn:
+          return Colors.orangeAccent;
+        case RelayStatus.loading:
+        default:
+          return Colors.grey.shade500;
+      }
+    }
+
+    Color _relayShadow(String relay) {
+      final status = relayStatuses[relay];
+      switch (status) {
+        case RelayStatus.ok:
+          return Colors.greenAccent.withOpacity(0.18);
+        case RelayStatus.warn:
+          return Colors.orangeAccent.withOpacity(0.18);
+        default:
+          return Colors.transparent;
+      }
+    }
+
     Widget relayRow(String relay) {
       return Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
@@ -2411,10 +2442,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               height: 10,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.grey.shade500,
+                color: _relayColor(relay),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.greenAccent.withOpacity(0.12),
+                    color: _relayShadow(relay),
                     blurRadius: 6,
                     spreadRadius: 1,
                   ),
@@ -2452,6 +2483,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (confirmed == true) {
                   setState(() {
                     relays.remove(relay);
+                    relayStatuses.remove(relay);
+                    relayStatusCheckedAt.remove(relay);
                   });
                   _markDirty();
                   await _saveSettings();
@@ -2470,10 +2503,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: FilledButton.icon(
-              onPressed: _handleSaveAction,
+              onPressed: (!_hasPendingChanges || _isSaving) ? null : _handleSaveAction,
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.greenAccent.shade400,
                 foregroundColor: Colors.black,
+                disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
+                disabledForegroundColor: Colors.black.withOpacity(0.4),
                 minimumSize: const Size(94, 40),
               ),
               icon: _isSaving
@@ -2494,21 +2529,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            children: [
-              statusChip(),
-              const SizedBox(width: 10),
-              if (currentNpub.isNotEmpty)
-                Expanded(
-                  child: Text(
-                    'npub: $currentNpub',
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
           Container(
             decoration: sectionDecoration,
             padding: const EdgeInsets.all(14),
@@ -2675,29 +2695,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actionGroup(
                   'Utilities',
                   [
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(140, 44),
-                        side: BorderSide(color: Colors.greenAccent.shade200),
-                      ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
                       onPressed: _exportCurrentKey,
-                      icon: const Icon(Icons.copy_outlined),
+                      icon: const Icon(Icons.vpn_key_outlined),
                       label: const Text('Copy nSec'),
                     ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(140, 44),
-                        side: BorderSide(color: Colors.greenAccent.shade200),
-                      ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
                       onPressed: _copyNpub,
-                      icon: const Icon(Icons.key_outlined),
+                      icon: const Icon(Icons.lock_outline),
                       label: const Text('Copy nPub'),
                     ),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(140, 44),
-                        side: BorderSide(color: Colors.greenAccent.shade200),
-                      ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
                       onPressed: _showNpubQr,
                       icon: const Icon(Icons.qr_code_2),
                       label: const Text('Show QR'),
@@ -2719,10 +2730,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Add relays and trim padding for faster connects.',
-                  style: TextStyle(fontSize: 12, color: Colors.white70),
-                ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
