@@ -447,6 +447,47 @@ function notify(title, message) {
   }
 }
 
+if (browser?.notifications?.onClicked) {
+  browser.notifications.onClicked.addListener(async (notificationId) => {
+    try {
+      await focusOrOpenChat();
+    } catch (err) {
+      console.warn("[pushstr] notification click failed", err);
+    } finally {
+      try {
+        await browser.notifications.clear(notificationId);
+      } catch (_) {
+        // ignore
+      }
+    }
+  });
+}
+
+async function focusOrOpenChat() {
+  const url = browser.runtime.getURL("popup.html?popout=1");
+  try {
+    const tabs = await browser.tabs.query({ url: `${url}*` });
+    if (tabs && tabs.length) {
+      const tab = tabs[0];
+      if (tab.id) await browser.tabs.update(tab.id, { active: true });
+      if (tab.windowId) await browser.windows.update(tab.windowId, { focused: true });
+      return;
+    }
+  } catch (err) {
+    console.warn("[pushstr] failed to focus existing chat window, opening new one", err);
+  }
+  try {
+    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
+  } catch (err) {
+    console.warn("[pushstr] unable to open chat window", err);
+    try {
+      await browser.tabs.create({ url });
+    } catch (_) {
+      // final fallback ignored
+    }
+  }
+}
+
 function normalizePubkey(input) {
   if (!input) throw new Error("Missing pubkey");
   try {

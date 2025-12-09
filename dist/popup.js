@@ -6898,6 +6898,7 @@ function renderHistory() {
         } catch (_) {
           prompt("Copy message:", m.content || "");
         }
+        flashCopyButton(copyBtn);
       });
       metaRow.appendChild(copyBtn);
     }
@@ -7382,6 +7383,14 @@ function popout() {
     return;
   }
   window.popoutWindow = window.open(url, "pushstr-popout", "noopener,noreferrer,width=800,height=640");
+}
+function flashCopyButton(btn) {
+  if (!btn)
+    return;
+  btn.classList.remove("copied");
+  void btn.offsetWidth;
+  btn.classList.add("copied");
+  setTimeout(() => btn.classList.remove("copied"), 1600);
 }
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
   const cleaned = stripNip18(content);

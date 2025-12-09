@@ -12158,6 +12158,45 @@ function notify(title, message) {
     console.warn("Notifications unavailable", err2);
   }
 }
+if (browser?.notifications?.onClicked) {
+  browser.notifications.onClicked.addListener(async (notificationId) => {
+    try {
+      await focusOrOpenChat();
+    } catch (err2) {
+      console.warn("[pushstr] notification click failed", err2);
+    } finally {
+      try {
+        await browser.notifications.clear(notificationId);
+      } catch (_) {
+      }
+    }
+  });
+}
+async function focusOrOpenChat() {
+  const url = browser.runtime.getURL("popup.html?popout=1");
+  try {
+    const tabs = await browser.tabs.query({ url: `${url}*` });
+    if (tabs && tabs.length) {
+      const tab = tabs[0];
+      if (tab.id)
+        await browser.tabs.update(tab.id, { active: true });
+      if (tab.windowId)
+        await browser.windows.update(tab.windowId, { focused: true });
+      return;
+    }
+  } catch (err2) {
+    console.warn("[pushstr] failed to focus existing chat window, opening new one", err2);
+  }
+  try {
+    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
+  } catch (err2) {
+    console.warn("[pushstr] unable to open chat window", err2);
+    try {
+      await browser.tabs.create({ url });
+    } catch (_) {
+    }
+  }
+}
 function normalizePubkey(input) {
   if (!input)
     throw new Error("Missing pubkey");
