@@ -2269,57 +2269,75 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _copyNpub() async {
-    try {
-      final npub = api.getNpub();
-      await Clipboard.setData(ClipboardData(text: npub));
+    // Use cached currentNpub which reflects the selected profile
+    final npubToCopy = currentNpub.isNotEmpty
+        ? currentNpub
+        : (selectedProfileIndex < profileNpubs.length
+            ? profileNpubs[selectedProfileIndex]
+            : '');
 
+    if (npubToCopy.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('npub copied to clipboard')),
-        );
-        setState(() => currentNpub = npub);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          const SnackBar(content: Text('No npub available')),
         );
       }
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: npubToCopy));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('npub copied to clipboard')),
+      );
     }
   }
 
   Future<void> _showNpubQr() async {
-    try {
-      final npub = api.getNpub();
-      if (!mounted) return;
-      setState(() => currentNpub = npub);
-      await showDialog(
-        context: context,
-        builder: (ctx) => Dialog(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: SizedBox(
-              width: 320,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('My npub', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    color: Colors.white,
-                    child: QrImageView(
-                      data: npub,
-                      size: 240,
-                      backgroundColor: Colors.white,
-                    ),
+    // Use cached currentNpub which reflects the selected profile
+    final npubToShow = currentNpub.isNotEmpty
+        ? currentNpub
+        : (selectedProfileIndex < profileNpubs.length
+            ? profileNpubs[selectedProfileIndex]
+            : '');
+
+    if (npubToShow.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No npub available')),
+        );
+      }
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: 320,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('My npub', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.white,
+                  child: QrImageView(
+                    data: npubToShow,
+                    size: 240,
+                    backgroundColor: Colors.white,
                   ),
-                  const SizedBox(height: 12),
-                  SelectableText(
-                    npub,
-                    style: const TextStyle(fontSize: 13),
-                    textAlign: TextAlign.center,
-                  ),
+                ),
+                const SizedBox(height: 12),
+                SelectableText(
+                  npubToShow,
+                  style: const TextStyle(fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerRight,
@@ -2334,13 +2352,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to show QR: $e')),
-        );
-      }
-    }
   }
 
   Future<void> _refreshProfileNpubs() async {
