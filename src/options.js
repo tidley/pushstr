@@ -51,7 +51,6 @@ function makeBrowser() {
 }
 
 const browser = makeBrowser();
-const statusEl = document.getElementById("status");
 const pubkeyLabel = document.getElementById("pubkeyLabel");
 const contactsBody = document.getElementById("contactsBody");
 const keySelect = document.getElementById("keySelect");
@@ -65,6 +64,8 @@ const relayList = document.getElementById("relayList");
 const contactPub = document.getElementById("contactPub");
 const contactNick = document.getElementById("contactNick");
 const contactError = document.getElementById("contactError");
+const editTimers = new WeakMap();
+const relayStatusCache = new Map();
 
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
@@ -81,6 +82,18 @@ async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   throw lastErr;
 }
 
+function setDirty(flag) {
+  document.body.classList.toggle("dirty", !!flag);
+}
+
+function syncFloatingState(el) {
+  if (!el) return;
+  const field = el.closest(".field");
+  if (!field) return;
+  if (el.value?.trim()) field.classList.add("filled");
+  else field.classList.remove("filled");
+}
+
 saveBtn.addEventListener("click", save);
 document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
@@ -93,6 +106,13 @@ document.getElementById("addRelay").addEventListener("click", addRelayFromInput)
 keySelect.addEventListener("change", async () => {
   const nsec = keySelect.value;
   if (nsec) await switchKey(nsec);
+  syncFloatingState(keySelect);
+});
+
+[keyNicknameEl, relayInput, contactPub, contactNick].forEach((el) => {
+  if (!el) return;
+  el.addEventListener("input", () => syncFloatingState(el));
+  el.addEventListener("blur", () => syncFloatingState(el));
 });
 
 init();
@@ -120,6 +140,20 @@ async function init() {
     populateKeys(keys, state.pubkey);
     fillKeyNickname(keys, state.pubkey);
     saveBtn.disabled = true;
+    saveBtn.textContent = "Save";
+    syncFloatingState(keySelect);
+    syncFloatingState(keyNicknameEl);
+    syncFloatingState(relayInput);
+    syncFloatingState(contactPub);
+    syncFloatingState(contactNick);
+    setDirty(false);
+    if (state.pubkey) {
+      pubkeyLabel.textContent = `Current npub: ${shortKey(state.pubkey)}`;
+      pubkeyLabel.title = toNpub(state.pubkey);
+    } else {
+      pubkeyLabel.textContent = "";
+      pubkeyLabel.title = "";
+    }
   } catch (err) {
     console.error("[pushstr][options] render failed", err, state);
   }
@@ -132,7 +166,7 @@ async function init() {
       status("Unable to initialize key");
     }
   }
-  pubkeyLabel.textContent = state.pubkey ? `Active npub: ${shortKey(state.pubkey)}` : "No key";
+  pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
 }
 
 async function loadStateFallback() {
@@ -159,10 +193,13 @@ function derivePubkeyFromNsec(nsec) {
 }
 
 async function save() {
+  if (saveBtn.disabled) return;
   const relays = readRelays();
   const recipients = readContacts();
   const keyNickname = keyNicknameEl.value.trim();
   try {
+    saveBtn.textContent = "Saving...";
+    saveBtn.disabled = true;
     await safeSend({
       type: "save-settings",
       relays,
@@ -172,22 +209,37 @@ async function save() {
       keyNickname
     });
     saveBtn.textContent = "Saved";
-    saveBtn.disabled = true;
+    setDirty(false);
     setTimeout(() => {
       saveBtn.textContent = "Save";
+      saveBtn.disabled = true;
     }, 2000);
     await init();
   } catch (err) {
     console.error("Save failed", err);
+    saveBtn.textContent = "Save";
+    saveBtn.disabled = false;
+    setDirty(true);
   }
 }
 
-function status(msg) {
-  // Deprecated inline status area removed
+function status(msg, tone = "warn") {
+  if (saveBtn) saveBtn.title = msg;
 }
 
 function markDirty() {
   saveBtn.disabled = false;
+  saveBtn.textContent = "Save";
+  setDirty(true);
+}
+
+function showEditedTag(wrapper) {
+  if (!wrapper) return;
+  wrapper.classList.add("just-edited");
+  const existing = editTimers.get(wrapper);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => wrapper.classList.remove("just-edited"), 1800);
+  editTimers.set(wrapper, timer);
 }
 
 async function regen() {
@@ -207,10 +259,10 @@ function renderContacts(list, initial = false) {
 
 function addContactRow(nickname = "", pubkey = "") {
   const tr = document.createElement("tr");
-  const tdNick = document.createElement("td");
-  tdNick.className = "nickcol";
   const tdPub = document.createElement("td");
   tdPub.className = "pubcol";
+  const tdNick = document.createElement("td");
+  tdNick.className = "nickcol";
   const tdDel = document.createElement("td");
   tdDel.className = "delcol";
   const hiddenPub = document.createElement("input");
@@ -218,16 +270,39 @@ function addContactRow(nickname = "", pubkey = "") {
   hiddenPub.value = pubkey || "";
   const nickInput = document.createElement("input");
   nickInput.type = "text";
+  nickInput.placeholder = " ";
   nickInput.value = nickname || "";
-  nickInput.addEventListener("input", markDirty);
+  const nickId = `nick-${Math.random().toString(36).slice(2, 8)}`;
+  nickInput.id = nickId;
+  const nickLabel = document.createElement("label");
+  nickLabel.htmlFor = nickId;
+  nickLabel.textContent = "Nickname";
+  const nickField = document.createElement("div");
+  nickField.className = "field floating";
+  nickField.appendChild(nickInput);
+  nickField.appendChild(nickLabel);
+  const nickWrap = document.createElement("div");
+  nickWrap.className = "nick-wrapper";
+  nickWrap.appendChild(nickField);
+  const editedTag = document.createElement("span");
+  editedTag.className = "edit-indicator";
+  editedTag.textContent = "Edited";
+  nickWrap.appendChild(editedTag);
+  nickInput.addEventListener("input", () => {
+    markDirty();
+    syncFloatingState(nickInput);
+    showEditedTag(nickWrap);
+  });
   const pubLabel = document.createElement("span");
   pubLabel.className = "truncate";
   const fullNpub = toNpub(pubkey);
   pubLabel.textContent = fullNpub || pubkey;
   pubLabel.title = fullNpub || pubkey;
   const delBtn = document.createElement("button");
-  delBtn.className = "remove-btn";
-  delBtn.textContent = "Remove";
+  delBtn.type = "button";
+  delBtn.className = "icon-btn danger";
+  delBtn.setAttribute("aria-label", "Remove contact");
+  delBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6a1 1 0 0 1 1 1v2h3v2h-1v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8H5V6h3V4a1 1 0 0 1 1-1zm1 3h4V5h-4zm-1 4v7h2v-7zm4 0v7h2v-7z"/></svg>';
   delBtn.addEventListener("click", () => {
     if (!confirm("Remove this contact?")) return;
     tr.remove();
@@ -235,12 +310,13 @@ function addContactRow(nickname = "", pubkey = "") {
   });
   tdPub.appendChild(pubLabel);
   tdPub.appendChild(hiddenPub);
-  tdNick.appendChild(nickInput);
+  tdNick.appendChild(nickWrap);
   tdDel.appendChild(delBtn);
   tr.appendChild(tdPub);
   tr.appendChild(tdNick);
   tr.appendChild(tdDel);
   contactsBody.appendChild(tr);
+  syncFloatingState(nickInput);
 }
 
 function readContacts() {
@@ -278,6 +354,8 @@ function addContactFromForm() {
   addContactRow(nickname, normalized);
   contactPub.value = "";
   contactNick.value = "";
+  syncFloatingState(contactPub);
+  syncFloatingState(contactNick);
   markDirty();
 }
 
@@ -351,13 +429,21 @@ async function showNpubQr() {
     const dataUrl = await QRCode.toDataURL(npub, { margin: 1, scale: 6 });
     const overlay = document.createElement("div");
     overlay.className = "qr-overlay";
-    overlay.innerHTML = `
-      <div class="qr-card">
-        <img src="${dataUrl}" alt="npub QR" />
-        <p>${npub}</p>
-        <button type="button" class="close-qr">Close</button>
-      </div>
-    `;
+    const card = document.createElement("div");
+    card.className = "qr-card";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = "npub QR";
+    const label = document.createElement("p");
+    label.textContent = npub;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close-qr";
+    closeBtn.textContent = "Close";
+    card.appendChild(img);
+    card.appendChild(label);
+    card.appendChild(closeBtn);
+    overlay.appendChild(card);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay || e.target.classList.contains("close-qr")) {
         overlay.remove();
@@ -379,26 +465,37 @@ function populateKeys(keys = [], currentPub) {
   if (unique.length === 0 && currentPub) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = shortKey(toNpub(currentPub));
+    opt.textContent = toNpub(currentPub);
     keySelect.appendChild(opt);
-    pubkeyLabel.textContent = `Active npub:`;
+    keySelect.title = toNpub(currentPub);
+    pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
+    pubkeyLabel.title = toNpub(currentPub);
     return;
   }
   unique.forEach((k) => {
     const opt = document.createElement("option");
     opt.value = k.nsec;
-    opt.textContent = `${shortKey(k.pubkey) || shortKey(k.nsec)}`;
+    opt.textContent = `${toNpub(k.pubkey) || shortKey(k.nsec)}`;
     if (currentPub && k.pubkey === currentPub) opt.selected = true;
     keySelect.appendChild(opt);
   });
   if (!keySelect.value && unique[0]) keySelect.value = unique[0].nsec;
-  if (currentPub) pubkeyLabel.textContent = `Active npub:`;
+  if (currentPub) {
+    keySelect.title = toNpub(currentPub);
+    pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
+    pubkeyLabel.title = toNpub(currentPub);
+  }
+  syncFloatingState(keySelect);
 }
 
 relayInput?.addEventListener("input", () => {
   relayError.textContent = "";
+  syncFloatingState(relayInput);
 });
-keyNicknameEl.addEventListener("input", markDirty);
+keyNicknameEl.addEventListener("input", () => {
+  markDirty();
+  syncFloatingState(keyNicknameEl);
+});
 
 async function switchKey() {
   const nsec = keySelect.value;
@@ -440,6 +537,7 @@ function shortKey(pk) {
 function fillKeyNickname(keys, currentPub) {
   const entry = (keys || []).find((k) => k.pubkey === currentPub);
   keyNicknameEl.value = entry?.nickname || "";
+  syncFloatingState(keyNicknameEl);
 }
 
 function flashButton(btn, label = "Copied") {
@@ -474,19 +572,31 @@ function renderRelays(relays = [], initial = false) {
 function renderRelayRow(relay) {
   const row = document.createElement("div");
   row.className = "relay-row";
+  const info = document.createElement("div");
+  info.className = "relay-info";
+  const statusDot = document.createElement("span");
+  statusDot.className = "status-dot status-loading";
+  statusDot.title = "Checking...";
   const span = document.createElement("span");
+  span.className = "relay-url";
   span.textContent = relay;
   span.title = relay;
+  info.appendChild(statusDot);
+  info.appendChild(span);
   const btn = document.createElement("button");
-  btn.className = "remove-btn";
-  btn.textContent = "Remove";
+  btn.className = "icon-btn danger";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Remove relay");
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6a1 1 0 0 1 1 1v2h3v2h-1v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8H5V6h3V4a1 1 0 0 1 1-1zm1 3h4V5h-4zm-1 4v7h2v-7zm4 0v7h2v-7z"/></svg>';
   btn.addEventListener("click", () => {
     if (!confirm("Remove this relay?")) return;
     row.remove();
+    relayStatusCache.delete(relay);
     markDirty();
   });
-  row.appendChild(span);
+  row.appendChild(info);
   row.appendChild(btn);
+  setTimeout(() => checkRelayStatus(relay, statusDot), 30);
   return row;
 }
 
@@ -504,11 +614,63 @@ function addRelayFromInput() {
   }
   relayList.appendChild(renderRelayRow(val));
   relayInput.value = "";
+  syncFloatingState(relayInput);
   markDirty();
 }
 
 function readRelays() {
-  return Array.from(relayList.querySelectorAll(".relay-row span")).map((s) => s.textContent).filter(Boolean);
+  return Array.from(relayList.querySelectorAll(".relay-row .relay-url")).map((s) => s.textContent).filter(Boolean);
+}
+
+function checkRelayStatus(relay, dot) {
+  if (!dot || !relay) return;
+  const cached = relayStatusCache.get(relay);
+  const now = Date.now();
+  if (cached && now - cached.ts < 10000) {
+    applyRelayStatus(dot, cached.state);
+    return;
+  }
+  applyRelayStatus(dot, "loading");
+  let ws;
+  let settled = false;
+  const finish = (state) => {
+    if (settled) return;
+    settled = true;
+    relayStatusCache.set(relay, { state, ts: Date.now() });
+    applyRelayStatus(dot, state);
+    try {
+      ws?.close();
+    } catch (_) {
+      // ignore
+    }
+  };
+  const timer = setTimeout(() => finish("warn"), 4000);
+  try {
+    ws = new WebSocket(relay);
+    ws.onopen = () => {
+      clearTimeout(timer);
+      finish("good");
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      finish("warn");
+    };
+    ws.onclose = () => {
+      clearTimeout(timer);
+      finish("warn");
+    };
+  } catch (_) {
+    clearTimeout(timer);
+    finish("warn");
+  }
+}
+
+function applyRelayStatus(dot, state) {
+  dot.className = "status-dot";
+  dot.classList.add(`status-${state}`);
+  if (state === "good") dot.title = "Connected";
+  else if (state === "warn") dot.title = "Unreachable";
+  else dot.title = "Checking...";
 }
 
 function normalizePubkeyInput(input) {

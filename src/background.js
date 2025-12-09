@@ -214,6 +214,16 @@ async function handleMessage(msg) {
     return decryptMediaDescriptor(msg.descriptor, msg.senderPubkey);
   }
 
+  if (msg.type === "delete-conversation") {
+    const target = normalizePubkey(msg.recipient);
+    if (!target) return { error: "missing recipient" };
+    const before = messages.length;
+    messages = messages.filter((m) => m.from !== target && m.to !== target);
+    messageIds = new Set(messages.map((m) => m.id).filter(Boolean));
+    await persistSettings();
+    return { ok: true, removed: before - messages.length };
+  }
+
   return { ok: true };
 }
 
@@ -428,12 +438,53 @@ function notify(title, message) {
   try {
     browser.notifications.create({
       type: "basic",
-      iconUrl: browser.runtime.getURL("pushtr_orange.png"),
+      iconUrl: browser.runtime.getURL("pushtr_96.png"),
       title,
       message
     });
   } catch (err) {
     console.warn("Notifications unavailable", err);
+  }
+}
+
+if (browser?.notifications?.onClicked) {
+  browser.notifications.onClicked.addListener(async (notificationId) => {
+    try {
+      await focusOrOpenChat();
+    } catch (err) {
+      console.warn("[pushstr] notification click failed", err);
+    } finally {
+      try {
+        await browser.notifications.clear(notificationId);
+      } catch (_) {
+        // ignore
+      }
+    }
+  });
+}
+
+async function focusOrOpenChat() {
+  const url = browser.runtime.getURL("popup.html?popout=1");
+  try {
+    const tabs = await browser.tabs.query({ url: `${url}*` });
+    if (tabs && tabs.length) {
+      const tab = tabs[0];
+      if (tab.id) await browser.tabs.update(tab.id, { active: true });
+      if (tab.windowId) await browser.windows.update(tab.windowId, { focused: true });
+      return;
+    }
+  } catch (err) {
+    console.warn("[pushstr] failed to focus existing chat window, opening new one", err);
+  }
+  try {
+    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
+  } catch (err) {
+    console.warn("[pushstr] unable to open chat window", err);
+    try {
+      await browser.tabs.create({ url });
+    } catch (_) {
+      // final fallback ignored
+    }
   }
 }
 

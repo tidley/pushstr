@@ -6835,8 +6835,25 @@ function renderContacts() {
     snippet.textContent = c.snippet || "";
     meta.appendChild(name);
     meta.appendChild(snippet);
+    const actions = document.createElement("div");
+    actions.className = "contact-actions";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "icon-btn danger";
+    del.title = "Delete conversation";
+    del.textContent = "\u{1F5D1}";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = confirm(`Delete conversation with ${c.label}? This removes local history only.`);
+      if (!ok)
+        return;
+      await browser.runtime.sendMessage({ type: "delete-conversation", recipient: c.id });
+      await refreshState();
+    });
+    actions.appendChild(del);
     el.appendChild(avatar);
     el.appendChild(meta);
+    el.appendChild(actions);
     contactsEl.appendChild(el);
   });
   const addBtn = document.createElement("button");
@@ -6881,6 +6898,7 @@ function renderHistory() {
         } catch (_) {
           prompt("Copy message:", m.content || "");
         }
+        flashCopyButton(copyBtn);
       });
       metaRow.appendChild(copyBtn);
     }
@@ -7004,7 +7022,7 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
   }
   const isOldMessage = messageId && !sessionMessages.has(messageId);
   if (isOldMessage) {
-    container.innerHTML = "";
+    container.replaceChildren();
     const filename = media.filename || "attachment";
     const decryptBtn = document.createElement("button");
     decryptBtn.textContent = `\u{1F513} Decrypt: ${filename}`;
@@ -7021,7 +7039,7 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
   decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl);
 }
 async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl) {
-  container.innerHTML = "<div style='color:#9ca3af;font-size:12px;'>Decrypting attachment\u2026</div>";
+  renderContainerMessage(container, "Decrypting attachment\u2026", "#9ca3af");
   try {
     const res = await browser.runtime.sendMessage({
       type: "decrypt-media",
@@ -7029,7 +7047,8 @@ async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMet
       senderPubkey
     });
     if (!res || res.error || !res.base64) {
-      container.innerHTML = `<div style='color:#ef4444;font-size:12px;'>Failed to decrypt: ${res?.error || "unknown error"}</div>`;
+      const errMsg = res?.error || "unknown error";
+      renderContainerMessage(container, `Failed to decrypt: ${errMsg}`, "#ef4444");
       return;
     }
     const bytes4 = b64ToBytes(res.base64);
@@ -7040,11 +7059,19 @@ async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMet
     persistDecryptedMedia(cacheKey, res.base64, cached.mime, cached.filename);
     displayDecryptedMedia(container, cached, media, fragMeta, downloadCtrl);
   } catch (err) {
-    container.innerHTML = `<div style='color:#ef4444;font-size:12px;'>Error: ${err.message}</div>`;
+    renderContainerMessage(container, `Error: ${err.message}`, "#ef4444");
   }
 }
+function renderContainerMessage(container, message, color = "#9ca3af") {
+  container.replaceChildren();
+  const msgEl = document.createElement("div");
+  msgEl.style.color = color;
+  msgEl.style.fontSize = "12px";
+  msgEl.textContent = message;
+  container.appendChild(msgEl);
+}
 function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadCtrl) {
-  container.innerHTML = "";
+  container.replaceChildren();
   const mime = cachedData.mime || media.mime || fragMeta.mime;
   if (mime && mime.startsWith("image")) {
     const img = document.createElement("img");
@@ -7357,6 +7384,17 @@ function popout() {
   }
   window.popoutWindow = window.open(url, "pushstr-popout", "noopener,noreferrer,width=800,height=640");
 }
+function flashCopyButton(btn) {
+  if (!btn)
+    return;
+  const original = btn.textContent;
+  btn.textContent = "\u2714";
+  btn.classList.add("copied");
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove("copied");
+  }, 1800);
+}
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
   const cleaned = stripNip18(content);
   const renderTextIfAny = (urlToStrip = null) => {
@@ -7365,7 +7403,10 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       txt = txt.replace(urlToStrip, "").trim();
     }
     if (txt) {
-      renderTextWithReadMore(container, txt);
+      const target = container.childNodes.length ? document.createElement("div") : container;
+      renderTextWithReadMore(target, txt);
+      if (target !== container)
+        container.appendChild(target);
     }
   };
   let jsonPart = cleaned;
@@ -7422,48 +7463,63 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
   }
   if (parsed && parsed.url) {
     const fullUrl = fragPart ? `${parsed.url}#${fragPart}` : parsed.url;
-    const actionHolder = document.createElement("div");
-    actionHolder.className = "actions-col";
-    const dl = createDownloadButton(fullUrl, parsed.type || fragMeta.mime, parsed.size || fragMeta.size, parsed.sha256 || fragMeta.sha256, {
+    const meta2 = {
       ...fragMeta,
+      url: fullUrl,
+      mime: parsed.type || fragMeta.mime,
+      size: parsed.size || fragMeta.size,
+      sha256: parsed.sha256 || fragMeta.sha256,
       filename: parsed.filename
-    });
-    actionHolder.appendChild(dl.btn);
-    if (fragMeta.isImage || /\.(png|jpe?g|gif|webp)$/i.test(parsed.url)) {
-      const img = document.createElement("img");
-      img.src = fullUrl;
-      img.style.maxWidth = "180px";
-      img.style.maxHeight = "180px";
-      img.style.display = "block";
-      container.appendChild(img);
+    };
+    if (isBlossomLink(fullUrl, meta2)) {
+      const actionHolder = document.createElement("div");
+      actionHolder.className = "actions-col";
+      const dl = createDownloadButton(fullUrl, meta2.mime, meta2.size, meta2.sha256, meta2);
+      actionHolder.appendChild(dl.btn);
+      if (meta2.isImage || /\.(png|jpe?g|gif|webp)$/i.test(parsed.url)) {
+        const img = document.createElement("img");
+        img.src = fullUrl;
+        img.style.maxWidth = "180px";
+        img.style.maxHeight = "180px";
+        img.style.display = "block";
+        container.appendChild(img);
+      }
+      renderTextIfAny(fullUrl);
+      return actionHolder;
     }
+    renderLink(container, fullUrl);
     renderTextIfAny(fullUrl);
-    return actionHolder;
+    return null;
   }
   const meta = parseUrlMeta(cleaned);
   if (meta) {
-    const actionHolder = document.createElement("div");
-    actionHolder.className = "actions-col";
-    const dl = createDownloadButton(meta.url, meta.mime, meta.size, null, meta);
-    actionHolder.appendChild(dl.btn);
-    if (meta.isImage) {
-      const img = document.createElement("img");
-      img.src = meta.url;
-      img.style.maxWidth = "180px";
-      img.style.maxHeight = "180px";
-      img.style.display = "block";
-      container.appendChild(img);
+    if (isBlossomLink(meta.url, meta)) {
+      const actionHolder = document.createElement("div");
+      actionHolder.className = "actions-col";
+      const dl = createDownloadButton(meta.url, meta.mime, meta.size, meta.sha256, meta);
+      actionHolder.appendChild(dl.btn);
+      if (meta.isImage) {
+        const img = document.createElement("img");
+        img.src = meta.url;
+        img.style.maxWidth = "180px";
+        img.style.maxHeight = "180px";
+        img.style.display = "block";
+        container.appendChild(img);
+      }
+      renderTextIfAny(meta.url);
+      return actionHolder;
     }
+    renderLink(container, meta.url);
     renderTextIfAny(meta.url);
-    return actionHolder;
+    return null;
   }
   const urlMatch = cleaned.match(/https?:\/\/\S+/i);
   if (urlMatch) {
     const metaFromUrl = parseUrlMeta(urlMatch[0]);
-    if (metaFromUrl) {
+    if (metaFromUrl && isBlossomLink(metaFromUrl.url, metaFromUrl)) {
       const actionHolder = document.createElement("div");
       actionHolder.className = "actions-col";
-      const dl = createDownloadButton(metaFromUrl.url, metaFromUrl.mime, metaFromUrl.size, null, metaFromUrl);
+      const dl = createDownloadButton(metaFromUrl.url, metaFromUrl.mime, metaFromUrl.size, metaFromUrl.sha256, metaFromUrl);
       actionHolder.appendChild(dl.btn);
       if (metaFromUrl.isImage) {
         const img = document.createElement("img");
@@ -7476,6 +7532,9 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       renderTextIfAny(metaFromUrl.url);
       return actionHolder;
     }
+    renderLink(container, urlMatch[0]);
+    renderTextIfAny(urlMatch[0]);
+    return null;
   }
   renderTextWithReadMore(container, cleaned);
   return null;
@@ -7538,17 +7597,24 @@ async function handleFileAttachment(file) {
 function showPreview(file) {
   previewEl.classList.remove("uploaded");
   clearPreviewBtn.classList.remove("hidden");
+  previewContentEl.replaceChildren();
   if (file) {
     if (file.type.startsWith("image")) {
       const url = URL.createObjectURL(file);
-      previewContentEl.innerHTML = `<img src="${url}" alt="preview" />`;
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "preview";
+      previewContentEl.appendChild(img);
     } else {
       const sizeLabel = formatSize(file.size);
-      previewContentEl.innerHTML = `<div class="file-chip">${file.name || "attachment"} (${sizeLabel})</div>`;
+      const chip = document.createElement("div");
+      chip.className = "file-chip";
+      chip.textContent = `${file.name || "attachment"} (${sizeLabel})`;
+      previewContentEl.appendChild(chip);
     }
     previewEl.style.display = "block";
   } else {
-    previewContentEl.innerHTML = "";
+    previewContentEl.textContent = "";
     previewEl.style.display = "none";
   }
 }
@@ -7556,7 +7622,7 @@ function clearPreview(keepUploaded = false) {
   if (keepUploaded && previewEl.classList.contains("uploaded")) {
     return;
   }
-  previewContentEl.innerHTML = "";
+  previewContentEl.textContent = "";
   previewEl.style.display = "none";
   previewEl.classList.remove("uploaded");
   clearPreviewBtn.classList.remove("hidden");
@@ -7577,13 +7643,15 @@ function parseUrlMeta(text) {
   const [base, frag] = trimmed.split("#", 2);
   let mime = "";
   let size = "";
+  let sha2563 = "";
   if (frag) {
     const params2 = new URLSearchParams(frag);
     mime = params2.get("m") || "";
     size = params2.get("size") || "";
+    sha2563 = params2.get("x") || params2.get("sha256") || "";
   }
   const isImage = mime && mime.startsWith && mime.startsWith("image") || /\.(png|jpe?g|gif|webp)$/i.test(base);
-  return { url: base + (frag ? "#" + frag : ""), isImage, size };
+  return { url: base + (frag ? "#" + frag : ""), isImage, size, mime, sha256: sha2563 };
 }
 function parseFragmentMeta(frag) {
   if (!frag)
@@ -7594,6 +7662,20 @@ function parseFragmentMeta(frag) {
   const sha2563 = params2.get("x") || "";
   const isImage = mime.startsWith("image");
   return { mime, size, sha256: sha2563, isImage };
+}
+function isBlossomLink(url, meta = {}) {
+  const hasMeta = Boolean(meta.sha256 || meta.mime || meta.size || meta.iv || meta.cipher_sha256);
+  if (!url)
+    return false;
+  try {
+    const parsed = new URL(url);
+    const hostMatches = parsed.hostname.includes("blossom");
+    const frag = parsed.hash || "";
+    const fragHasMeta = frag.includes("m=") || frag.includes("size=") || frag.includes("x=");
+    return hasMeta && (hostMatches || fragHasMeta);
+  } catch (_) {
+    return hasMeta;
+  }
 }
 function formatSize(bytes4) {
   if (!bytes4 && bytes4 !== 0)
@@ -7612,6 +7694,9 @@ function friendlyTime(ts) {
     return "";
   const date = new Date(ts * 1e3);
   const now2 = /* @__PURE__ */ new Date();
+  const diffMs = now2.getTime() - date.getTime();
+  if (diffMs < 60 * 1e3)
+    return "Just now";
   const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const todayStart = midnight(now2);
   const yesterdayStart = todayStart - 24 * 60 * 60 * 1e3;
@@ -7633,6 +7718,10 @@ function truncateSnippet(text) {
 }
 function renderTextWithReadMore(container, text) {
   const MAX_LEN = 400;
+  if (/https?:\/\/\S+/i.test(text)) {
+    renderTextWithLinks(container, text);
+    return;
+  }
   if (!text || text.length <= MAX_LEN) {
     container.textContent = text;
     return;
@@ -7665,6 +7754,40 @@ function renderTextWithReadMore(container, text) {
   container.appendChild(shortSpan);
   container.appendChild(fullSpan);
   container.appendChild(link);
+}
+function renderTextWithLinks(container, text) {
+  container.replaceChildren();
+  const parts = text.split(/(https?:\/\/\S+)/gi);
+  for (const part of parts) {
+    if (!part)
+      continue;
+    if (/^https?:\/\/\S+/i.test(part)) {
+      const a = document.createElement("a");
+      a.href = part;
+      a.target = "_blank";
+      a.rel = "noreferrer noopener";
+      a.textContent = part;
+      a.className = "inline-link";
+      container.appendChild(a);
+    } else {
+      container.appendChild(document.createTextNode(part));
+    }
+  }
+}
+function renderLink(container, url, label = null) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noreferrer noopener";
+  link.textContent = label || url;
+  link.className = "inline-link";
+  if (container.childNodes.length) {
+    const spacer = document.createElement("div");
+    spacer.appendChild(link);
+    container.appendChild(spacer);
+  } else {
+    container.appendChild(link);
+  }
 }
 function showUploadedPreview(url, mime = "") {
   clearPreview();

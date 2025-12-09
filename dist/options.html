@@ -6,67 +6,104 @@
   <title>Pushstr Settings</title>
 </head>
 <body>
-  <h1>Pushstr Settings</h1>
-  <div class="card">
-    <h2>Active Key & Actions</h2>
-    <div class="keyops top">
-      <label id="pubkeyLabel" for="keySelect"></label>
-      <select id="keySelect"></select>
-      <input id="keyNickname" type="text" placeholder="Profile nickname (optional)" />
-      <button id="showNpubQr">Show nPub QR</button>
+  <header class="settings-header">
+    <div class="title-stack">
+      <h1>Pushstr Settings</h1>
+      <p class="subtitle">Manage profiles, relays, and contacts</p>
     </div>
-    <div class="keyops top actions split-actions">
-      <div class="left-actions">
-        <button id="regen">New Key</button>
-        <button id="import">Import nSec</button>
-        <button id="export">Copy nSec</button>
-        <button id="exportNpub">Copy nPub</button>
-      </div>
-      <div class="right-actions">
-        <button id="removeProfile" class="remove-btn">Remove Profile</button>
-      </div>
-    </div>
-  </div>
+  </header>
 
-  <div class="card">
-    <h2>Relays</h2>
-    <div class="relay-add">
-      <input id="relayInput" type="text" placeholder="wss://relay.example.com" />
-      <button id="addRelay">Add</button>
+  <div class="page">
+    <div class="card key-card tone-1">
+      <div class="card-header">
+        <div>
+          <h2>Profile</h2>
+        </div>
+        <span class="pill subtle current-npub" id="pubkeyLabel"></span>
+      </div>
+      <div class="key-grid">
+        <div class="field floating select-field">
+          <select id="keySelect"></select>
+          <label for="keySelect">Active profile</label>
+        </div>
+        <div class="field floating">
+          <input id="keyNickname" type="text" placeholder=" " />
+          <label for="keyNickname">Profile nickname (optional)</label>
+        </div>
+      </div>
+      <div class="action-groups">
+        <div class="action-cluster">
+          <div class="cluster-label">Profile Tools</div>
+          <div class="button-row">
+            <button id="export">Copy Secret Key (nSec)</button>
+            <button id="exportNpub">Copy Public Key (nPub)</button>
+            <button class="ghost-btn" id="showNpubQr">Show nPub QR</button>
+          </div>
+        </div>
+        <div class="action-cluster">
+          <div class="cluster-label">Manage Profile</div>
+          <div class="button-row">
+            <button id="regen">Generate New Profile</button>
+            <button id="import">Import Secret Key (nSec)</button>
+            <button id="removeProfile" class="icon-btn ghost danger push-right" title="Remove profile" aria-label="Remove profile">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6a1 1 0 0 1 1 1v2h3v2h-1v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8H5V6h3V4a1 1 0 0 1 1-1zm1 3h4V5h-4zm-1 4v7h2v-7zm4 0v7h2v-7z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card tone-2">
+      <div class="card-header">
+        <div>
+          <h2>Relays</h2>
+        </div>
+      </div>
+      <div class="relay-add">
+        <div class="field floating stretch">
+          <input id="relayInput" type="text" placeholder=" " />
+          <label for="relayInput">Relay URL</label>
+        </div>
+        <button id="addRelay" class="primary ghost">Add</button>
+      </div>
       <span id="relayError" class="helper error"></span>
+      <div id="relayList" class="relay-list"></div>
     </div>
-    <div id="relayList" class="relay-list"></div>
-  </div>
 
-  <div class="card">
-    <div class="contacts-head">
-      <div>
-        <h2>Contacts</h2>
-        <p class="helper">Add npub or pubkey hex</p>
+    <div class="card tone-3">
+      <div class="card-header">
+        <div>
+          <h2>Contacts</h2>
+        </div>
+      </div>
+      <div class="contact-form">
+        <div class="field floating">
+          <input id="contactPub" type="text" placeholder=" " />
+          <label for="contactPub">nPub or pubkey hex</label>
+        </div>
+        <div class="field floating">
+          <input id="contactNick" type="text" placeholder=" " />
+          <label for="contactNick">Nickname (optional)</label>
+        </div>
+        <button id="addContact" class="primary ghost">Add Contact</button>
+      </div>
+      <span id="contactError" class="helper error"></span>
+      <div class="table-wrapper">
+        <table id="contactsTable">
+          <colgroup>
+            <col class="pubcol" />
+            <col class="nickcol" />
+            <col class="delcol" />
+          </colgroup>
+          <thead>
+            <tr><th class="pubcol">Pubkey</th><th class="nickcol">Nickname</th><th class="delcol"></th></tr>
+          </thead>
+          <tbody id="contactsBody"></tbody>
+        </table>
       </div>
     </div>
-    <div class="contact-form">
-      <input id="contactPub" type="text" placeholder="Pubkey (npub or hex)" />
-      <input id="contactNick" type="text" placeholder="Nickname (optional)" />
-      <button id="addContact">Add Contact</button>
-      <span id="contactError" class="helper error"></span>
-    </div>
-    <div class="table-wrapper">
-      <table id="contactsTable">
-        <colgroup>
-          <col class="pubcol" />
-          <col class="nickcol" />
-          <col class="delcol" />
-        </colgroup>
-        <thead>
-          <tr><th class="pubcol">Pubkey</th><th class="nickcol">Nickname</th><th class="delcol"></th></tr>
-        </thead>
-        <tbody id="contactsBody"></tbody>
-      </table>
-    </div>
   </div>
-
-  <div class="footer">
+  <div class="save-fab">
     <button id="save" class="primary" disabled>Save</button>
   </div>
   <script type="module" src="options.js"></script>

@@ -196,7 +196,8 @@ main {
   padding: 7px 8px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: center;
   min-height: 42px;
@@ -229,6 +230,31 @@ main {
 
 .contact .meta {
   flex: 1;
+}
+
+.contact-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn.danger {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #ffffff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 20px;
+}
+
+.icon-btn.danger:hover {
+  border-color: #f87171;
 }
 
 .contact .name {
@@ -271,6 +297,29 @@ main {
   flex-direction: column;
   gap: 6px;
   min-height: 0;
+}
+
+.ghost-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ghost-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+#chat-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 8px 12px 0 12px;
+  gap: 8px;
 }
 
 .msg-row {
@@ -327,6 +376,12 @@ main {
   margin-top: 4px;
 }
 
+.inline-link {
+  color: #93c5fd;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
 .meta.external {
   margin-left: 6px;
   font-size: 11px;
@@ -357,11 +412,21 @@ main {
   padding: 3px 6px;
   cursor: pointer;
   font-size: 11px;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
 
 .copy-btn:hover {
   border-color: var(--accent);
 }
+
+.copy-btn.copied {
+  border-color: var(--accent);
+  background: rgba(34, 197, 94, 0.18);
+  color: #d1fae5;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+  animation: none;
+}
+
 
 .read-more {
   margin-left: 4px;

@@ -327,8 +327,14 @@ function __wbg_get_imports() {
         return ret;
     };
     imports.wbg.__wbg_new_no_args_cb138f77cf6151ee = function(arg0, arg1) {
-        const ret = new Function(getStringFromWasm0(arg0, arg1));
-        return ret;
+        const code = getStringFromWasm0(arg0, arg1);
+        if (code === "return this") {
+            return () => globalThis;
+        }
+        console.warn("[wasm] blocking dynamic Function call", code);
+        return () => {
+            throw new Error("Dynamic code execution is disabled");
+        };
     };
     imports.wbg.__wbg_new_with_length_aa5eaf41d35235e5 = function(arg0) {
         const ret = new Uint8Array(arg0 >>> 0);

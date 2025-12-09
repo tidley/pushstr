@@ -194,6 +194,65 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _deleteConversation() async {
+    if (selectedContact == null) return;
+    final label = contacts.firstWhere(
+      (c) => c['pubkey'] == selectedContact,
+      orElse: () => <String, dynamic>{},
+    )['nickname'] as String? ??
+        _short(selectedContact!);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete conversation?'),
+        content: Text('Remove local history with $label?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      messages.removeWhere((m) =>
+          (m['direction'] == 'out' && m['to'] == selectedContact) ||
+          (m['direction'] == 'in' && m['from'] == selectedContact));
+    });
+    await _saveMessages();
+  }
+
+  Future<void> _deleteConversationFor(String? pubkey) async {
+    if (pubkey == null || pubkey.isEmpty) return;
+    final label = contacts.firstWhere(
+      (c) => c['pubkey'] == pubkey,
+      orElse: () => <String, dynamic>{},
+    )['nickname'] as String? ??
+        _short(pubkey);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete conversation?'),
+        content: Text('Remove local history with $label?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      messages.removeWhere((m) =>
+          (m['direction'] == 'out' && m['to'] == pubkey) ||
+          (m['direction'] == 'in' && m['from'] == pubkey));
+    });
+    await _saveMessages();
+    if (selectedContact == pubkey) {
+      setState(() {
+        selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+      });
+    }
+  }
+
   Future<void> _saveContacts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -416,6 +475,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  Future<void> _editContact(BuildContext context, Map<String, dynamic> contact) async {
+    final nicknameCtrl = TextEditingController(text: contact['nickname']?.toString() ?? _short(contact['pubkey'] ?? ''));
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit nickname'),
+        content: TextField(
+          controller: nicknameCtrl,
+          decoration: const InputDecoration(labelText: 'Nickname'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final updatedNick = nicknameCtrl.text.trim();
+    setState(() {
+      for (final c in contacts) {
+        if (c['pubkey'] == contact['pubkey']) {
+          c['nickname'] = updatedNick.isEmpty ? _short(c['pubkey'] ?? '') : updatedNick;
+          break;
+        }
+      }
+    });
+    await _saveContacts();
   }
 
   Future<void> _scanContactQr() async {
@@ -881,17 +969,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     setState(() => selectedContact = contact['pubkey']);
                     Navigator.pop(context);
                   },
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete),
-                    onPressed: () async {
-                      setState(() {
-                        contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
-                        if (selectedContact == contact['pubkey']) {
-                          selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-                        }
-                      });
-                      await _saveContacts();
-                    },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.delete_forever),
+                        tooltip: 'Delete conversation',
+                        onPressed: () => _deleteConversationFor(contact['pubkey']),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        tooltip: 'Edit nickname',
+                        onPressed: () => _editContact(context, contact),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete),
+                        onPressed: () async {
+                          setState(() {
+                            contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
+                            if (selectedContact == contact['pubkey']) {
+                              selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+                            }
+                          });
+                          await _saveContacts();
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -983,6 +1086,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
         final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
+        final blossomUrl = _extractBlossomUrl(m['content']);
         final actions = !isOut
             ? Column(
                 mainAxisSize: MainAxisSize.min,
@@ -998,13 +1102,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       );
                     },
                   ),
-                  if (_extractDownloadUrl(m['content']) != null)
+                  if (blossomUrl != null)
                     IconButton(
                       icon: const Icon(Icons.download, size: 18),
                       tooltip: 'Download',
                       onPressed: () {
-                        final url = _extractDownloadUrl(m['content']);
-                        if (url != null) _launchUrl(url);
+                        _launchUrl(blossomUrl);
                       },
                     ),
                 ],
@@ -1141,15 +1244,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   return Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: messageCtrl,
-                          focusNode: _messageFocus,
-                          maxLines: null,
-                          decoration: const InputDecoration(
-                            hintText: 'Message',
-                            filled: true,
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxHeight: 180,
+                          ),
+                          child: TextField(
+                            controller: messageCtrl,
+                            focusNode: _messageFocus,
+                            keyboardType: TextInputType.multiline,
+                            minLines: 1,
+                            maxLines: null, // allow scrolling inside the field
+                            decoration: const InputDecoration(
+                              hintText: 'Message',
+                              filled: true,
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
                           ),
                         ),
                       ),
@@ -1360,6 +1470,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final url = media['url'].toString();
       final filename = media['filename']?.toString() ?? 'Attachment';
       final mime = media['mime']?.toString() ?? 'application/octet-stream';
+      final isBlossom = _isBlossomLink(url, media);
       final isImage = mime.startsWith('image/') || RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1379,9 +1490,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.download, size: 20),
-                color: Colors.white,
+              TextButton.icon(
+                icon: Icon(isBlossom ? Icons.download : Icons.open_in_new, size: 18),
+                label: Text(isBlossom ? 'Download' : 'Open link'),
                 onPressed: () => _launchUrl(url),
               ),
               IconButton(
@@ -1416,6 +1527,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (url != null) {
       final isImage = RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(url);
       final textPart = cleaned.replaceFirst(url, '').trim();
+      final isBlossom = _isBlossomLink(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1424,6 +1536,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               textPart,
               style: const TextStyle(fontSize: 15),
             ),
+          TextButton(
+            onPressed: () => _launchUrl(url),
+            child: Text(
+              url,
+              style: const TextStyle(
+                decoration: TextDecoration.underline,
+                color: Colors.lightBlueAccent,
+              ),
+            ),
+          ),
           if (isImage)
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -1437,9 +1559,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.download, size: 20),
-                color: Colors.white,
+              TextButton.icon(
+                icon: Icon(isBlossom ? Icons.download : Icons.open_in_new, size: 18),
+                label: Text(isBlossom ? 'Download' : 'Open link'),
                 onPressed: () => _launchUrl(url),
               ),
               IconButton(
@@ -1553,6 +1675,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return match?.group(0);
   }
 
+  bool _isBlossomLink(String url, [Map<String, dynamic>? meta]) {
+    final uri = Uri.tryParse(url);
+    final hostHasBlossom = uri?.host.contains('blossom') ?? false;
+    final frag = uri?.fragment ?? '';
+    final fragHasMeta = frag.contains('m=') || frag.contains('size=') || frag.contains('x=');
+    final hasMeta = (meta?['sha256']?.toString().isNotEmpty ?? false) ||
+        (meta?['cipher_sha256']?.toString().isNotEmpty ?? false) ||
+        (meta?['iv']?.toString().isNotEmpty ?? false) ||
+        (meta?['mime']?.toString().isNotEmpty ?? false) ||
+        (meta?['size'] != null);
+    return hasMeta && (hostHasBlossom || fragHasMeta);
+  }
+
   Future<void> _initShareListener() async {
     try {
       // Handle initial share when app is launched from share sheet
@@ -1574,6 +1709,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _handleSharedPayload(dynamic payload) {
     if (payload is! Map) return;
     final text = payload['text']?.toString() ?? '';
+    final bytes = _asUint8List(payload['bytes']);
+    final mime = payload['type']?.toString() ?? '';
+    final name = payload['name']?.toString();
+
+    if (bytes != null && bytes.isNotEmpty) {
+      final resolvedMime = mime.isNotEmpty ? mime : (lookupMimeType(name ?? '', headerBytes: bytes) ?? 'application/octet-stream');
+      final filename = (name != null && name.isNotEmpty) ? name : 'shared.${extensionFromMime(resolvedMime)}';
+      setState(() {
+        _pendingAttachment = _PendingAttachment(
+          bytes: bytes,
+          mime: resolvedMime,
+          name: filename,
+        );
+        if (text.isNotEmpty) {
+          messageCtrl.text = text;
+        }
+      });
+      _messageFocus.requestFocus();
+      _scrollToBottom();
+      return;
+    }
+
     if (text.isNotEmpty) {
       setState(() {
         messageCtrl.text = text;
@@ -1588,6 +1745,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
     final now = DateTime.now();
+    final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
 
     // Helper to get midnight of a date
     DateTime midnight(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -1622,16 +1781,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return '$weekday, $month $day at $timePart';
   }
 
-  String? _extractDownloadUrl(dynamic content) {
+  String? _extractBlossomUrl(dynamic content) {
     try {
       final cleaned = _stripNip18(content?.toString() ?? '');
       final parsed = jsonDecode(cleaned);
       if (parsed is Map) {
-        if (parsed['url'] is String) {
-          return parsed['url'] as String;
+        final map = Map<String, dynamic>.from(parsed);
+        final topUrl = map['url'];
+        if (topUrl is String && _isBlossomLink(topUrl, map)) {
+          return topUrl;
         }
-        if (parsed['media'] is Map && (parsed['media']['url'] is String)) {
-          return parsed['media']['url'] as String;
+        if (map['media'] is Map) {
+          final media = Map<String, dynamic>.from(map['media'] as Map);
+          final url = media['url'];
+          if (url is String && _isBlossomLink(url, media)) return url;
         }
       }
     } catch (_) {
@@ -1748,6 +1911,8 @@ class _QrScanPageState extends State<_QrScanPage> {
 }
 
 // Settings Screen with Profile Management and Relays
+enum RelayStatus { loading, ok, warn }
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -1761,10 +1926,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int selectedProfileIndex = 0;
   String profileNickname = '';
   List<String> relays = [];
+  final Map<String, RelayStatus> relayStatuses = {};
+  final Map<String, DateTime> relayStatusCheckedAt = {};
   final TextEditingController relayInputCtrl = TextEditingController();
   String relayError = '';
   String currentNpub = '';
   final TextEditingController nicknameCtrl = TextEditingController();
+  bool _isSaving = false;
+  bool _hasPendingChanges = false;
+  String _saveStatus = 'Saved';
+  Color _saveStatusColor = Colors.greenAccent.shade200;
 
   @override
   void initState() {
@@ -1826,37 +1997,107 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     await _refreshProfileNpubs();
+    if (mounted) {
+      setState(() {
+        _hasPendingChanges = false;
+        _isSaving = false;
+        _saveStatus = 'Saved';
+        _saveStatusColor = Colors.greenAccent.shade200;
+      });
+    }
+    _probeAllRelays(loadedRelays);
+  }
+
+  void _markDirty() {
+    if (!mounted) return;
+    setState(() {
+      _hasPendingChanges = true;
+      _saveStatus = 'Unsaved changes';
+      _saveStatusColor = Colors.amber.shade300;
+    });
+  }
+
+  Future<void> _handleSaveAction() async {
+    if (_isSaving) return;
+    if (!_hasPendingChanges) {
+      if (mounted) {
+        setState(() {
+          _saveStatus = 'No changes';
+          _saveStatusColor = Colors.blueGrey.shade200;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No changes to save'),
+            duration: Duration(milliseconds: 1200),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    await _saveSettings();
   }
 
   Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Save profiles
-    await prefs.setStringList(
-      'profiles',
-      profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
-    );
-
-    // Save selected profile
-    await prefs.setInt('selected_profile_index', selectedProfileIndex);
-
-    // Update current nsec
-    if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-      await prefs.setString('nostr_nsec', profiles[selectedProfileIndex]['nsec']!);
-      profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
-    }
-
-    // Save relays
-    await prefs.setStringList('relays', relays);
-
+    if (!mounted) return;
+    setState(() {
+      _isSaving = true;
+      _saveStatus = 'Saving...';
+      _saveStatusColor = Colors.amber.shade300;
+    });
     try {
-      final npub = api.getNpub();
-      setState(() => currentNpub = npub);
-    } catch (_) {
-      // ignore
-    }
+      final prefs = await SharedPreferences.getInstance();
 
-    await _refreshProfileNpubs();
+      await prefs.setStringList(
+        'profiles',
+        profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
+      );
+      await prefs.setInt('selected_profile_index', selectedProfileIndex);
+
+      if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+        await prefs.setString('nostr_nsec', profiles[selectedProfileIndex]['nsec']!);
+        profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
+      }
+
+      await prefs.setStringList('relays', relays);
+
+      try {
+        final npub = api.getNpub();
+        setState(() => currentNpub = npub);
+      } catch (_) {
+        // ignore
+      }
+
+      await _refreshProfileNpubs();
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _hasPendingChanges = false;
+        _saveStatus = 'Saved';
+        _saveStatusColor = Colors.greenAccent.shade200;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Settings saved'),
+          duration: Duration(milliseconds: 1400),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _saveStatus = 'Save failed';
+        _saveStatusColor = Colors.amber.shade300;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: $e'),
+          duration: const Duration(milliseconds: 1600),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _addProfile() async {
@@ -1899,8 +2140,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   setState(() {
                     profiles.add({'nsec': nsec, 'nickname': nickname});
                   });
-                await _saveSettings();
-                await _refreshProfileNpubs();
+                  _markDirty();
+                  await _saveSettings();
+                  await _refreshProfileNpubs();
                 }
                 Navigator.pop(ctx);
               },
@@ -1936,6 +2178,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() {
                 profiles.add({'nsec': nsec, 'nickname': nickname});
               });
+              _markDirty();
               await _saveSettings();
               await _refreshProfileNpubs();
               Navigator.pop(ctx);
@@ -2092,239 +2335,445 @@ class _SettingsScreenState extends State<SettingsScreen> {
       relays.add(relay);
       relayInputCtrl.clear();
     });
+    _markDirty();
     await _saveSettings();
+    _probeRelay(relay);
+  }
+
+  void _probeAllRelays(List<String> list) {
+    for (final relay in list) {
+      _probeRelay(relay);
+    }
+  }
+
+  void _probeRelay(String relay) {
+    final now = DateTime.now();
+    final last = relayStatusCheckedAt[relay];
+    if (last != null && now.difference(last).inSeconds < 10) return;
+    relayStatusCheckedAt[relay] = now;
+    setState(() {
+      relayStatuses[relay] = RelayStatus.loading;
+    });
+    WebSocket.connect(relay).timeout(const Duration(seconds: 4)).then((ws) {
+      relayStatuses[relay] = RelayStatus.ok;
+      relayStatusCheckedAt[relay] = DateTime.now();
+      ws.close();
+      if (mounted) setState(() {});
+    }).catchError((_) {
+      relayStatuses[relay] = RelayStatus.warn;
+      relayStatusCheckedAt[relay] = DateTime.now();
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pushstr Settings'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // Profile Section
-          const Text(
-            'Profile & npub',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          if (profiles.isNotEmpty && selectedProfileIndex < profiles.length)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade900,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButton<int>(
-                      value: selectedProfileIndex,
-                      isExpanded: true,
-                      underline: Container(),
-                      items: profiles.asMap().entries.map((entry) {
-                        final idx = entry.key;
-                        final profile = entry.value;
-                        final nickname = profile['nickname'] ?? '';
-                        final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
-                            ? _shortNpub(profileNpubs[idx])
-                            : '';
-                        final label = nickname.isNotEmpty
-                            ? nickname
-                            : (npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}');
+    final sectionDecoration = BoxDecoration(
+      color: Colors.grey.shade900,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.greenAccent.withOpacity(0.32)),
+      boxShadow: [
+        BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 8)),
+        BoxShadow(color: Colors.greenAccent.withOpacity(0.08), blurRadius: 10, spreadRadius: 1),
+      ],
+    );
 
-                        return DropdownMenuItem(
-                          value: idx,
-                          child: Text(label),
-                        );
-                      }).toList(),
-                      onChanged: (idx) {
-                        if (idx != null) {
-                          setState(() {
-                            selectedProfileIndex = idx;
-                            profileNickname = profiles[idx]['nickname'] ?? '';
-                            nicknameCtrl.text = profileNickname;
-                            if (idx < profileNpubs.length) {
-                              currentNpub = profileNpubs[idx];
-                            }
-                          });
-                          _saveSettings();
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Remove profile',
-                    onPressed: profiles.length <= 1
-                        ? null
-                        : () async {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Remove profile?'),
-                                content: const Text('This will remove the selected profile. Continue?'),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true) {
-                              final removing = selectedProfileIndex;
-                              setState(() {
-                                profiles.removeAt(removing);
-                                if (removing < profileNpubs.length) {
-                                  profileNpubs.removeAt(removing);
-                                }
-                                if (selectedProfileIndex >= profiles.length) {
-                                  selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                                }
-                                profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                                nicknameCtrl.text = profileNickname;
-                              });
-                              await _saveSettings();
-                              await _refreshProfileNpubs();
-                            }
-                          },
-                    icon: const Icon(Icons.delete),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: nicknameCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Profile nickname (optional)',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      ),
-                      onChanged: (value) {
-                        if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-                          profiles[selectedProfileIndex]['nickname'] = value;
-                          _saveSettings();
-                        }
-                      },
-                    ),
+    Widget actionGroup(String label, List<Widget> buttons) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 12,
+              letterSpacing: 0.08,
+              color: Colors.white70,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: buttons,
+          ),
+        ],
+      );
+    }
+
+    Color _relayColor(String relay) {
+      final status = relayStatuses[relay];
+      switch (status) {
+        case RelayStatus.ok:
+          return Colors.greenAccent;
+        case RelayStatus.warn:
+          return Colors.orangeAccent;
+        case RelayStatus.loading:
+        default:
+          return Colors.grey.shade500;
+      }
+    }
+
+    Color _relayShadow(String relay) {
+      final status = relayStatuses[relay];
+      switch (status) {
+        case RelayStatus.ok:
+          return Colors.greenAccent.withOpacity(0.18);
+        case RelayStatus.warn:
+          return Colors.orangeAccent.withOpacity(0.18);
+        default:
+          return Colors.transparent;
+      }
+    }
+
+    Widget relayRow(String relay) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.35),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.greenAccent.withOpacity(0.22)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _relayColor(relay),
+                boxShadow: [
+                  BoxShadow(
+                    color: _relayShadow(relay),
+                    blurRadius: 6,
+                    spreadRadius: 1,
                   ),
                 ],
               ),
             ),
-          if (currentNpub.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: SelectableText(
-                'npub: $currentNpub',
-                style: const TextStyle(fontSize: 13, color: Colors.white70),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                relay,
+                style: const TextStyle(fontSize: 13),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          const SizedBox(height: 12),
-
-          // Key Management Buttons
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ElevatedButton(
-                onPressed: _generateProfile,
-                child: const Text('New Key'),
+            IconButton(
+              tooltip: 'Remove relay',
+              icon: const Icon(Icons.delete_outline, size: 20),
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.08),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                visualDensity: VisualDensity.compact,
               ),
-              ElevatedButton(
-                onPressed: _addProfile,
-                child: const Text('Import nSec'),
-              ),
-              ElevatedButton(
-                onPressed: _exportCurrentKey,
-                child: const Text('Copy nSec'),
-              ),
-              ElevatedButton(
-                onPressed: _copyNpub,
-                child: const Text('Copy nPub'),
-              ),
-              ElevatedButton(
-                onPressed: _showNpubQr,
-                child: const Text('Show nPub QR'),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-          const Divider(),
-          const SizedBox(height: 16),
-
-          // Relays Section
-          const Text(
-            'Relays',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: relayInputCtrl,
-                  decoration: InputDecoration(
-                    hintText: 'wss://relay.example.com',
-                    border: const OutlineInputBorder(),
-                    errorText: relayError.isEmpty ? null : relayError,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              onPressed: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Remove relay?'),
+                    content: Text('Remove $relay?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+                    ],
                   ),
-                  onChanged: (_) {
-                    if (relayError.isNotEmpty) {
-                      setState(() => relayError = '');
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: _addRelay,
-                child: const Text('Add'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...relays.map((relay) => ListTile(
-                title: Text(relay, style: const TextStyle(fontSize: 14)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete, size: 20),
-                  onPressed: () async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Remove relay?'),
-                        content: Text('Remove $relay?'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
-                        ],
-                      ),
-                    );
-                    if (confirmed == true) {
-                      setState(() {
-                        relays.remove(relay);
-                      });
-                      await _saveSettings();
-                    }
-                  },
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              )),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(12),
-        color: Colors.black.withValues(alpha: 0.4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            ElevatedButton(
-              onPressed: _saveSettings,
-              child: const Text('Save'),
+                );
+                if (confirmed == true) {
+                  setState(() {
+                    relays.remove(relay);
+                    relayStatuses.remove(relay);
+                    relayStatusCheckedAt.remove(relay);
+                  });
+                  _markDirty();
+                  await _saveSettings();
+                }
+              },
             ),
           ],
         ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Pushstr Settings'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilledButton.icon(
+              onPressed: (!_hasPendingChanges || _isSaving) ? null : _handleSaveAction,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.greenAccent.shade400,
+                foregroundColor: Colors.black,
+                disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
+                disabledForegroundColor: Colors.black.withOpacity(0.4),
+                minimumSize: const Size(94, 40),
+              ),
+              icon: _isSaving
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                      ),
+                    )
+                  : const Icon(Icons.save_outlined, size: 18),
+              label: Text(_isSaving ? 'Saving' : 'Save'),
+            ),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Profile & npub',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) ...[
+                  InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: 'Active profile',
+                      filled: true,
+                      fillColor: Colors.black.withOpacity(0.35),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: selectedProfileIndex,
+                        isExpanded: true,
+                        items: profiles.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final profile = entry.value;
+                          final nickname = profile['nickname'] ?? '';
+                          final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
+                              ? _shortNpub(profileNpubs[idx])
+                              : '';
+                          final label = nickname.isNotEmpty
+                              ? nickname
+                              : (npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}');
+
+                          return DropdownMenuItem(
+                            value: idx,
+                            child: Text(label),
+                          );
+                        }).toList(),
+                        onChanged: (idx) async {
+                          if (idx != null) {
+                            setState(() {
+                              selectedProfileIndex = idx;
+                              profileNickname = profiles[idx]['nickname'] ?? '';
+                              nicknameCtrl.text = profileNickname;
+                              if (idx < profileNpubs.length) {
+                                currentNpub = profileNpubs[idx];
+                              }
+                            });
+                            _markDirty();
+                            await _saveSettings();
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: nicknameCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Profile nickname (optional)',
+                            filled: true,
+                            fillColor: Colors.black.withOpacity(0.35),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+                              profiles[selectedProfileIndex]['nickname'] = value;
+                              _markDirty();
+                              _saveSettings();
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        tooltip: 'Remove profile',
+                        onPressed: profiles.length <= 1
+                            ? null
+                            : () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Remove profile?'),
+                                    content: const Text('This will remove the selected profile. Continue?'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+                                    ],
+                                  ),
+                                );
+                                if (confirmed == true) {
+                                  final removing = selectedProfileIndex;
+                                  setState(() {
+                                    profiles.removeAt(removing);
+                                    if (removing < profileNpubs.length) {
+                                      profileNpubs.removeAt(removing);
+                                    }
+                                    if (selectedProfileIndex >= profiles.length) {
+                                      selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+                                    }
+                                    profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                                    nicknameCtrl.text = profileNickname;
+                                  });
+                                  _markDirty();
+                                  await _saveSettings();
+                                  await _refreshProfileNpubs();
+                                }
+                              },
+                        icon: const Icon(Icons.delete_outline),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.06),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Key Actions',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                actionGroup(
+                  'Key management',
+                  [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _generateProfile,
+                      icon: const Icon(Icons.bolt_outlined),
+                      label: const Text('New Key'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _addProfile,
+                      icon: const Icon(Icons.input_outlined),
+                      label: const Text('Import nSec'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                actionGroup(
+                  'Utilities',
+                  [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _exportCurrentKey,
+                      icon: const Icon(Icons.vpn_key_outlined),
+                      label: const Text('Copy nSec'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _copyNpub,
+                      icon: const Icon(Icons.lock_outline),
+                      label: const Text('Copy nPub'),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: _showNpubQr,
+                      icon: const Icon(Icons.qr_code_2),
+                      label: const Text('Show QR'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Relays',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: relayInputCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Relay URL',
+                          filled: true,
+                          fillColor: Colors.black.withOpacity(0.35),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                          ),
+                          errorText: relayError.isEmpty ? null : relayError,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        onChanged: (_) {
+                          if (relayError.isNotEmpty) {
+                            setState(() => relayError = '');
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: _addRelay,
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Add'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(90, 44),
+                        backgroundColor: Colors.greenAccent.shade400,
+                        foregroundColor: Colors.black,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ...relays.map(relayRow),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
