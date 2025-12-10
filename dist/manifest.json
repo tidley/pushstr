@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Pushstr",
   "description": "Secure messaging via Nostr",
-  "version": "0.1.5",
+  "version": "0.0.3",
   "icons": {
     "48": "pushtr_48.png",
     "96": "pushtr_96.png",
