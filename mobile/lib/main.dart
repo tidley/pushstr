@@ -2462,7 +2462,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _hasPendingChanges = true;
-      _saveStatus = 'Unsaved changes';
+      _saveStatus = '';
     });
     if (schedule) {
       _scheduleAutoSave();
@@ -3193,39 +3193,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  _HoldDeleteIcon(
-                    active: _holdActive['delete_profile'] ?? false,
-                    progress: _holdProgressFor('delete_profile'),
-                    onTap: () {
-                      if (_hasPendingChanges && !_isSaving) {
-                        _saveSettings();
-                      } else {
-                        _showHoldWarning('Hold 5s to delete profile');
-                      }
-                    },
-                    onHoldStart: () {
-                      if (_hasPendingChanges || _isSaving || profiles.length <= 1) return;
-                      _startHoldAction('delete_profile', () async {
-                        final removing = selectedProfileIndex;
-                        setState(() {
-                          profiles.removeAt(removing);
-                          if (removing < profileNpubs.length) {
-                            profileNpubs.removeAt(removing);
-                          }
-                          if (selectedProfileIndex >= profiles.length) {
-                            selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                          }
-                          profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                          nicknameCtrl.text = profileNickname;
-                        });
-                        _hasPendingChanges = false;
-                        _saveStatus = 'Saved';
-                        await _saveSettings();
-                        await _refreshProfileNpubs();
-                        _cancelHoldAction('delete_profile');
-                      }, countdownLabel: 'Hold to delete profile');
-                    },
-                    onHoldEnd: () => _cancelHoldAction('delete_profile'),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 150),
+                    child: (_hasPendingChanges && !_isSaving)
+                        ? IconButton.filled(
+                            key: const ValueKey('save_profile'),
+                            onPressed: _saveSettings,
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.greenAccent.shade400,
+                              foregroundColor: Colors.black,
+                              shape: const CircleBorder(),
+                              padding: const EdgeInsets.all(10),
+                            ),
+                            icon: const Icon(Icons.check, size: 22),
+                            tooltip: 'Save profile',
+                          )
+                        : _HoldDeleteIcon(
+                            active: _holdActive['delete_profile'] ?? false,
+                            progress: _holdProgressFor('delete_profile'),
+                            onTap: () => _showHoldWarning('Hold 5s to delete profile'),
+                            onHoldStart: () {
+                              if (_isSaving || profiles.length <= 1) return;
+                              _startHoldAction('delete_profile', () async {
+                                final removing = selectedProfileIndex;
+                                setState(() {
+                                  profiles.removeAt(removing);
+                                  if (removing < profileNpubs.length) {
+                                    profileNpubs.removeAt(removing);
+                                  }
+                                  if (selectedProfileIndex >= profiles.length) {
+                                    selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+                                  }
+                                  profileNickname =
+                                      profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                                  nicknameCtrl.text = profileNickname;
+                                });
+                                _hasPendingChanges = false;
+                                _saveStatus = 'Saved';
+                                await _saveSettings();
+                                await _refreshProfileNpubs();
+                                _cancelHoldAction('delete_profile');
+                              }, countdownLabel: 'Hold to delete profile');
+                            },
+                            onHoldEnd: () => _cancelHoldAction('delete_profile'),
+                          ),
                   ),
                     ],
                   ),
