@@ -2148,10 +2148,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _hasPendingChanges = false;
   String _saveStatus = 'Saved';
   Color _saveStatusColor = Colors.greenAccent.shade200;
+  bool _relayInputValid = false;
+  Timer? _nsecCopyTimer;
+  double _nsecCopyProgress = 0;
+  bool _nsecHoldActive = false;
+  static const int _nsecHoldMillis = 10000;
 
   @override
   void initState() {
     super.initState();
+    relayInputCtrl.addListener(_updateRelayValidity);
     _loadSettings();
   }
 
@@ -2159,6 +2165,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     relayInputCtrl.dispose();
     nicknameCtrl.dispose();
+    _nsecCopyTimer?.cancel();
     super.dispose();
   }
 
@@ -2225,6 +2232,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _isSaving = false;
         _saveStatus = 'Saved';
         _saveStatusColor = Colors.greenAccent.shade200;
+        _relayInputValid = _isRelayInputValid(relayInputCtrl.text);
       });
     }
     _probeAllRelays(loadedRelays);
@@ -2237,6 +2245,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _saveStatus = 'Unsaved changes';
       _saveStatusColor = Colors.amber.shade300;
     });
+  }
+
+  bool _isRelayInputValid(String relay) {
+    final trimmed = relay.trim();
+    return trimmed.isNotEmpty && (trimmed.startsWith('ws://') || trimmed.startsWith('wss://'));
+  }
+
+  void _updateRelayValidity() {
+    final valid = _isRelayInputValid(relayInputCtrl.text);
+    if (_relayInputValid != valid && mounted) {
+      setState(() {
+        _relayInputValid = valid;
+      });
+    }
   }
 
   Future<void> _handleSaveAction() async {
@@ -2267,14 +2289,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _saveStatus = 'Saving...';
       _saveStatusColor = Colors.amber.shade300;
     });
-    try {
-      final prefs = await SharedPreferences.getInstance();
+      try {
+        final prefs = await SharedPreferences.getInstance();
 
-      await prefs.setStringList(
-        'profiles',
-        profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
-      );
-      await prefs.setInt('selected_profile_index', selectedProfileIndex);
+        await prefs.setStringList(
+          'profiles',
+          profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
+        );
+        await prefs.setInt('selected_profile_index', selectedProfileIndex);
 
       if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
         final selectedNsec = profiles[selectedProfileIndex]['nsec']!;
@@ -2455,15 +2477,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _warnCopyNpub() {
+  void _warnCopyNsec() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Security tip: do not share your npub casually. Long-press for 3 seconds to copy.'),
-        duration: Duration(milliseconds: 1600),
+        content: Text('Security tip: do not share your nsec. Long-press for 10 seconds to copy.'),
+        duration: Duration(milliseconds: 2000),
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  void _startNsecHold() {
+    _nsecCopyTimer?.cancel();
+    setState(() {
+      _nsecHoldActive = true;
+      _nsecCopyProgress = 0;
+    });
+    final start = DateTime.now();
+    _nsecCopyTimer = Timer.periodic(const Duration(milliseconds: 120), (t) {
+      final elapsed = DateTime.now().difference(start).inMilliseconds;
+      final progress = (elapsed / _nsecHoldMillis).clamp(0.0, 1.0);
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() {
+        _nsecCopyProgress = progress;
+      });
+      if (progress >= 1) {
+        _finishNsecHold();
+      }
+    });
+  }
+
+  void _finishNsecHold() {
+    _nsecCopyTimer?.cancel();
+    _nsecCopyTimer = null;
+    if (!mounted) return;
+    setState(() {
+      _nsecHoldActive = false;
+      _nsecCopyProgress = 1;
+    });
+    _exportCurrentKey();
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        setState(() {
+          _nsecCopyProgress = 0;
+        });
+      }
+    });
+  }
+
+  void _cancelNsecHold() {
+    _nsecCopyTimer?.cancel();
+    _nsecCopyTimer = null;
+    if (!mounted) return;
+    setState(() {
+      _nsecHoldActive = false;
+      _nsecCopyProgress = 0;
+    });
   }
 
   Future<void> _showNpubQr() async {
@@ -2586,12 +2659,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _addRelay() async {
-    final relay = relayInputCtrl.text.trim();
-    setState(() => relayError = '');
-    if (relay.isEmpty || !(relay.startsWith('ws://') || relay.startsWith('wss://'))) {
-      setState(() => relayError = 'Enter a valid ws:// or wss:// URL');
-      return;
-    }
+      final relay = relayInputCtrl.text.trim();
+      setState(() => relayError = '');
+      if (relay.isEmpty || !(relay.startsWith('ws://') || relay.startsWith('wss://'))) {
+        setState(() => relayError = 'Enter a valid ws:// or wss:// URL');
+        return;
+      }
     if (relays.contains(relay)) {
       setState(() => relayError = 'Relay already added');
       return;
@@ -2636,10 +2709,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final sectionDecoration = BoxDecoration(
       color: Colors.grey.shade900,
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: Colors.greenAccent.withOpacity(0.32)),
+      border: Border.all(color: Colors.greenAccent.withOpacity(0.2)),
       boxShadow: [
-        BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 12, offset: const Offset(0, 8)),
-        BoxShadow(color: Colors.greenAccent.withOpacity(0.08), blurRadius: 10, spreadRadius: 1),
+        BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 8, offset: const Offset(0, 6)),
+        BoxShadow(color: Colors.greenAccent.withOpacity(0.04), blurRadius: 8, spreadRadius: 0.5),
       ],
     );
 
@@ -2739,13 +2812,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Expanded(
               child: Text(
                 relay,
-                style: const TextStyle(fontSize: 13),
+                style: const TextStyle(fontSize: 14),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             IconButton(
               tooltip: 'Remove relay',
-              icon: const Icon(Icons.delete_outline, size: 21),
+              icon: const Icon(Icons.delete_outline, size: 18),
               style: IconButton.styleFrom(
                 backgroundColor: Colors.white.withOpacity(0.05),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -2804,11 +2877,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     )
                   : const Icon(Icons.save_outlined, size: 20),
-              label: Text(_isSaving ? 'Saving' : 'Save'),
-            ),
+            label: Text(_isSaving ? 'Saving' : 'Save'),
           ),
-        ],
-      ),
+        ),
+      ],
+    ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2822,7 +2895,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'Profile',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
                 if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) ...[
                   InputDecorator(
                     decoration: InputDecoration(
@@ -2881,7 +2954,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
                   Row(
                     children: [
                       Expanded(
@@ -2973,16 +3046,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actionGroup(
                   'Utilities',
                   [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
-                      onPressed: _exportCurrentKey,
-                      icon: const Icon(Icons.vpn_key_outlined, size: 20),
-                      label: const Text('Copy nSec'),
+                    GestureDetector(
+                      onLongPressStart: (_) => _startNsecHold(),
+                      onLongPressEnd: (_) => _cancelNsecHold(),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final radius = BorderRadius.circular(10);
+                          return Stack(
+                            alignment: Alignment.centerLeft,
+                            children: [
+                              Positioned.fill(
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: _nsecCopyProgress.clamp(0.0, 1.0),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.14),
+                                      borderRadius: radius,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              SizedBox(
+                                width: constraints.maxWidth,
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                                  onPressed: _warnCopyNsec,
+                                  icon: const Icon(Icons.vpn_key_outlined, size: 22),
+                                  label: const Text('Copy nSec'),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
-                      onPressed: _warnCopyNpub,
-                      onLongPress: _copyNpub,
+                      onPressed: _copyNpub,
                       icon: const Icon(Icons.lock_outline, size: 22),
                       label: const Text('Copy nPub'),
                     ),
@@ -3031,12 +3132,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           if (relayError.isNotEmpty) {
                             setState(() => relayError = '');
                           }
+                          _updateRelayValidity();
                         },
                       ),
                     ),
                     const SizedBox(width: 8),
                     FilledButton.icon(
-                      onPressed: _addRelay,
+                      onPressed: _relayInputValid ? _addRelay : null,
                       icon: const Icon(Icons.add_rounded, size: 20),
                       label: const Text('Add'),
                       style: FilledButton.styleFrom(
