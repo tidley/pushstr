@@ -1198,18 +1198,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildSendToDropdown({bool inAppBar = false}) {
+    final showDetails = !inAppBar;
     final contactItems = contacts
         .map(
-          (c) => DropdownMenuItem<String>(
-            value: c['pubkey'] ?? '',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(c['nickname'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
-                Text(_short(c['pubkey'] ?? ''), style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
-              ],
-            ),
-          ),
+          (c) {
+            final nickname = c['nickname'] ?? '';
+            final pubkey = c['pubkey'] ?? '';
+            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+            final secondary = _short(pubkey);
+            final child = showDetails
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(primary, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(secondary, style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
+                    ],
+                  )
+                : Text(primary, overflow: TextOverflow.ellipsis);
+
+            return DropdownMenuItem<String>(
+              value: pubkey,
+              child: child,
+            );
+          },
         )
         .toList();
     final selectedValue =
@@ -1219,6 +1231,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       value: selectedValue,
       isExpanded: true,
       isDense: inAppBar,
+      itemHeight: showDetails ? kMinInteractiveDimension : null,
       decoration: inAppBar
           ? const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero)
           : const InputDecoration(
@@ -1226,6 +1239,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               border: OutlineInputBorder(),
               contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
+      selectedItemBuilder: (_) => contacts
+          .map((c) {
+            final nickname = c['nickname'] ?? '';
+            final pubkey = c['pubkey'] ?? '';
+            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: Text(primary, overflow: TextOverflow.ellipsis),
+            );
+          })
+          .toList(),
       hint: const Text('Select a contact'),
       items: contactItems,
       onChanged: contactItems.isEmpty
