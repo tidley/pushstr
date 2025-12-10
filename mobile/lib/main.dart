@@ -34,6 +34,45 @@ String _deriveNpub(String nsec) {
   }
 }
 
+class _HoldDeleteIcon extends StatelessWidget {
+  final bool active;
+  final double progress;
+  final VoidCallback onTap;
+  final VoidCallback onHoldStart;
+  final VoidCallback onHoldEnd;
+
+  const _HoldDeleteIcon({
+    required this.active,
+    required this.progress,
+    required this.onTap,
+    required this.onHoldStart,
+    required this.onHoldEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = active ? (1 - 0.25 * progress.clamp(0, 1)) : 1.0;
+    return GestureDetector(
+      onTap: onTap,
+      onLongPressStart: (_) => onHoldStart(),
+      onLongPressEnd: (_) => onHoldEnd(),
+      child: AnimatedScale(
+        scale: scale,
+        duration: const Duration(milliseconds: 120),
+        child: IconButton(
+          icon: const Icon(Icons.delete),
+          onPressed: null,
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            visualDensity: const VisualDensity(horizontal: 0, vertical: -1),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ExternalLibrary? externalLibrary;
@@ -90,6 +129,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _listening = false;
   bool _didInitRust = false;
   // StreamSubscription? _intentDataStreamSubscription;
+  final Map<String, Timer> _holdTimersHome = {};
+  final Map<String, double> _holdProgressHome = {};
+  final Map<String, bool> _holdActiveHome = {};
+  static const int _holdMillis = 5000;
 
   // Session-based decryption caching
   final Map<String, Uint8List> _decryptedMediaCache = {};
@@ -129,6 +172,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     _scrollController.dispose();
     _messageFocus.dispose();
+    for (final t in _holdTimersHome.values) {
+      t.cancel();
+    }
     WidgetsBinding.instance.removeObserver(this);
     // _intentDataStreamSubscription?.cancel();
     super.dispose();
@@ -336,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       for (final pubkey in incomingPubkeys) {
         if (!contacts.any((c) => c['pubkey'] == pubkey)) {
-          final newContact = {'pubkey': pubkey!, 'nickname': pubkey.substring(0, 8)};
+          final newContact = {'pubkey': pubkey!, 'nickname': ''};
           contacts.add(newContact);
         }
       }
@@ -353,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         messages = merged;
         lastError = null;
+        contacts = _dedupeContacts(contacts);
         _sortContactsByActivity();
       });
       _ensureSelectedContact();
@@ -576,7 +623,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
 
-    final nicknameCtrl = TextEditingController(text: _short(input));
+    final nicknameCtrl = TextEditingController(text: '');
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -675,7 +722,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
             for (final pubkey in incomingPubkeys) {
               if (!contacts.any((c) => c['pubkey'] == pubkey)) {
-                final newContact = {'pubkey': pubkey!, 'nickname': pubkey.substring(0, 8)};
+                final newContact = {'pubkey': pubkey!, 'nickname': ''};
                 contacts.add(newContact);
               }
             }
@@ -683,6 +730,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               messages = _mergeMessages([...messages, ...newMessages]);
               lastError = null;
+              contacts = _dedupeContacts(contacts);
               _sortContactsByActivity();
             });
             _ensureSelectedContact();
@@ -1117,17 +1165,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         tooltip: 'Edit nickname',
                         onPressed: () => _editContact(context, contact),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () async {
-                          setState(() {
-                            contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
-                            if (selectedContact == contact['pubkey']) {
-                              selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-                            }
+                      _HoldDeleteIcon(
+                        active: _holdActiveHome['delete_contact_${contact['pubkey']}'] ?? false,
+                        progress: _holdProgressHomeFor('delete_contact_${contact['pubkey']}'),
+                        onTap: () => _showHoldWarningHome('Hold 5s to delete contact'),
+                        onHoldStart: () {
+                          _startHoldActionHome('delete_contact_${contact['pubkey']}', () async {
+                            setState(() {
+                              contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
+                              if (selectedContact == contact['pubkey']) {
+                                selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+                              }
+                            });
+                            await _saveContacts();
+                            _cancelHoldActionHome('delete_contact_${contact['pubkey']}');
                           });
-                          await _saveContacts();
                         },
+                        onHoldEnd: () => _cancelHoldActionHome('delete_contact_${contact['pubkey']}'),
                       ),
                     ],
                   ),
@@ -2033,6 +2087,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     return null;
   }
+
+  // Home screen hold helpers
+  void _startHoldActionHome(String key, VoidCallback onComplete) {
+    _holdTimersHome[key]?.cancel();
+    final start = DateTime.now();
+    setState(() {
+      _holdActiveHome[key] = true;
+      _holdProgressHome[key] = 0;
+    });
+    _holdTimersHome[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
+      final elapsed = DateTime.now().difference(start).inMilliseconds;
+      final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() {
+        _holdProgressHome[key] = progress;
+      });
+      if (progress >= 1) {
+        t.cancel();
+        _holdTimersHome.remove(key);
+        setState(() {
+          _holdActiveHome[key] = false;
+        });
+        onComplete();
+      }
+    });
+  }
+
+  void _cancelHoldActionHome(String key) {
+    _holdTimersHome[key]?.cancel();
+    _holdTimersHome.remove(key);
+    if (!mounted) return;
+    setState(() {
+      _holdActiveHome[key] = false;
+      _holdProgressHome[key] = 0;
+    });
+  }
+
+  double _holdProgressHomeFor(String key) => _holdProgressHome[key] ?? 0;
+
+  void _showHoldWarningHome(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(milliseconds: 1600),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 }
 
 class _PendingAttachment {
@@ -2171,6 +2277,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _nsecCopied = false;
   bool _npubCopied = false;
   Timer? _copyResetTimer;
+  Timer? _autoSaveTimer;
+  final Map<String, Timer> _holdTimers = {};
+  final Map<String, double> _holdProgress = {};
+  final Map<String, bool> _holdActive = {};
+  static const int _holdMillis = 5000;
 
   @override
   void initState() {
@@ -2184,6 +2295,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     relayInputCtrl.dispose();
     nicknameCtrl.dispose();
     _copyResetTimer?.cancel();
+    _autoSaveTimer?.cancel();
+    for (final t in _holdTimers.values) {
+      t.cancel();
+    }
     super.dispose();
   }
 
@@ -2263,6 +2378,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _saveStatus = 'Unsaved changes';
       _saveStatusColor = Colors.amber.shade300;
     });
+    _scheduleAutoSave();
   }
 
   bool _isRelayInputValid(String relay) {
@@ -2502,6 +2618,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _npubCopied = false;
         _nsecCopied = false;
       });
+    });
+  }
+
+  void _startHoldAction(String key, VoidCallback onComplete) {
+    _holdTimers[key]?.cancel();
+    final start = DateTime.now();
+    setState(() {
+      _holdActive[key] = true;
+      _holdProgress[key] = 0;
+    });
+    _holdTimers[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
+      final elapsed = DateTime.now().difference(start).inMilliseconds;
+      final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() {
+        _holdProgress[key] = progress;
+      });
+      if (progress >= 1) {
+        t.cancel();
+        _holdTimers.remove(key);
+        setState(() {
+          _holdActive[key] = false;
+        });
+        onComplete();
+      }
+    });
+  }
+
+  void _cancelHoldAction(String key) {
+    _holdTimers[key]?.cancel();
+    _holdTimers.remove(key);
+    if (!mounted) return;
+    setState(() {
+      _holdActive[key] = false;
+      _holdProgress[key] = 0;
+    });
+  }
+
+  double _holdProgressFor(String key) => _holdProgress[key] ?? 0;
+
+  void _showHoldWarning(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(milliseconds: 1600),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _scheduleAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(milliseconds: 900), () {
+      if (_hasPendingChanges && !_isSaving) {
+        _saveSettings();
+      }
     });
   }
 
@@ -2782,27 +2958,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            IconButton(
-              tooltip: 'Remove relay',
-              icon: const Icon(Icons.delete_outline, size: 18),
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.05),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                visualDensity: const VisualDensity(horizontal: 0, vertical: -1),
-              ),
-              onPressed: () async {
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Remove relay?'),
-                    content: Text('Remove $relay?'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
-                    ],
-                  ),
-                );
-                if (confirmed == true) {
+            _HoldDeleteIcon(
+              active: _holdActive['relay_$relay'] ?? false,
+              progress: _holdProgressFor('relay_$relay'),
+              onTap: () => _showHoldWarning('Hold 5s to remove relay'),
+              onHoldStart: () {
+                _startHoldAction('relay_$relay', () async {
                   setState(() {
                     relays.remove(relay);
                     relayStatuses.remove(relay);
@@ -2810,8 +2971,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   });
                   _markDirty();
                   await _saveSettings();
-                }
+                  _cancelHoldAction('relay_$relay');
+                });
               },
+              onHoldEnd: () => _cancelHoldAction('relay_$relay'),
             ),
           ],
         ),
@@ -2821,33 +2984,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pushstr Settings'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilledButton.icon(
-              onPressed: (!_hasPendingChanges || _isSaving) ? null : _handleSaveAction,
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.greenAccent.shade400,
-                foregroundColor: Colors.black,
-                disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
-                disabledForegroundColor: Colors.black.withOpacity(0.4),
-                minimumSize: const Size(94, 34),
-              ),
-              icon: _isSaving
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-                      ),
-                    )
-                  : const Icon(Icons.save_outlined, size: 20),
-            label: Text(_isSaving ? 'Saving' : 'Save'),
-          ),
-        ),
-      ],
-    ),
+        actions: const [],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2946,46 +3084,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      IconButton(
-                        tooltip: 'Remove profile',
-                        onPressed: profiles.length <= 1
-                            ? null
-                            : () async {
-                                final confirmed = await showDialog<bool>(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    title: const Text('Remove profile?'),
-                                    content: const Text('This will remove the selected profile. Continue?'),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
-                                    ],
-                                  ),
-                                );
-                                if (confirmed == true) {
-                                  final removing = selectedProfileIndex;
-                                  setState(() {
-                                    profiles.removeAt(removing);
-                                    if (removing < profileNpubs.length) {
-                                      profileNpubs.removeAt(removing);
-                                    }
-                                    if (selectedProfileIndex >= profiles.length) {
-                                      selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                                    }
-                                    profileNickname =
-                                        profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                                    nicknameCtrl.text = profileNickname;
-                                  });
-                                  _markDirty();
-                                  await _saveSettings();
-                                  await _refreshProfileNpubs();
-                                }
-                              },
-                        icon: const Icon(Icons.delete_outline),
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.06),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
+                      _HoldDeleteIcon(
+                        active: _holdActive['delete_profile'] ?? false,
+                        progress: _holdProgressFor('delete_profile'),
+                        onTap: () => _showHoldWarning('Hold 5s to delete profile'),
+                        onHoldStart: () {
+                          if (profiles.length <= 1) return;
+                          _startHoldAction('delete_profile', () async {
+                            final removing = selectedProfileIndex;
+                            setState(() {
+                              profiles.removeAt(removing);
+                              if (removing < profileNpubs.length) {
+                                profileNpubs.removeAt(removing);
+                              }
+                              if (selectedProfileIndex >= profiles.length) {
+                                selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+                              }
+                              profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                              nicknameCtrl.text = profileNickname;
+                            });
+                            _markDirty();
+                            await _saveSettings();
+                            await _refreshProfileNpubs();
+                            _cancelHoldAction('delete_profile');
+                          });
+                        },
+                        onHoldEnd: () => _cancelHoldAction('delete_profile'),
                       ),
                     ],
                   ),
@@ -3012,14 +3136,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actionGroup(
                   'Utilities',
                   [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
-                      onPressed: () async {
+                    GestureDetector(
+                      onLongPressStart: (_) => _startHoldAction('copy_nsec', () async {
                         await _exportCurrentKey();
                         _setCopyState(nsec: true);
-                      },
-                      icon: const Icon(Icons.vpn_key_outlined, size: 20),
-                      label: Text(_nsecCopied ? 'Copied' : 'Copy nSec'),
+                        _cancelHoldAction('copy_nsec');
+                      }),
+                      onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
+                      onTap: () {},
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 120),
+                        opacity: 1.0,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                          onPressed: null,
+                          icon: const Icon(Icons.vpn_key_outlined, size: 20),
+                          label: Text(_nsecCopied ? 'Copied' : 'Hold 5s to copy nSec'),
+                        ),
+                      ),
                     ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
