@@ -57,8 +57,8 @@ class _HoldDeleteIcon extends StatelessWidget {
     final pulse = 0.5 + 0.5 * math.sin(math.pi * (1 + clamped * 4) * clamped);
     final intensity = (0.25 + 0.75 * pulse) * eased;
     final color = Color.lerp(Colors.white, Colors.redAccent.shade200, intensity.clamp(0, 1))!;
-    final scale = active ? (1.05 + 0.15 * eased) : 1.0;
-    final iconSize = 28.0 + 6.0 * eased;
+    final scale = active ? (1.0 + 0.12 * eased) : 1.0;
+    final iconSize = 24.0 + 4.0 * eased;
     return GestureDetector(
       onTap: onTap,
       onLongPressStart: (_) => onHoldStart(),
@@ -139,6 +139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, Timer> _holdTimersHome = {};
   final Map<String, double> _holdProgressHome = {};
   final Map<String, bool> _holdActiveHome = {};
+  final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 5000;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
@@ -1186,7 +1187,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         progress: _holdProgressHomeFor('delete_contact_${contact['pubkey']}'),
                         onTap: () => _showHoldWarningHome('Hold 5s to delete contact'),
                         onHoldStart: () {
-                          _startHoldActionHome('delete_contact_${contact['pubkey']}', () async {
+                          _startHoldActionHome(
+                            'delete_contact_${contact['pubkey']}',
+                            () async {
                             setState(() {
                               contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
                               if (selectedContact == contact['pubkey']) {
@@ -1195,7 +1198,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             });
                             await _saveContacts();
                             _cancelHoldActionHome('delete_contact_${contact['pubkey']}');
-                          });
+                            },
+                            countdownLabel: 'Hold to delete contact',
+                          );
                         },
                         onHoldEnd: () => _cancelHoldActionHome('delete_contact_${contact['pubkey']}'),
                       ),
@@ -2151,9 +2156,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // Home screen hold helpers
-  void _startHoldActionHome(String key, VoidCallback onComplete) {
+  void _startHoldActionHome(String key, VoidCallback onComplete, {String? countdownLabel}) {
     _holdTimersHome[key]?.cancel();
     final start = DateTime.now();
+    _holdLastSecondHome[key] = (_holdMillis / 1000).ceil();
     setState(() {
       _holdActiveHome[key] = true;
       _holdProgressHome[key] = 0;
@@ -2168,9 +2174,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _holdProgressHome[key] = progress;
       });
+      final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
+      if (countdownLabel != null && remainingSeconds != _holdLastSecondHome[key]) {
+        _holdLastSecondHome[key] = remainingSeconds;
+        _showHoldWarningHome('$countdownLabel (${remainingSeconds}s)');
+      }
       if (progress >= 1) {
         t.cancel();
         _holdTimersHome.remove(key);
+        _holdLastSecondHome.remove(key);
         setState(() {
           _holdActiveHome[key] = false;
         });
@@ -2182,6 +2194,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _cancelHoldActionHome(String key) {
     _holdTimersHome[key]?.cancel();
     _holdTimersHome.remove(key);
+    _holdLastSecondHome.remove(key);
     if (!mounted) return;
     setState(() {
       _holdActiveHome[key] = false;
@@ -2337,6 +2350,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Map<String, Timer> _holdTimers = {};
   final Map<String, double> _holdProgress = {};
   final Map<String, bool> _holdActive = {};
+  final Map<String, int> _holdLastSecond = {};
   static const int _holdMillis = 5000;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
@@ -2363,6 +2377,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    if (mounted) {
+      setState(() {
+        _isSaving = true;
+        _saveStatus = 'Loading...';
+        _saveStatusColor = Colors.amber.shade200;
+      });
+    }
     final prefs = await SharedPreferences.getInstance();
 
     // Load profiles
@@ -2463,13 +2484,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _saveStatus = 'No changes';
           _saveStatusColor = Colors.blueGrey.shade200;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No changes to save'),
-            duration: Duration(milliseconds: 1200),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _showThemedToast('No changes to save', preferTop: true);
       }
       return;
     }
@@ -2518,13 +2533,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _saveStatus = 'Saved';
         _saveStatusColor = Colors.greenAccent.shade200;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Settings saved'),
-          duration: Duration(milliseconds: 1400),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showThemedToast('Settings saved', preferTop: true);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2532,13 +2541,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _saveStatus = 'Save failed';
         _saveStatusColor = Colors.amber.shade300;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Save failed: $e'),
-          duration: const Duration(milliseconds: 1600),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showThemedToast('Save failed: $e', preferTop: true);
     }
   }
 
@@ -2721,9 +2724,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _startHoldAction(String key, VoidCallback onComplete) {
+  void _startHoldAction(String key, VoidCallback onComplete, {String? countdownLabel}) {
     _holdTimers[key]?.cancel();
     final start = DateTime.now();
+    _holdLastSecond[key] = (_holdMillis / 1000).ceil();
     setState(() {
       _holdActive[key] = true;
       _holdProgress[key] = 0;
@@ -2738,9 +2742,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _holdProgress[key] = progress;
       });
+      final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
+      if (countdownLabel != null && remainingSeconds != _holdLastSecond[key]) {
+        _holdLastSecond[key] = remainingSeconds;
+        _showHoldWarning('$countdownLabel (${remainingSeconds}s)');
+      }
       if (progress >= 1) {
         t.cancel();
         _holdTimers.remove(key);
+        _holdLastSecond.remove(key);
         setState(() {
           _holdActive[key] = false;
         });
@@ -2752,6 +2762,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _cancelHoldAction(String key) {
     _holdTimers[key]?.cancel();
     _holdTimers.remove(key);
+    _holdLastSecond.remove(key);
     if (!mounted) return;
     setState(() {
       _holdActive[key] = false;
@@ -3064,7 +3075,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _markDirty();
                   await _saveSettings();
                   _cancelHoldAction('relay_$relay');
-                });
+                }, countdownLabel: 'Hold to remove relay');
               },
               onHoldEnd: () => _cancelHoldAction('relay_$relay'),
             ),
@@ -3081,6 +3092,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (_isSaving)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _saveStatus,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
           Container(
             decoration: sectionDecoration,
             padding: const EdgeInsets.all(14),
@@ -3199,7 +3228,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             await _saveSettings();
                             await _refreshProfileNpubs();
                             _cancelHoldAction('delete_profile');
-                          });
+                          }, countdownLabel: 'Hold to delete profile');
                         },
                         onHoldEnd: () => _cancelHoldAction('delete_profile'),
                       ),
@@ -3317,16 +3346,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
+                    IconButton.filled(
                       onPressed: _relayInputValid ? _addRelay : null,
-                      icon: const Icon(Icons.add_rounded, size: 20),
-                      label: const Text('Add'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(90, 32),
+                      icon: const Icon(Icons.add_rounded, size: 22),
+                      style: IconButton.styleFrom(
                         backgroundColor: Colors.greenAccent.shade400,
                         foregroundColor: Colors.black,
                         disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
                         disabledForegroundColor: Colors.black.withOpacity(0.4),
+                        padding: const EdgeInsets.all(12),
+                        shape: const CircleBorder(),
                       ),
                     ),
                   ],
