@@ -612,25 +612,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Invalid contact QR: $e')),
-        );
+        _showThemedToast('Invalid contact QR: $e', preferTop: true);
       }
       return;
     }
     if (!RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(input)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('QR did not contain a valid pubkey')),
-        );
+        _showThemedToast('QR did not contain a valid pubkey', preferTop: true);
       }
       return;
     }
     if (contacts.any((c) => c['pubkey'] == input)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contact already exists')),
-        );
+        _showThemedToast('Contact already exists', preferTop: true);
       }
       return;
     }
@@ -677,9 +671,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     await _saveContacts();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact added')),
-      );
+      _showThemedToast('Contact added', preferTop: true);
     }
   }
 
@@ -687,9 +679,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final granted = await _ensureCameraPermission();
     if (!granted) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera permission required to scan QR')),
-        );
+        _showThemedToast('Camera permission required to scan QR', preferTop: true);
       }
       return null;
     }
@@ -1038,17 +1028,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open link')),
-      );
+      _showThemedToast('Could not open link', preferTop: true);
     }
   }
 
   Future<void> _attachImage() async {
     if (selectedContact == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a contact first')),
-      );
+      _showThemedToast('Select a contact first', preferTop: true);
       return;
     }
     try {
@@ -1070,9 +1056,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       _scrollToBottom();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Attach failed: $e')),
-      );
+      _showThemedToast('Attach failed: $e', preferTop: true);
     }
   }
 
@@ -1307,9 +1291,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onPressed: () {
                       final text = (m['content'] ?? '').toString();
                       Clipboard.setData(ClipboardData(text: text));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Message copied')),
-                      );
+                      _showThemedToast('Message copied', preferTop: true);
                     },
                   ),
                   if (blossomUrl != null)
@@ -1642,9 +1624,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to show QR: $e')),
-        );
+        _showThemedToast('Unable to show QR: $e', preferTop: true);
       }
     }
   }
@@ -1758,9 +1738,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   color: Colors.white,
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: 'Attachment (${mime})'));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Attachment copied')),
-                    );
+                    _showThemedToast('Attachment copied', preferTop: true);
                   },
                 ),
             ],
@@ -1804,9 +1782,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 color: Colors.white,
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: url));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Link copied')),
-                  );
+                  _showThemedToast('Link copied', preferTop: true);
                 },
               ),
             ],
@@ -1871,14 +1847,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               IconButton(
                 icon: const Icon(Icons.copy, size: 20),
                 color: Colors.white,
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: url));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Link copied')),
-                  );
-                },
-              ),
-            ],
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: url));
+                _showThemedToast('Link copied', preferTop: true);
+              },
+            ),
+          ],
           ),
         ],
       );
@@ -1935,14 +1909,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final file = File('${dir.path}/pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext');
       await file.writeAsBytes(bytes);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved to ${file.path}')),
-      );
+      _showThemedToast('Saved to ${file.path}', preferTop: true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Save failed: $e')),
-      );
+      _showThemedToast('Save failed: $e', preferTop: true);
     }
   }
 
