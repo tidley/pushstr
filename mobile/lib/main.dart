@@ -183,6 +183,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .where((c) => c['pubkey']!.isNotEmpty)
           .toList();
     });
+      _ensureSelectedContact();
 
       // Save nsec if it was generated
       if (savedNsec.isEmpty) {
@@ -337,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         messages = merged;
         lastError = null;
       });
+      _ensureSelectedContact();
 
       // Save messages to persist them
       await _saveMessages();
@@ -660,6 +662,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               messages = _mergeMessages([...messages, ...newMessages]);
               lastError = null;
             });
+            _ensureSelectedContact();
             await _saveMessages();
             if (_isNearBottom()) {
               _scrollToBottom();
@@ -673,6 +676,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     _listening = false;
+  }
+
+  void _ensureSelectedContact() {
+    if (selectedContact != null && contacts.any((c) => c['pubkey'] == selectedContact)) {
+      return;
+    }
+    String? best;
+    int bestTs = -1;
+    for (final m in messages) {
+      final contact = m['direction'] == 'out' ? (m['to'] as String?) : (m['from'] as String?);
+      if (contact == null || contact.isEmpty) continue;
+      if (!contacts.any((c) => c['pubkey'] == contact)) continue;
+      final ts = m['created_at'] is int ? m['created_at'] as int : 0;
+      if (ts > bestTs) {
+        bestTs = ts;
+        best = contact;
+      }
+    }
+    best ??= contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+    if (best != null && mounted) {
+      setState(() {
+        selectedContact = best;
+      });
+    }
   }
 
   List<Map<String, dynamic>> _mergeMessages(List<Map<String, dynamic>> incoming) {
@@ -904,6 +931,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 74,
         title: _buildSendToDropdown(inAppBar: true),
         actions: [
           IconButton(
@@ -942,19 +970,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.qr_code_2),
+                      icon: const Icon(Icons.qr_code_2, size: 32),
                       tooltip: 'Show my npub QR',
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                      constraints: const BoxConstraints.tightFor(width: 52, height: 52),
                       onPressed: _showMyNpubQr,
                     ),
                   ],
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-              child: Text('Contacts', style: Theme.of(context).textTheme.titleMedium),
             ),
             for (final contact in contacts)
               Dismissible(
@@ -991,11 +1015,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.delete_forever),
-                        tooltip: 'Delete conversation',
-                        onPressed: () => _deleteConversationFor(contact['pubkey']),
-                      ),
                       IconButton(
                         icon: const Icon(Icons.edit),
                         tooltip: 'Edit nickname',
@@ -1047,11 +1066,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          if (contacts.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-              child: _buildSendToDropdown(),
-            ),
           if (!isConnected)
             Container(
               color: Colors.orange.withValues(alpha: 0.2),
@@ -1253,36 +1267,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      selectedContact != null
-                          ? 'Sending to ${contacts.firstWhere((c) => c['pubkey'] == selectedContact)['nickname'] ?? _short(selectedContact!)}'
-                          : 'No contact selected',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Add contact',
-                    onPressed: () => _addContact(context),
-                    icon: const Icon(Icons.person_add_alt),
-                  ),
-                ],
-              ),
-              if (!contacts.any((c) => c['pubkey'] == selectedContact))
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    'Add or select a contact from the top bar',
-                    style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
-                  ),
-                ),
-              const SizedBox(height: 8),
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: messageCtrl,
                 builder: (context, value, _) {
                   final hasContent = value.text.trim().isNotEmpty || _pendingAttachment != null;
+                  final noContacts = contacts.isEmpty;
+                  final canSend = selectedContact != null && !noContacts;
                   return Row(
                     children: [
                       Expanded(
@@ -1307,10 +1297,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        icon: Icon(hasContent ? Icons.send : Icons.attach_file),
-                        onPressed: selectedContact == null
-                            ? null
-                            : () => hasContent ? _sendMessage() : _attachImage(),
+                        icon: Icon(
+                          noContacts
+                              ? Icons.person_add_alt
+                              : (hasContent ? Icons.send : Icons.attach_file),
+                        ),
+                        onPressed: noContacts
+                            ? () => _addContact(context)
+                            : (canSend
+                                ? () => hasContent ? _sendMessage() : _attachImage()
+                                : null),
                         style: IconButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.primary,
                           foregroundColor: Colors.black,
