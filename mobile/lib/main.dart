@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -15,25 +16,9 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-// TODO: Re-enable when API is stable
-// import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
-
-// Top-level function for compute() to derive npub from nsec
-String _deriveNpub(String nsec) {
-  try {
-    RustLib.init();
-  } catch (_) {
-    // Ignore double-init in isolate
-  }
-  try {
-    return api.initNostr(nsec: nsec);
-  } catch (_) {
-    return '';
-  }
-}
 
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
@@ -134,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool isConnected = false;
   bool _listening = false;
   bool _didInitRust = false;
+  final ImagePicker _imagePicker = ImagePicker();
   // StreamSubscription? _intentDataStreamSubscription;
   final Map<String, bool> _copiedMessages = {};
   final Map<String, Timer> _copiedMessageTimers = {};
@@ -1066,6 +1052,73 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _attachImage() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 88,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
+      setState(() {
+        _pendingAttachment = _PendingAttachment(
+          bytes: bytes,
+          mime: mime,
+          name: name,
+        );
+      });
+      _scrollToBottom();
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _showAttachChooser() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image),
+              title: const Text('Image'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachImage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file),
+              title: const Text('File'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachFile();
+              },
+            ),
+            const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _ensureRustInitialized() async {
     if (_didInitRust) return;
     try {
@@ -1511,7 +1564,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         onPressed: noContacts
                             ? () => _addContact(context)
                             : (canSend
-                                ? () => hasContent ? _sendMessage() : _attachFile()
+                                  ? () => hasContent
+                                        ? _sendMessage()
+                                        : _showAttachChooser()
                                 : null),
                         style: IconButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.primary,
