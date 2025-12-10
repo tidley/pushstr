@@ -149,6 +149,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
     final savedNsec = prefs.getString('nostr_nsec') ?? '';
+    final profileIndex = prefs.getInt('selected_profile_index') ?? 0;
 
     // Handle shared content from Android intents
     _initShareListener();
@@ -184,6 +185,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .toList();
       _sortContactsByActivity();
     });
+      // Load profile-specific stored data if present (fallback to shared above)
+      await _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true);
       _ensureSelectedContact();
 
       // Save nsec if it was generated
@@ -202,10 +205,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+  String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+
   Future<void> _saveMessages() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('messages', jsonEncode(messages));
+      final key = nsec != null ? _messagesKeyFor(nsec!) : 'messages';
+      await prefs.setString(key, jsonEncode(messages));
+      if (nsec != null) {
+        // Clear legacy shared storage to avoid cross-profile bleed
+        await prefs.remove('messages');
+      }
     } catch (e) {
       print('Failed to save messages: $e');
     }
@@ -273,10 +284,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _saveContacts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final key = nsec != null ? _contactsKeyFor(nsec!) : 'contacts';
       await prefs.setStringList(
-        'contacts',
+        key,
         contacts.map((c) => '${c['nickname'] ?? ''}|${c['pubkey'] ?? ''}').toList(),
       );
+      if (nsec != null) {
+        await prefs.remove('contacts');
+      }
     } catch (e) {
       print('Failed to save contacts: $e');
     }
@@ -344,6 +359,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       // Save messages to persist them
       await _saveMessages();
+      await _saveContacts();
       if (added && _isNearBottom()) {
         _scrollToBottom();
       }
@@ -484,6 +500,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
               setState(() {
                 contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': pubkey});
+                _sortContactsByActivity();
               });
 
               await _saveContacts();
@@ -595,6 +612,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final nickname = nicknameCtrl.text.trim().isEmpty ? _short(input) : nicknameCtrl.text.trim();
     setState(() {
       contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': input});
+      _sortContactsByActivity();
     });
     await _saveContacts();
     if (mounted) {
@@ -667,6 +685,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             });
             _ensureSelectedContact();
             await _saveMessages();
+            await _saveContacts();
             if (_isNearBottom()) {
               _scrollToBottom();
             }
@@ -725,6 +744,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final tsB = _lastActivityFor(b['pubkey'] as String?);
       return tsB.compareTo(tsA);
     });
+  }
+
+  Future<void> _loadLocalProfileData({required int profileIndex, bool overrideLoaded = false}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final profileList = prefs.getStringList('profiles') ?? [];
+    String? profileNsec;
+    if (profileIndex >= 0 && profileIndex < profileList.length) {
+      final parts = profileList[profileIndex].split('|');
+      profileNsec = parts.isNotEmpty ? parts[0] : null;
+    } else {
+      profileNsec = nsec;
+    }
+    final contactsKey = profileNsec != null && profileNsec.isNotEmpty ? _contactsKeyFor(profileNsec) : 'contacts';
+    final messagesKey = profileNsec != null && profileNsec.isNotEmpty ? _messagesKeyFor(profileNsec) : 'messages';
+
+    final savedContacts = prefs.getStringList(contactsKey) ?? [];
+    final savedMessages = prefs.getString(messagesKey);
+    List<Map<String, dynamic>> loadedMessages = [];
+    if (savedMessages != null && savedMessages.isNotEmpty) {
+      try {
+        final List<dynamic> msgsList = jsonDecode(savedMessages);
+        loadedMessages = msgsList.cast<Map<String, dynamic>>();
+      } catch (e) {
+        print('Failed to load saved messages for profile: $e');
+      }
+    }
+
+    final loadedContacts = savedContacts
+        .map((c) {
+          final parts = c.split('|');
+          return <String, dynamic>{'nickname': parts[0], 'pubkey': parts.length > 1 ? parts[1] : ''};
+        })
+        .where((c) => c['pubkey']!.isNotEmpty)
+        .toList();
+
+    if (!mounted) return;
+    setState(() {
+      if (overrideLoaded || contacts.isEmpty) {
+        contacts = loadedContacts;
+      }
+      if (overrideLoaded || messages.isEmpty) {
+        messages = loadedMessages;
+      }
+      _sortContactsByActivity();
+    });
+    _ensureSelectedContact();
   }
 
   List<Map<String, dynamic>> _mergeMessages(List<Map<String, dynamic>> incoming) {
@@ -1434,6 +1499,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     if (didProfileChange) {
+      await _loadLocalProfileData(profileIndex: currentProfileIndex, overrideLoaded: true);
       // Restart listener and fetch messages
       _startDmListener();
       _fetchMessages();
@@ -2389,6 +2455,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  void _warnCopyNpub() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Security tip: do not share your npub casually. Long-press for 3 seconds to copy.'),
+        duration: Duration(milliseconds: 1600),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _showNpubQr() async {
     // Use cached currentNpub which reflects the selected profile
     final npubToShow = currentNpub.isNotEmpty
@@ -2573,10 +2650,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text(
             label.toUpperCase(),
             style: const TextStyle(
-              fontSize: 12,
-              letterSpacing: 0.08,
+              fontSize: 13,
+              letterSpacing: 0.4,
               color: Colors.white70,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 6),
@@ -2614,10 +2691,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
 
+    String _relayStatusLabel(String relay) {
+      final status = relayStatuses[relay];
+      switch (status) {
+        case RelayStatus.ok:
+          return 'Good';
+        case RelayStatus.warn:
+          return 'Offline';
+        case RelayStatus.loading:
+        default:
+          return 'Checking';
+      }
+    }
+
     Widget relayRow(String relay) {
       return Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.35),
           borderRadius: BorderRadius.circular(10),
@@ -2641,6 +2731,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(width: 10),
+            Text(
+              _relayStatusLabel(relay),
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+            ),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
                 relay,
@@ -2650,11 +2745,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             IconButton(
               tooltip: 'Remove relay',
-              icon: const Icon(Icons.delete_outline, size: 20),
+              icon: const Icon(Icons.delete_outline, size: 21),
               style: IconButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.08),
+                backgroundColor: Colors.white.withOpacity(0.05),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                visualDensity: VisualDensity.compact,
+                visualDensity: const VisualDensity(horizontal: 0, vertical: -1),
               ),
               onPressed: () async {
                 final confirmed = await showDialog<bool>(
@@ -2697,7 +2792,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 foregroundColor: Colors.black,
                 disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
                 disabledForegroundColor: Colors.black.withOpacity(0.4),
-                minimumSize: const Size(94, 40),
+                minimumSize: const Size(94, 34),
               ),
               icon: _isSaving
                   ? SizedBox(
@@ -2708,7 +2803,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
                       ),
                     )
-                  : const Icon(Icons.save_outlined, size: 18),
+                  : const Icon(Icons.save_outlined, size: 20),
               label: Text(_isSaving ? 'Saving' : 'Save'),
             ),
           ),
@@ -2725,16 +2820,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 const Text(
                   'Profile',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 6),
                 if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) ...[
                   InputDecorator(
                     decoration: InputDecoration(
                       labelText: 'Active profile',
                       filled: true,
                       fillColor: Colors.black.withOpacity(0.35),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -2801,6 +2896,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               borderRadius: BorderRadius.circular(12),
                               borderSide: BorderSide(color: Colors.greenAccent.shade200),
                             ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           ),
                           onChanged: (value) {
                             if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
@@ -2860,39 +2956,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'Key management',
                   [
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: _generateProfile,
-                      icon: const Icon(Icons.bolt_outlined),
+                      icon: const Icon(Icons.bolt_outlined, size: 20),
                       label: const Text('New Key'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: _addProfile,
-                      icon: const Icon(Icons.input_outlined),
+                      icon: const Icon(Icons.input_outlined, size: 20),
                       label: const Text('Import nSec'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 actionGroup(
                   'Utilities',
                   [
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: _exportCurrentKey,
-                      icon: const Icon(Icons.vpn_key_outlined),
+                      icon: const Icon(Icons.vpn_key_outlined, size: 20),
                       label: const Text('Copy nSec'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
-                      onPressed: _copyNpub,
-                      icon: const Icon(Icons.lock_outline),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      onPressed: _warnCopyNpub,
+                      onLongPress: _copyNpub,
+                      icon: const Icon(Icons.lock_outline, size: 22),
                       label: const Text('Copy nPub'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: _showNpubQr,
-                      icon: const Icon(Icons.qr_code_2),
+                      icon: const Icon(Icons.qr_code_2, size: 20),
                       label: const Text('Show QR'),
                     ),
                   ],
@@ -2940,17 +3037,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(width: 8),
                     FilledButton.icon(
                       onPressed: _addRelay,
-                      icon: const Icon(Icons.add_rounded),
+                      icon: const Icon(Icons.add_rounded, size: 20),
                       label: const Text('Add'),
                       style: FilledButton.styleFrom(
-                        minimumSize: const Size(90, 44),
+                        minimumSize: const Size(90, 32),
                         backgroundColor: Colors.greenAccent.shade400,
                         foregroundColor: Colors.black,
+                        disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
+                        disabledForegroundColor: Colors.black.withOpacity(0.4),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 ...relays.map(relayRow),
               ],
             ),
