@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -51,7 +52,13 @@ class _HoldDeleteIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scale = active ? (1 - 0.25 * progress.clamp(0, 1)) : 1.0;
+    final clamped = progress.clamp(0.0, 1.0);
+    final eased = Curves.easeIn.transform(clamped);
+    final pulse = 0.5 + 0.5 * math.sin(math.pi * (1 + clamped * 4) * clamped);
+    final intensity = (0.25 + 0.75 * pulse) * eased;
+    final color = Color.lerp(Colors.white, Colors.redAccent.shade200, intensity.clamp(0, 1))!;
+    final scale = active ? (1.05 + 0.15 * eased) : 1.0;
+    final iconSize = 28.0 + 6.0 * eased;
     return GestureDetector(
       onTap: onTap,
       onLongPressStart: (_) => onHoldStart(),
@@ -60,7 +67,7 @@ class _HoldDeleteIcon extends StatelessWidget {
         scale: scale,
         duration: const Duration(milliseconds: 120),
         child: IconButton(
-          icon: const Icon(Icons.delete),
+          icon: Icon(Icons.delete, color: color, size: iconSize),
           onPressed: null,
           style: IconButton.styleFrom(
             backgroundColor: Colors.transparent,
@@ -133,6 +140,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, double> _holdProgressHome = {};
   final Map<String, bool> _holdActiveHome = {};
   static const int _holdMillis = 5000;
+  OverlayEntry? _toastEntry;
+  Timer? _toastTimer;
 
   // Session-based decryption caching
   final Map<String, Uint8List> _decryptedMediaCache = {};
@@ -175,6 +184,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     for (final t in _holdTimersHome.values) {
       t.cancel();
     }
+    _toastTimer?.cancel();
+    _toastEntry?.remove();
     WidgetsBinding.instance.removeObserver(this);
     // _intentDataStreamSubscription?.cancel();
     super.dispose();
@@ -1150,7 +1161,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   await _saveContacts();
                 },
                 child: ListTile(
-                  title: Text(contact['nickname'] ?? ''),
+                  title: Text(
+                    () {
+                      final nickname = (contact['nickname'] ?? '').toString().trim();
+                      return nickname.isNotEmpty ? nickname : _short(contact['pubkey'] ?? '');
+                    }(),
+                  ),
                   subtitle: Text(_short(contact['pubkey'] ?? ''), style: const TextStyle(fontSize: 11)),
                   selected: selectedContact == contact['pubkey'],
                   onTap: () {
@@ -1578,9 +1594,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final npubValue = (npub != null && npub!.isNotEmpty) ? npub! : api.getNpub();
       if (!mounted) return;
       if (npubValue.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No npub available')),
-        );
+        _showThemedToast('No npub available', preferTop: true);
         return;
       }
       await showDialog(
@@ -2088,6 +2102,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return null;
   }
 
+  void _showThemedToast(String message, {bool preferTop = false}) {
+    _toastEntry?.remove();
+    _toastTimer?.cancel();
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    final theme = Theme.of(context);
+    final padding = MediaQuery.of(context).viewPadding;
+
+    _toastEntry = OverlayEntry(
+      builder: (_) => Positioned(
+        top: preferTop ? padding.top + 16 : null,
+        bottom: preferTop ? null : padding.bottom + 16,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.colorScheme.primary.withOpacity(0.8)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.45),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(_toastEntry!);
+    _toastTimer = Timer(const Duration(milliseconds: 1600), () {
+      _toastEntry?.remove();
+      _toastEntry = null;
+    });
+  }
+
   // Home screen hold helpers
   void _startHoldActionHome(String key, VoidCallback onComplete) {
     _holdTimersHome[key]?.cancel();
@@ -2131,13 +2193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showHoldWarningHome(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(milliseconds: 1600),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    _showThemedToast(message, preferTop: true);
   }
 }
 
@@ -2282,6 +2338,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Map<String, double> _holdProgress = {};
   final Map<String, bool> _holdActive = {};
   static const int _holdMillis = 5000;
+  OverlayEntry? _toastEntry;
+  Timer? _toastTimer;
 
   @override
   void initState() {
@@ -2299,6 +2357,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     for (final t in _holdTimers.values) {
       t.cancel();
     }
+    _toastTimer?.cancel();
+    _toastEntry?.remove();
     super.dispose();
   }
 
@@ -2577,12 +2637,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final nsec = profiles[selectedProfileIndex]['nsec']!;
     await Clipboard.setData(ClipboardData(text: nsec));
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('nsec copied to clipboard')),
-      );
-    }
   }
 
   Future<void> _copyNpub() async {
@@ -2595,9 +2649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (npubToCopy.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No npub available')),
-        );
+        _showThemedToast('No npub available', preferTop: true);
       }
       return;
     }
@@ -2618,6 +2670,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _npubCopied = false;
         _nsecCopied = false;
       });
+    });
+  }
+
+  void _showThemedToast(String message, {bool preferTop = false}) {
+    _toastEntry?.remove();
+    _toastTimer?.cancel();
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    final theme = Theme.of(context);
+    final padding = MediaQuery.of(context).viewPadding;
+
+    _toastEntry = OverlayEntry(
+      builder: (_) => Positioned(
+        top: preferTop ? padding.top + 16 : null,
+        bottom: preferTop ? null : padding.bottom + 16,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: theme.colorScheme.primary.withOpacity(0.8)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.45),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(_toastEntry!);
+    _toastTimer = Timer(const Duration(milliseconds: 1600), () {
+      _toastEntry?.remove();
+      _toastEntry = null;
     });
   }
 
@@ -2663,13 +2763,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showHoldWarning(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(milliseconds: 1600),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    _showThemedToast(message, preferTop: true);
   }
 
   void _scheduleAutoSave() {
@@ -2691,9 +2785,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (npubToShow.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No npub available')),
-        );
+        _showThemedToast('No npub available', preferTop: true);
       }
       return;
     }
@@ -3136,25 +3228,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actionGroup(
                   'Utilities',
                   [
-                    GestureDetector(
-                      onLongPressStart: (_) => _startHoldAction('copy_nsec', () async {
-                        await _exportCurrentKey();
-                        _setCopyState(nsec: true);
-                        _cancelHoldAction('copy_nsec');
-                      }),
-                      onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
-                      onTap: () {},
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 120),
-                        opacity: 1.0,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
-                          onPressed: null,
-                          icon: const Icon(Icons.vpn_key_outlined, size: 20),
-                          label: Text(_nsecCopied ? 'Copied' : 'Hold 5s to copy nSec'),
+                    Builder(builder: (context) {
+                      final holdActive = _holdActive['copy_nsec'] ?? false;
+                      final progress = _holdProgress['copy_nsec'] ?? 0.0;
+                      final remainingMs = (_holdMillis * (1 - progress)).clamp(0.0, _holdMillis.toDouble());
+                      final remainingSeconds = (remainingMs / 1000).ceil();
+                      final label = _nsecCopied
+                          ? 'Copied'
+                          : holdActive
+                              ? 'Hold ${remainingSeconds}s to copy nSec'
+                              : 'Hold 5s to copy nSec';
+                      return GestureDetector(
+                        onLongPressStart: (_) => _startHoldAction('copy_nsec', () async {
+                          await _exportCurrentKey();
+                          _setCopyState(nsec: true);
+                          _cancelHoldAction('copy_nsec');
+                        }),
+                        onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
+                        onTap: () {},
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 120),
+                          opacity: 1.0,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                            onPressed: null,
+                            icon: const Icon(Icons.vpn_key_outlined, size: 20),
+                            label: Text(label),
+                          ),
                         ),
-                      ),
-                    ),
+                      );
+                    }),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: () async {
