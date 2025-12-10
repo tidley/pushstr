@@ -1,3 +1,7 @@
+# 0.0.3 2025-12-10
+
+- Focussed mainly on mobile UI / UX
+
 # 0.0.2 2025-12-09
 
 - UI refresh for extension options and popup: redesigned settings cards/labels, grouped profile tools, floating labels, sticky save, updated copy/QR/buttons, and cleaned conversation actions and message copy/preview behaviors.

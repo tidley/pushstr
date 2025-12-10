@@ -1,4 +1,56 @@
+# Pushstr – Private, Secure, Instant Communication
+
+> **Pushstr is a fast, lightweight communication layer built on Nostr.**  
+> It is quick, secure, and anonymous if required — with no registration, no payment, and no central server.
+
+Generate an address and start communicating within seconds. All user data are created and stored locally, and can be backed up or restored as needed. Add a contact to begin sending, or simply share your address to receive messages. A minimal messaging interface surfaces activity from your contacts in real time.
+
+An address can be used for any duration and you may create unlimited parallel addresses to isolate conversations.  
+All messages are encrypted for the recipient and then encrypted again during transport, protecting both parties end-to-end.
+
+---
+
+## Core Use Cases
+
+### Simple chatting
+- Private conversations with friends or fully anonymous interactions.
+- Great for one-off contact: e.g., put a QR code on a poster to create a disposable inbound-only address.
+
+### Notes and file sharing
+- Install the browser extension and link it with your phone or another computer.
+- Send text, images, or arbitrary data privately and securely.
+
+### Secure, flexible file transfer
+- From text and JPEGs to MP3 or ZIP archives.
+- All files are encrypted for the recipient before transport.
+
+### Plan-A communications
+- Fast, lightweight stack enabling effortless, low-friction messaging.
+
+### Plan-B communications
+- Multi-relay, multiple-redundancy architecture for extremely high reliability and uptime.
+
+### Ephemeral profiles
+- Create as many profiles as there are stars in the sky without limitation*.  
+- Each profile may be used once or forever, depending on your threat model.
+
+> **\*** *There are approximately 10^53 times more possible Nostr keys than stars in the observable universe.*
+
+---
+
+## Communication Options
+
+| Type           | Security | Privacy | Reliability | Stability / Redundancy |
+|----------------|----------|---------|-------------|--------------------------|
+| Legacy apps    | Low      | Low     | High        | Low – single-provider failure = total outage |
+| Privacy apps   | Medium   | Medium  | Medium      | Low – centralised backend, Cloudflare-level outages |
+| Nostr          | High     | High    | High        | High – distributed relays, no single point of failure |
+| **Pushstr**    | **High** | **High** | **High**    | **Very High – multi-relay redundancy + client-side failover** |
+
+---
+
 # Pushstr - Pushbullet on Nostr
+
 
 Pushbullet-style messaging over Nostr Giftwrapped DMs. Runs as a Firefox/Chrome extension and as a mobile app (Android/iOS).
 
@@ -36,6 +88,8 @@ flutter pub get
 flutter run
 # Android release APK
 flutter build apk --release
+# Load to connected mobile
+flutter install --use-application-binary build/app/outputs/flutter-apk/app-release.apk
 ```
 - Optional Rust rebuild (refresh FFI + native libs):
 ```bash
