@@ -1421,7 +1421,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       selectedItemBuilder: (_) => contacts
           .map((c) {
             final pubkey = c['pubkey'] ?? '';
-        final primary = _short(pubkey);
+        final nickname = (c['nickname'] ?? '').toString().trim();
+        final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
             return Align(
               alignment: Alignment.centerLeft,
               child: Text(primary, overflow: TextOverflow.ellipsis),
@@ -2950,6 +2951,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     );
 
+    final textButtonStyle = ElevatedButton.styleFrom(
+      minimumSize: const Size(150, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    );
+
     Widget actionGroup(String label, List<Widget> buttons) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3254,13 +3260,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'Key management',
                   [
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: _generateProfile,
-                      icon: const Icon(Icons.bolt_outlined, size: 20),
+                      icon: const Icon(Icons.add, size: 22),
                     label: const Text('New Profile'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: _addProfile,
                       icon: const Icon(Icons.input_outlined, size: 20),
                     label: const Text('Import Profile (nSec)'),
@@ -3293,7 +3299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           duration: const Duration(milliseconds: 120),
                           opacity: 1.0,
                           child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                            style: textButtonStyle,
                             onPressed: null,
                             icon: const Icon(Icons.vpn_key_outlined, size: 20),
                             label: Text(label),
@@ -3302,16 +3308,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     }),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: () async {
                         await _copyNpub();
                         _setCopyState(npub: true);
                       },
-                      icon: const Icon(Icons.lock_outline, size: 22),
+                      icon: const Icon(Icons.mail_outline, size: 22),
                       label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: _showNpubQr,
                       icon: const Icon(Icons.qr_code_2, size: 20),
                       label: const Text('Show QR'),
