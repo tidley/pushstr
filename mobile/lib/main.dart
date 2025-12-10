@@ -2122,7 +2122,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return null;
   }
 
-  void _showThemedToast(String message, {bool preferTop = false}) {
+  void _showThemedToast(
+    String message, {
+    bool preferTop = false,
+    Duration? duration,
+  }) {
     _toastEntry?.remove();
     _toastTimer?.cancel();
     final overlay = Overlay.maybeOf(context);
@@ -2164,7 +2168,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
 
     overlay.insert(_toastEntry!);
-    _toastTimer = Timer(const Duration(milliseconds: 1600), () {
+    _toastTimer = Timer(duration ?? const Duration(milliseconds: 1600), () {
       _toastEntry?.remove();
       _toastEntry = null;
     });
@@ -2525,7 +2529,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hasPendingChanges = false;
         profileNickname = nicknameCtrl.text.trim();
       });
-      _showThemedToast('Settings saved', preferTop: true);
+      _showThemedToast(
+        'Saved',
+        preferTop: true,
+        duration: const Duration(milliseconds: 900),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2666,7 +2674,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _showThemedToast(String message, {bool preferTop = false}) {
+  void _showThemedToast(
+    String message, {
+    bool preferTop = false,
+    Duration? duration,
+  }) {
     _toastEntry?.remove();
     _toastTimer?.cancel();
     final overlay = Overlay.maybeOf(context);
@@ -2708,7 +2720,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     overlay.insert(_toastEntry!);
-    _toastTimer = Timer(const Duration(milliseconds: 1600), () {
+    _toastTimer = Timer(duration ?? const Duration(milliseconds: 1600), () {
       _toastEntry?.remove();
       _toastEntry = null;
     });
