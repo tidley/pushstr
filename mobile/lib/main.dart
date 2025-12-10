@@ -1205,17 +1205,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             final nickname = c['nickname'] ?? '';
             final pubkey = c['pubkey'] ?? '';
             final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
-            final secondary = _short(pubkey);
-            final child = showDetails
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(primary, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      Text(secondary, style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
-                    ],
-                  )
-                : Text(primary, overflow: TextOverflow.ellipsis);
+            final child = Text(primary, overflow: TextOverflow.ellipsis);
 
             return DropdownMenuItem<String>(
               value: pubkey,
