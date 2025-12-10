@@ -127,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, double> _holdProgressHome = {};
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
-  static const int _holdMillis = 5000;
+  static const int _holdMillis = 4000;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
@@ -1373,12 +1373,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           (c) {
             final nickname = c['nickname'] ?? '';
             final pubkey = c['pubkey'] ?? '';
-            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
-            final child = Text(primary, overflow: TextOverflow.ellipsis);
+      final primary = _short(pubkey);
+      final label = nickname.trim().isNotEmpty
+          ? '$primary · $nickname'
+          : primary;
 
             return DropdownMenuItem<String>(
               value: pubkey,
-              child: child,
+        child: Text(label, overflow: TextOverflow.ellipsis),
             );
           },
         )
@@ -1415,9 +1417,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
       selectedItemBuilder: (_) => contacts
           .map((c) {
-            final nickname = c['nickname'] ?? '';
             final pubkey = c['pubkey'] ?? '';
-            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+        final primary = _short(pubkey);
             return Align(
               alignment: Alignment.centerLeft,
               child: Text(primary, overflow: TextOverflow.ellipsis),
@@ -2350,7 +2351,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController nicknameCtrl = TextEditingController();
   bool _isSaving = false;
   bool _hasPendingChanges = false;
-  String _saveStatus = 'Saved';
   bool _relayInputValid = false;
   bool _nsecCopied = false;
   bool _npubCopied = false;
@@ -2451,7 +2451,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _hasPendingChanges = false;
         _isSaving = false;
-        _saveStatus = 'Saved';
         _relayInputValid = _isRelayInputValid(relayInputCtrl.text);
       });
     }
@@ -2462,7 +2461,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _hasPendingChanges = true;
-      _saveStatus = '';
     });
     if (schedule) {
       _scheduleAutoSave();
@@ -2488,14 +2486,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _isSaving = true;
     });
-      try {
-        final prefs = await SharedPreferences.getInstance();
+    _showThemedToast('Saving...', preferTop: true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-        await prefs.setStringList(
-          'profiles',
-          profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
-        );
-        await prefs.setInt('selected_profile_index', selectedProfileIndex);
+      await prefs.setStringList(
+        'profiles',
+        profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
+      );
+      await prefs.setInt('selected_profile_index', selectedProfileIndex);
 
       if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
         final selectedNsec = profiles[selectedProfileIndex]['nsec']!;
@@ -2520,14 +2519,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _isSaving = false;
         _hasPendingChanges = false;
-        _saveStatus = 'Saved';
+        profileNickname = nicknameCtrl.text.trim();
       });
       _showThemedToast('Settings saved', preferTop: true);
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isSaving = false;
-        _saveStatus = 'Save failed';
       });
       _showThemedToast('Save failed: $e', preferTop: true);
     }
@@ -3072,6 +3070,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
+    final nicknameDirty = nicknameCtrl.text.trim() != profileNickname;
+    final showProfileSave = !_isSaving && (_hasPendingChanges || nicknameDirty);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pushstr Settings'),
@@ -3080,24 +3081,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_isSaving)
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2.2),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    _saveStatus,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
           Container(
             decoration: sectionDecoration,
             padding: const EdgeInsets.all(14),
@@ -3129,18 +3112,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         items: profiles.asMap().entries.map((entry) {
                           final idx = entry.key;
                           final profile = entry.value;
-                          final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
-                              ? _shortNpub(profileNpubs[idx])
+                          final fullNpub =
+                              (idx < profileNpubs.length &&
+                                  profileNpubs[idx].isNotEmpty)
+                              ? profileNpubs[idx]
                               : '';
+                          final shortNpub = fullNpub.isNotEmpty
+                              ? _shortNpub(fullNpub)
+                              : 'Profile ${idx + 1}';
                           final nickname = (profile['nickname'] ?? '').trim();
-                          final baseLabel = npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}';
-                          final label = nickname.isNotEmpty ? '$baseLabel · $nickname' : baseLabel;
+                          final label = nickname.isNotEmpty
+                              ? '$shortNpub - $nickname'
+                              : shortNpub;
 
                           return DropdownMenuItem(
                             value: idx,
                             child: Text(label),
                           );
                         }).toList(),
+                        selectedItemBuilder: (ctx) {
+                          return profiles.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final fullNpub =
+                                (idx < profileNpubs.length &&
+                                    profileNpubs[idx].isNotEmpty)
+                                ? profileNpubs[idx]
+                                : '';
+                            final shortNpub = fullNpub.isNotEmpty
+                                ? _shortNpub(fullNpub)
+                                : 'Profile ${idx + 1}';
+                            return Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(shortNpub),
+                            );
+                          }).toList();
+                        },
                         onChanged: (idx) async {
                           if (idx != null && idx < profiles.length && idx != selectedProfileIndex) {
                             final nsec = profiles[idx]['nsec'] ?? '';
@@ -3195,7 +3201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(width: 10),
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 150),
-                    child: (_hasPendingChanges && !_isSaving)
+                        child: showProfileSave
                         ? IconButton.filled(
                             key: const ValueKey('save_profile'),
                             onPressed: _saveSettings,
@@ -3228,8 +3234,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
                                   nicknameCtrl.text = profileNickname;
                                 });
-                                _hasPendingChanges = false;
-                                _saveStatus = 'Saved';
+                                      _hasPendingChanges = false;
                                 await _saveSettings();
                                 await _refreshProfileNpubs();
                                 _cancelHoldAction('delete_profile');
@@ -3249,13 +3254,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: _generateProfile,
                       icon: const Icon(Icons.bolt_outlined, size: 20),
-                      label: const Text('New Key'),
+                    label: const Text('New Profile'),
                     ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
                       onPressed: _addProfile,
                       icon: const Icon(Icons.input_outlined, size: 20),
-                      label: const Text('Import nSec'),
+                    label: const Text('Import Profile (nSec)'),
                     ),
                   ],
                 ),
@@ -3271,8 +3276,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final label = _nsecCopied
                           ? 'Copied'
                           : holdActive
-                              ? 'Hold ${remainingSeconds}s to copy nSec'
-                              : 'Hold 5s to copy nSec';
+                          ? 'Hold ${remainingSeconds}s to copy profile secret (nSec)'
+                          : 'Hold 5s to copy profile secret (nSec)';
                       return GestureDetector(
                         onLongPressStart: (_) => _startHoldAction('copy_nsec', () async {
                           await _exportCurrentKey();
