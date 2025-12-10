@@ -270,65 +270,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _deleteConversation() async {
-    if (selectedContact == null) return;
-    final label = contacts.firstWhere(
-      (c) => c['pubkey'] == selectedContact,
-      orElse: () => <String, dynamic>{},
-    )['nickname'] as String? ??
-        _short(selectedContact!);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete conversation?'),
-        content: Text('Remove local history with $label?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    setState(() {
-      messages.removeWhere((m) =>
-          (m['direction'] == 'out' && m['to'] == selectedContact) ||
-          (m['direction'] == 'in' && m['from'] == selectedContact));
-    });
-    await _saveMessages();
-  }
-
-  Future<void> _deleteConversationFor(String? pubkey) async {
-    if (pubkey == null || pubkey.isEmpty) return;
-    final label = contacts.firstWhere(
-      (c) => c['pubkey'] == pubkey,
-      orElse: () => <String, dynamic>{},
-    )['nickname'] as String? ??
-        _short(pubkey);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete conversation?'),
-        content: Text('Remove local history with $label?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    setState(() {
-      messages.removeWhere((m) =>
-          (m['direction'] == 'out' && m['to'] == pubkey) ||
-          (m['direction'] == 'in' && m['from'] == pubkey));
-    });
-    await _saveMessages();
-    if (selectedContact == pubkey) {
-      setState(() {
-        selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-      });
-    }
-  }
-
   Future<void> _saveContacts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -551,6 +492,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': pubkey});
                 contacts = _dedupeContacts(contacts);
                 _sortContactsByActivity();
+                selectedContact = pubkey;
               });
 
               await _saveContacts();
@@ -2338,7 +2280,7 @@ class _PendingPreview extends StatelessWidget {
 }
 
 class _QrScanPage extends StatefulWidget {
-  const _QrScanPage({super.key});
+  const _QrScanPage();
 
   @override
   State<_QrScanPage> createState() => _QrScanPageState();
@@ -2409,7 +2351,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSaving = false;
   bool _hasPendingChanges = false;
   String _saveStatus = 'Saved';
-  Color _saveStatusColor = Colors.greenAccent.shade200;
   bool _relayInputValid = false;
   bool _nsecCopied = false;
   bool _npubCopied = false;
@@ -2449,7 +2390,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _isSaving = true;
         _saveStatus = 'Loading...';
-        _saveStatusColor = Colors.amber.shade200;
       });
     }
     final prefs = await SharedPreferences.getInstance();
@@ -2513,21 +2453,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hasPendingChanges = false;
         _isSaving = false;
         _saveStatus = 'Saved';
-        _saveStatusColor = Colors.greenAccent.shade200;
         _relayInputValid = _isRelayInputValid(relayInputCtrl.text);
       });
     }
     _probeAllRelays(loadedRelays);
   }
 
-  void _markDirty() {
+  void _markDirty({bool schedule = true}) {
     if (!mounted) return;
     setState(() {
       _hasPendingChanges = true;
       _saveStatus = 'Unsaved changes';
-      _saveStatusColor = Colors.amber.shade300;
     });
-    _scheduleAutoSave();
+    if (schedule) {
+      _scheduleAutoSave();
+    }
   }
 
   bool _isRelayInputValid(String relay) {
@@ -2544,27 +2484,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _handleSaveAction() async {
-    if (_isSaving) return;
-    if (!_hasPendingChanges) {
-      if (mounted) {
-        setState(() {
-          _saveStatus = 'No changes';
-          _saveStatusColor = Colors.blueGrey.shade200;
-        });
-        _showThemedToast('No changes to save', preferTop: true);
-      }
-      return;
-    }
-    await _saveSettings();
-  }
-
   Future<void> _saveSettings() async {
     if (!mounted) return;
     setState(() {
       _isSaving = true;
       _saveStatus = 'Saving...';
-      _saveStatusColor = Colors.amber.shade300;
     });
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -2599,7 +2523,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _isSaving = false;
         _hasPendingChanges = false;
         _saveStatus = 'Saved';
-        _saveStatusColor = Colors.greenAccent.shade200;
       });
       _showThemedToast('Settings saved', preferTop: true);
     } catch (e) {
@@ -2607,7 +2530,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _isSaving = false;
         _saveStatus = 'Save failed';
-        _saveStatusColor = Colors.amber.shade300;
       });
       _showThemedToast('Save failed: $e', preferTop: true);
     }
@@ -3264,42 +3186,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           ),
-                          onChanged: (value) {
-                            if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-                              profiles[selectedProfileIndex]['nickname'] = value;
-                              _markDirty();
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      _HoldDeleteIcon(
-                        active: _holdActive['delete_profile'] ?? false,
-                        progress: _holdProgressFor('delete_profile'),
-                        onTap: () => _showHoldWarning('Hold 5s to delete profile'),
-                        onHoldStart: () {
-                          if (profiles.length <= 1) return;
-                          _startHoldAction('delete_profile', () async {
-                            final removing = selectedProfileIndex;
-                            setState(() {
-                              profiles.removeAt(removing);
-                              if (removing < profileNpubs.length) {
-                                profileNpubs.removeAt(removing);
-                              }
-                              if (selectedProfileIndex >= profiles.length) {
-                                selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                              }
-                              profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                              nicknameCtrl.text = profileNickname;
-                            });
-                            _markDirty();
-                            await _saveSettings();
-                            await _refreshProfileNpubs();
-                            _cancelHoldAction('delete_profile');
-                          }, countdownLabel: 'Hold to delete profile');
-                        },
-                        onHoldEnd: () => _cancelHoldAction('delete_profile'),
-                      ),
+                      onChanged: (value) {
+                        if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+                          profiles[selectedProfileIndex]['nickname'] = value;
+                          _markDirty(schedule: false);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton.filled(
+                    onPressed: _hasPendingChanges && !_isSaving ? _saveSettings : null,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.greenAccent.shade400,
+                      foregroundColor: Colors.black,
+                      shape: const CircleBorder(),
+                      padding: const EdgeInsets.all(10),
+                    ),
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2.4),
+                          )
+                        : const Icon(Icons.check, size: 22),
+                    tooltip: 'Save profile',
+                  ),
                     ],
                   ),
                   const SizedBox(height: 12),
