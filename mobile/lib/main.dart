@@ -182,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           })
           .where((c) => c['pubkey']!.isNotEmpty)
           .toList();
+      _sortContactsByActivity();
     });
       _ensureSelectedContact();
 
@@ -337,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         messages = merged;
         lastError = null;
+        _sortContactsByActivity();
       });
       _ensureSelectedContact();
 
@@ -661,6 +663,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               messages = _mergeMessages([...messages, ...newMessages]);
               lastError = null;
+              _sortContactsByActivity();
             });
             _ensureSelectedContact();
             await _saveMessages();
@@ -700,6 +703,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         selectedContact = best;
       });
     }
+  }
+
+  int _lastActivityFor(String? pubkey) {
+    if (pubkey == null || pubkey.isEmpty) return -1;
+    var ts = -1;
+    for (final m in messages) {
+      final contact = m['direction'] == 'out' ? (m['to'] as String?) : (m['from'] as String?);
+      if (contact != pubkey) continue;
+      final created = m['created_at'];
+      if (created is int && created > ts) {
+        ts = created;
+      }
+    }
+    return ts;
+  }
+
+  void _sortContactsByActivity() {
+    contacts.sort((a, b) {
+      final tsA = _lastActivityFor(a['pubkey'] as String?);
+      final tsB = _lastActivityFor(b['pubkey'] as String?);
+      return tsB.compareTo(tsA);
+    });
   }
 
   List<Map<String, dynamic>> _mergeMessages(List<Map<String, dynamic>> incoming) {
@@ -1223,7 +1248,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       isDense: inAppBar,
       itemHeight: showDetails ? kMinInteractiveDimension : null,
       decoration: inAppBar
-          ? const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero)
+          ? InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Colors.white, width: 1),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Colors.white, width: 1),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.white.withOpacity(0.9), width: 1.2),
+              ),
+            )
           : const InputDecoration(
               labelText: 'Send to',
               border: OutlineInputBorder(),
@@ -1253,8 +1293,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (inAppBar) {
       return Padding(
-        padding: const EdgeInsets.only(top: 6, bottom: 6),
-        child: SizedBox(height: 48, child: dropdown),
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(height: 46, child: dropdown),
+        ),
       );
     }
     return dropdown;
