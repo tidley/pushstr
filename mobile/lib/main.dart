@@ -479,8 +479,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           TextButton(
             onPressed: () async {
-              final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(pubkey) : nicknameCtrl.text.trim();
               var pubkey = pubkeyCtrl.text.trim();
+              final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(pubkey) : nicknameCtrl.text.trim();
 
               if (nickname.isEmpty || pubkey.isEmpty) {
                 Navigator.pop(context);
