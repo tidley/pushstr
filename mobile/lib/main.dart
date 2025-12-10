@@ -1525,6 +1525,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
+        if (Platform.isAndroid) const SizedBox(height: 8),
       ],
     );
   }
