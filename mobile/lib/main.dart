@@ -136,6 +136,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _listening = false;
   bool _didInitRust = false;
   // StreamSubscription? _intentDataStreamSubscription;
+  final Map<String, bool> _copiedMessages = {};
+  final Map<String, Timer> _copiedMessageTimers = {};
   final Map<String, Timer> _holdTimersHome = {};
   final Map<String, double> _holdProgressHome = {};
   final Map<String, bool> _holdActiveHome = {};
@@ -182,6 +184,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     _scrollController.dispose();
     _messageFocus.dispose();
+    for (final t in _copiedMessageTimers.values) {
+      t.cancel();
+    }
     for (final t in _holdTimersHome.values) {
       t.cancel();
     }
@@ -1079,6 +1084,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 74,
+        leading: Builder(
+          builder: (context) => Transform.translate(
+            offset: const Offset(0, -2),
+            child: IconButton(
+              icon: const Icon(Icons.menu),
+              tooltip: 'Open menu',
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
+          ),
+        ),
         title: _buildSendToDropdown(inAppBar: true),
         actions: const [],
       ),
@@ -1281,20 +1296,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final isOut = m['direction'] == 'out';
         final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
         final blossomUrl = _extractBlossomUrl(m['content']);
-        final actions = !isOut
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.copy, size: 18),
-                    tooltip: 'Copy message',
-                    onPressed: () {
-                      final text = (m['content'] ?? '').toString();
-                      Clipboard.setData(ClipboardData(text: text));
-                      _showThemedToast('Message copied', preferTop: true);
-                    },
-                  ),
-                  if (blossomUrl != null)
+          final actions = !isOut
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        _copiedMessages[_messageCopyKey(m)] == true ? Icons.check_circle : Icons.copy,
+                        size: 18,
+                        color: _copiedMessages[_messageCopyKey(m)] == true ? Colors.greenAccent : null,
+                      ),
+                      tooltip: 'Copy message',
+                      onPressed: () {
+                        final text = (m['content'] ?? '').toString();
+                        Clipboard.setData(ClipboardData(text: text));
+                        _markMessageCopied(_messageCopyKey(m));
+                      },
+                    ),
+                    if (blossomUrl != null)
                     IconButton(
                       icon: const Icon(Icons.download, size: 18),
                       tooltip: 'Download',
@@ -1647,6 +1666,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final value = text.trim();
     if (value.length <= 12) return value;
     return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
+  }
+
+  String _messageCopyKey(Map<String, dynamic> message) {
+    final id = message['id']?.toString();
+    if (id != null && id.isNotEmpty) return id;
+    final created = message['created_at']?.toString() ?? '';
+    final content = message['content']?.toString() ?? '';
+    return '$created|$content';
+  }
+
+  void _markMessageCopied(String key) {
+    _copiedMessageTimers[key]?.cancel();
+    setState(() {
+      _copiedMessages[key] = true;
+    });
+    _copiedMessageTimers[key] = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      setState(() {
+        _copiedMessages.remove(key);
+      });
+      _copiedMessageTimers.remove(key);
+    });
   }
 
   String _stripNip18(String text) {
