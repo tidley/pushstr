@@ -2642,6 +2642,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final nsec = profiles[selectedProfileIndex]['nsec']!;
     await Clipboard.setData(ClipboardData(text: nsec));
+    if (mounted) {
+      _showThemedToast('Copied profile secret (nSec)', preferTop: true);
+    }
   }
 
   Future<void> _copyNpub() async {
@@ -3312,7 +3315,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           await _exportCurrentKey();
                           _setCopyState(nsec: true);
                           _cancelHoldAction('copy_nsec');
-                        }),
+                        }, countdownLabel: 'copy profile secret (nSec)'),
                         onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
                         onTap: () {},
                         child: AnimatedOpacity(
