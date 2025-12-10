@@ -3257,7 +3257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 12),
                 ],
                 actionGroup(
-                  'Key management',
+                  'Management',
                   [
                     ElevatedButton.icon(
                       style: textButtonStyle,
