@@ -2387,10 +2387,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     if (mounted) {
-      setState(() {
-        _isSaving = true;
-        _saveStatus = 'Loading...';
-      });
+    setState(() {
+      _isSaving = true;
+    });
     }
     final prefs = await SharedPreferences.getInstance();
 
@@ -2488,7 +2487,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _isSaving = true;
-      _saveStatus = 'Saving...';
     });
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -3195,22 +3193,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  IconButton.filled(
-                    onPressed: _hasPendingChanges && !_isSaving ? _saveSettings : null,
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.greenAccent.shade400,
-                      foregroundColor: Colors.black,
-                      shape: const CircleBorder(),
-                      padding: const EdgeInsets.all(10),
-                    ),
-                    icon: _isSaving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2.4),
-                          )
-                        : const Icon(Icons.check, size: 22),
-                    tooltip: 'Save profile',
+                  _HoldDeleteIcon(
+                    active: _holdActive['delete_profile'] ?? false,
+                    progress: _holdProgressFor('delete_profile'),
+                    onTap: () {
+                      if (_hasPendingChanges && !_isSaving) {
+                        _saveSettings();
+                      } else {
+                        _showHoldWarning('Hold 5s to delete profile');
+                      }
+                    },
+                    onHoldStart: () {
+                      if (_hasPendingChanges || _isSaving || profiles.length <= 1) return;
+                      _startHoldAction('delete_profile', () async {
+                        final removing = selectedProfileIndex;
+                        setState(() {
+                          profiles.removeAt(removing);
+                          if (removing < profileNpubs.length) {
+                            profileNpubs.removeAt(removing);
+                          }
+                          if (selectedProfileIndex >= profiles.length) {
+                            selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+                          }
+                          profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                          nicknameCtrl.text = profileNickname;
+                        });
+                        _hasPendingChanges = false;
+                        _saveStatus = 'Saved';
+                        await _saveSettings();
+                        await _refreshProfileNpubs();
+                        _cancelHoldAction('delete_profile');
+                      }, countdownLabel: 'Hold to delete profile');
+                    },
+                    onHoldEnd: () => _cancelHoldAction('delete_profile'),
                   ),
                     ],
                   ),
