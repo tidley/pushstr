@@ -470,9 +470,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           TextButton(
             onPressed: () async {
               var pubkey = pubkeyCtrl.text.trim();
-              final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(pubkey) : nicknameCtrl.text.trim();
+              final nickname = nicknameCtrl.text.trim();
 
-              if (nickname.isEmpty || pubkey.isEmpty) {
+              if (pubkey.isEmpty) {
                 Navigator.pop(context);
                 return;
               }
@@ -538,10 +538,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final scanned = await _scanQrRaw();
     if (scanned == null || scanned.trim().isEmpty) return;
     var input = scanned.trim();
+    String? displayNpub;
     try {
       if (input.startsWith('npub')) {
         input = api.npubToHex(npub: input);
       }
+      displayNpub = api.hexToNpub(hex: input);
     } catch (e) {
       if (mounted) {
         _showThemedToast('Invalid contact QR: $e', preferTop: true);
@@ -572,7 +574,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             const Text('Pubkey'),
             const SizedBox(height: 4),
-            SelectableText(input, style: const TextStyle(fontSize: 12)),
+            SelectableText(displayNpub ?? input, style: const TextStyle(fontSize: 12)),
             const SizedBox(height: 12),
             TextField(
               controller: nicknameCtrl,
@@ -595,11 +597,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (confirmed != true) return;
 
-    final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(input) : nicknameCtrl.text.trim();
+    final nickname = nicknameCtrl.text.trim();
     setState(() {
       contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': input});
       contacts = _dedupeContacts(contacts);
       _sortContactsByActivity();
+      selectedContact = input;
     });
     await _saveContacts();
     if (mounted) {
