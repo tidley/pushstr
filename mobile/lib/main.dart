@@ -479,7 +479,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           TextButton(
             onPressed: () async {
-              final nickname = nicknameCtrl.text.trim();
+              final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(pubkey) : nicknameCtrl.text.trim();
               var pubkey = pubkeyCtrl.text.trim();
 
               if (nickname.isEmpty || pubkey.isEmpty) {
@@ -610,7 +610,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (confirmed != true) return;
 
-    final nickname = nicknameCtrl.text.trim().isEmpty ? _short(input) : nicknameCtrl.text.trim();
+    final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(input) : nicknameCtrl.text.trim();
     setState(() {
       contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': input});
       contacts = _dedupeContacts(contacts);
@@ -1586,6 +1586,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // fall back to raw text if conversion fails
       }
     }
+    if (value.length <= 12) return value;
+    return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
+  }
+
+  String _shortHex(String text) {
+    final value = text.trim();
     if (value.length <= 12) return value;
     return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
   }
