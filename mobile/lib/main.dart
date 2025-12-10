@@ -904,7 +904,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pushstr'),
+        title: _buildSendToDropdown(inAppBar: true),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -931,7 +931,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('Contacts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Text('Pushstr', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 6),
                           if (npub != null)
                             Text(
@@ -951,6 +951,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+              child: Text('Contacts', style: Theme.of(context).textTheme.titleMedium),
             ),
             for (final contact in contacts)
               Dismissible(
@@ -1023,7 +1027,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             ListTile(
               leading: const Icon(Icons.qr_code_scanner),
-              title: const Text('Scan contact QR'),
+              title: const Text('Scan QR'),
               onTap: () {
                 Navigator.pop(context);
                 _scanContactQr();
@@ -1043,6 +1047,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
+          if (contacts.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+              child: _buildSendToDropdown(),
+            ),
           if (!isConnected)
             Container(
               color: Colors.orange.withValues(alpha: 0.2),
@@ -1174,7 +1183,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildComposer() {
+  Widget _buildSendToDropdown({bool inAppBar = false}) {
     final contactItems = contacts
         .map(
           (c) => DropdownMenuItem<String>(
@@ -1192,6 +1201,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final selectedValue =
         contacts.any((c) => c['pubkey'] == selectedContact) ? selectedContact : null;
 
+    final dropdown = DropdownButtonFormField<String>(
+      value: selectedValue,
+      isExpanded: true,
+      isDense: inAppBar,
+      decoration: inAppBar
+          ? const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero)
+          : const InputDecoration(
+              labelText: 'Send to',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            ),
+      hint: const Text('Select a contact'),
+      items: contactItems,
+      onChanged: contactItems.isEmpty
+          ? null
+          : (value) {
+              if (value == null) return;
+              setState(() => selectedContact = value);
+              _scrollToBottom();
+            },
+    );
+
+    if (inAppBar) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 6),
+        child: SizedBox(height: 48, child: dropdown),
+      );
+    }
+    return dropdown;
+  }
+
+  Widget _buildComposer() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1215,27 +1256,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Row(
                 children: [
                   Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: selectedValue,
-                      isExpanded: true,
-                      isDense: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Send to',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      ),
-                      hint: const Text('Select a contact'),
-                      items: contactItems,
-                      onChanged: contactItems.isEmpty
-                          ? null
-                          : (value) {
-                              if (value == null) return;
-                              setState(() => selectedContact = value);
-                              _scrollToBottom();
-                            },
+                    child: Text(
+                      selectedContact != null
+                          ? 'Sending to ${contacts.firstWhere((c) => c['pubkey'] == selectedContact)['nickname'] ?? _short(selectedContact!)}'
+                          : 'No contact selected',
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 8),
                   IconButton(
                     tooltip: 'Add contact',
                     onPressed: () => _addContact(context),
@@ -1243,11 +1270,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ],
               ),
-              if (contactItems.isEmpty)
+              if (!contacts.any((c) => c['pubkey'] == selectedContact))
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
-                    'Add a contact to start messaging',
+                    'Add or select a contact from the top bar',
                     style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
                   ),
                 ),
