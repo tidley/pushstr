@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -122,7 +122,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
-  final ImagePicker _picker = ImagePicker();
   _PendingAttachment? _pendingAttachment;
   double _lastViewInsets = 0;
   String? npub;
@@ -1037,26 +1036,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _attachImage() async {
+  Future<void> _attachFile() async {
     if (selectedContact == null) {
       _showThemedToast('Select a contact first', preferTop: true);
       return;
     }
     try {
-      final picked = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1280,
-        maxHeight: 1280,
-        imageQuality: 85,
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        withData: true,
+        type: FileType.any,
       );
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      final mime = lookupMimeType(picked.name) ?? 'image/*';
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      final name = file.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
       setState(() {
         _pendingAttachment = _PendingAttachment(
           bytes: bytes,
           mime: mime,
-          name: picked.name,
+          name: name,
         );
       });
       _scrollToBottom();
@@ -1510,7 +1511,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         onPressed: noContacts
                             ? () => _addContact(context)
                             : (canSend
-                                ? () => hasContent ? _sendMessage() : _attachImage()
+                                ? () => hasContent ? _sendMessage() : _attachFile()
                                 : null),
                         style: IconButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.primary,
