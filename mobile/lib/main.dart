@@ -176,13 +176,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       npub = initedNpub;
       isConnected = true;
       messages = loadedMessages;
-      contacts = savedContacts
+      contacts = _dedupeContacts(savedContacts
           .map((c) {
             final parts = c.split('|');
             return <String, dynamic>{'nickname': parts[0], 'pubkey': parts.length > 1 ? parts[1] : ''};
           })
           .where((c) => c['pubkey']!.isNotEmpty)
-          .toList();
+          .toList());
       _sortContactsByActivity();
     });
       // Load profile-specific stored data if present (fallback to shared above)
@@ -500,6 +500,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
               setState(() {
                 contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': pubkey});
+                contacts = _dedupeContacts(contacts);
                 _sortContactsByActivity();
               });
 
@@ -612,6 +613,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final nickname = nicknameCtrl.text.trim().isEmpty ? _short(input) : nicknameCtrl.text.trim();
     setState(() {
       contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': input});
+      contacts = _dedupeContacts(contacts);
       _sortContactsByActivity();
     });
     await _saveContacts();
@@ -746,6 +748,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
+  List<Map<String, dynamic>> _dedupeContacts(List<Map<String, dynamic>> list) {
+    final seen = <String, Map<String, dynamic>>{};
+    for (final c in list.reversed) {
+      final pubkey = (c['pubkey'] ?? '').toString();
+      if (pubkey.isEmpty) continue;
+      seen[pubkey] = c;
+    }
+    final deduped = seen.values.toList().reversed.toList();
+    return deduped;
+  }
+
   Future<void> _loadLocalProfileData({required int profileIndex, bool overrideLoaded = false}) async {
     final prefs = await SharedPreferences.getInstance();
     final profileList = prefs.getStringList('profiles') ?? [];
@@ -782,7 +795,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       if (overrideLoaded || contacts.isEmpty) {
-        contacts = loadedContacts;
+        contacts = _dedupeContacts(loadedContacts);
       }
       if (overrideLoaded || messages.isEmpty) {
         messages = loadedMessages;
@@ -2149,10 +2162,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _saveStatus = 'Saved';
   Color _saveStatusColor = Colors.greenAccent.shade200;
   bool _relayInputValid = false;
-  Timer? _nsecCopyTimer;
-  double _nsecCopyProgress = 0;
-  bool _nsecHoldActive = false;
-  static const int _nsecHoldMillis = 10000;
+  bool _nsecCopied = false;
+  bool _npubCopied = false;
+  Timer? _copyResetTimer;
 
   @override
   void initState() {
@@ -2165,7 +2177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     relayInputCtrl.dispose();
     nicknameCtrl.dispose();
-    _nsecCopyTimer?.cancel();
+    _copyResetTimer?.cancel();
     super.dispose();
   }
 
@@ -2469,73 +2481,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     await Clipboard.setData(ClipboardData(text: npubToCopy));
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('npub copied to clipboard')),
-      );
-    }
+    _setCopyState(npub: true);
   }
 
-  void _warnCopyNsec() {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Security tip: do not share your nsec. Long-press for 10 seconds to copy.'),
-        duration: Duration(milliseconds: 2000),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _startNsecHold() {
-    _nsecCopyTimer?.cancel();
+  void _setCopyState({bool npub = false, bool nsec = false}) {
+    _copyResetTimer?.cancel();
     setState(() {
-      _nsecHoldActive = true;
-      _nsecCopyProgress = 0;
+      if (npub) _npubCopied = true;
+      if (nsec) _nsecCopied = true;
     });
-    final start = DateTime.now();
-    _nsecCopyTimer = Timer.periodic(const Duration(milliseconds: 120), (t) {
-      final elapsed = DateTime.now().difference(start).inMilliseconds;
-      final progress = (elapsed / _nsecHoldMillis).clamp(0.0, 1.0);
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
+    _copyResetTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
       setState(() {
-        _nsecCopyProgress = progress;
+        _npubCopied = false;
+        _nsecCopied = false;
       });
-      if (progress >= 1) {
-        _finishNsecHold();
-      }
-    });
-  }
-
-  void _finishNsecHold() {
-    _nsecCopyTimer?.cancel();
-    _nsecCopyTimer = null;
-    if (!mounted) return;
-    setState(() {
-      _nsecHoldActive = false;
-      _nsecCopyProgress = 1;
-    });
-    _exportCurrentKey();
-    Future.delayed(const Duration(milliseconds: 400), () {
-      if (mounted) {
-        setState(() {
-          _nsecCopyProgress = 0;
-        });
-      }
-    });
-  }
-
-  void _cancelNsecHold() {
-    _nsecCopyTimer?.cancel();
-    _nsecCopyTimer = null;
-    if (!mounted) return;
-    setState(() {
-      _nsecHoldActive = false;
-      _nsecCopyProgress = 0;
     });
   }
 
@@ -3046,46 +3006,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actionGroup(
                   'Utilities',
                   [
-                    GestureDetector(
-                      onLongPressStart: (_) => _startNsecHold(),
-                      onLongPressEnd: (_) => _cancelNsecHold(),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final radius = BorderRadius.circular(10);
-                          return Stack(
-                            alignment: Alignment.centerLeft,
-                            children: [
-                              Positioned.fill(
-                                child: FractionallySizedBox(
-                                  alignment: Alignment.centerLeft,
-                                  widthFactor: _nsecCopyProgress.clamp(0.0, 1.0),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.14),
-                                      borderRadius: radius,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: constraints.maxWidth,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
-                                  onPressed: _warnCopyNsec,
-                                  icon: const Icon(Icons.vpn_key_outlined, size: 22),
-                                  label: const Text('Copy nSec'),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 44)),
+                      onPressed: () async {
+                        await _exportCurrentKey();
+                        _setCopyState(nsec: true);
+                      },
+                      icon: const Icon(Icons.vpn_key_outlined, size: 20),
+                      label: Text(_nsecCopied ? 'Copied' : 'Copy nSec'),
                     ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
-                      onPressed: _copyNpub,
+                      onPressed: () async {
+                        await _copyNpub();
+                        _setCopyState(npub: true);
+                      },
                       icon: const Icon(Icons.lock_outline, size: 22),
-                      label: const Text('Copy nPub'),
+                      label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
                     ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
