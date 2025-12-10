@@ -958,13 +958,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         toolbarHeight: 74,
         title: _buildSendToDropdown(inAppBar: true),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchMessages,
-            tooltip: 'Refresh messages',
-          ),
-        ],
+        actions: const [],
       ),
       drawer: Drawer(
         child: ListView(
