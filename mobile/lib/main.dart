@@ -1197,7 +1197,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             await _saveContacts();
                             _cancelHoldActionHome('delete_contact_${contact['pubkey']}');
                             },
-                            countdownLabel: 'Hold to delete contact',
+                            countdownLabel: 'delete contact',
                           );
                         },
                         onHoldEnd: () => _cancelHoldActionHome('delete_contact_${contact['pubkey']}'),
@@ -2178,11 +2178,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _startHoldActionHome(String key, VoidCallback onComplete, {String? countdownLabel}) {
     _holdTimersHome[key]?.cancel();
     final start = DateTime.now();
-    _holdLastSecondHome[key] = (_holdMillis / 1000).ceil();
+    final totalSeconds = (_holdMillis / 1000).ceil();
+    _holdLastSecondHome[key] = totalSeconds;
     setState(() {
       _holdActiveHome[key] = true;
       _holdProgressHome[key] = 0;
     });
+    if (countdownLabel != null) {
+      _showHoldWarningHome('Hold ${totalSeconds}s to $countdownLabel');
+    }
     _holdTimersHome[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
@@ -2196,7 +2200,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
       if (countdownLabel != null && remainingSeconds != _holdLastSecondHome[key]) {
         _holdLastSecondHome[key] = remainingSeconds;
-        _showHoldWarningHome('$countdownLabel (${remainingSeconds}s)');
+        _showHoldWarningHome('Hold ${remainingSeconds}s to $countdownLabel');
       }
       if (progress >= 1) {
         t.cancel();
@@ -2532,7 +2536,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showThemedToast(
         'Saved',
         preferTop: true,
-        duration: const Duration(milliseconds: 900),
+        duration: const Duration(milliseconds: 500),
       );
     } catch (e) {
       if (!mounted) return;
@@ -2729,11 +2733,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _startHoldAction(String key, VoidCallback onComplete, {String? countdownLabel}) {
     _holdTimers[key]?.cancel();
     final start = DateTime.now();
-    _holdLastSecond[key] = (_holdMillis / 1000).ceil();
+    final totalSeconds = (_holdMillis / 1000).ceil();
+    _holdLastSecond[key] = totalSeconds;
     setState(() {
       _holdActive[key] = true;
       _holdProgress[key] = 0;
     });
+    if (countdownLabel != null) {
+      _showHoldWarning('Hold ${totalSeconds}s to $countdownLabel');
+    }
     _holdTimers[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
@@ -2747,7 +2755,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
       if (countdownLabel != null && remainingSeconds != _holdLastSecond[key]) {
         _holdLastSecond[key] = remainingSeconds;
-        _showHoldWarning('$countdownLabel (${remainingSeconds}s)');
+        _showHoldWarning('Hold ${remainingSeconds}s to $countdownLabel');
       }
       if (progress >= 1) {
         t.cancel();
@@ -3082,7 +3090,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _markDirty();
                   await _saveSettings();
                   _cancelHoldAction('relay_$relay');
-                }, countdownLabel: 'Hold to remove relay');
+                }, countdownLabel: 'remove relay');
               },
               onHoldEnd: () => _cancelHoldAction('relay_$relay'),
             ),
@@ -3259,7 +3267,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 await _saveSettings();
                                 await _refreshProfileNpubs();
                                 _cancelHoldAction('delete_profile');
-                              }, countdownLabel: 'Hold to delete profile');
+                              }, countdownLabel: 'delete profile');
                             },
                             onHoldEnd: () => _cancelHoldAction('delete_profile'),
                           ),

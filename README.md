@@ -49,7 +49,21 @@ All messages are encrypted for the recipient and then encrypted again during tra
 
 ---
 
-# Pushstr - Pushbullet on Nostr
+# Application demos
+- open, show settings, add nickname
+
+(both record)
+- open, add contact via qr, message
+- open, show qr, receive message
+
+(both)
+- attach photo
+- receive photo
+
+
+---
+
+# "Pushbullet on Nostr"
 
 
 Pushbullet-style messaging over Nostr Giftwrapped DMs. Runs as a Firefox/Chrome extension and as a mobile app (Android/iOS).

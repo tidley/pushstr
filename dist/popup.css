@@ -411,7 +411,7 @@ main {
   border-radius: 6px;
   padding: 0;
   cursor: pointer;
-  font-size: 27px;
+  font-size: 20px;
   line-height: 1;
   transition: color 150ms ease, transform 120ms ease;
 }
