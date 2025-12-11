@@ -3539,6 +3539,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _foregroundEnabled = val;
                         _foregroundServiceEnabled = val;
                       });
+                      // Ensure notification permission is granted when enabling
+                      if (val) {
+                        final notifStatus = await Permission.notification.status;
+                        if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
+                          await Permission.notification.request();
+                        }
+                      }
+
                       if (val) {
                         await _startForegroundService();
                       } else {
