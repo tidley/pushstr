@@ -49,17 +49,21 @@ All messages are encrypted for the recipient and then encrypted again during tra
 
 ---
 
-# Application demos
+# Demos
 - open, show settings, add nickname
+<video controls src="2025-12-10_23-54-27.mkv" title="Title"></video>
 
-(both record)
-- open, add contact via qr, message
-- open, show qr, receive message
+- open, show qr, add contact via qr, message
+<video controls src="2025-12-10_23-55-46.mkv" title="Title"></video>
 
-(both)
-- attach photo
-- receive photo
+- extension popout, add photo, send to mobile, mobile attaches and sends a photo back
+<video controls src="2025-12-10_23-58-08.mkv" title="Title"></video>
 
+- extension popout, second phone, add mobile contact, message
+<video controls src="2025-12-11_00-00-31.mkv" title="Title"></video>
+
+- rename contact, switch contact, send message to extension
+<video controls src="2025-12-11_00-02-21.mkv" title="Title"></video>
 
 ---
 
