@@ -18,6 +18,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:background_fetch/background_fetch.dart' as bg;
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
@@ -25,6 +26,8 @@ import 'bridge_generated.dart/frb_generated.dart';
 bool _rustInitialized = false;
 Completer<void>? _rustInitCompleter;
 final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+bool _foregroundServiceEnabled = false;
+bool _foregroundServiceRunning = false;
 
 Future<void> _ensureRustInit() async {
   if (_rustInitialized) return;
@@ -74,6 +77,27 @@ void backgroundFetchHeadless(bg.HeadlessTask task) async {
   bg.BackgroundFetch.finish(task.taskId);
 }
 
+@pragma('vm:entry-point')
+void foregroundStartCallback() {
+  FlutterForegroundTask.setTaskHandler(_PushstrTaskHandler());
+}
+
+class _PushstrTaskHandler extends TaskHandler {
+  @override
+  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {}
+
+  @override
+  Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
+    await _performBackgroundSync();
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {}
+
+  @override
+  void onReceiveData(Object? data) {}
+}
+
 Future<void> _setupBackgroundTasks() async {
   try {
     await bg.BackgroundFetch.configure(
@@ -115,6 +139,28 @@ Future<void> _initNotifications() async {
   if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
     await Permission.notification.request();
   }
+
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'pushstr_fg',
+      channelName: 'Pushstr background service',
+      channelDescription: 'Keeps Pushstr connected for notifications',
+      channelImportance: NotificationChannelImportance(2),
+      priority: NotificationPriority(-1),
+      iconData: const NotificationIconData(
+        resType: ResourceType.mipmap,
+        resPrefix: ResourcePrefix.ic,
+        name: 'launcher',
+      ),
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(),
+    foregroundTaskOptions: const ForegroundTaskOptions(
+      interval: 15 * 60 * 1000,
+      isOnceEvent: false,
+      allowWakeLock: true,
+      allowWifiLock: true,
+    ),
+  );
 }
 
 class _HoldDeleteIcon extends StatelessWidget {
@@ -2506,6 +2552,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _relayInputValid = false;
   bool _nsecCopied = false;
   bool _npubCopied = false;
+  bool _foregroundToggle = false;
+  bool _foregroundEnabled = false;
   Timer? _copyResetTimer;
   Timer? _autoSaveTimer;
   final Map<String, Timer> _holdTimers = {};
@@ -2604,7 +2652,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hasPendingChanges = false;
         _isSaving = false;
         _relayInputValid = _isRelayInputValid(relayInputCtrl.text);
+        _foregroundServiceEnabled =
+            prefs.getBool('foreground_service_enabled') ?? false;
+        _foregroundEnabled = _foregroundServiceEnabled;
+        _foregroundToggle = _foregroundServiceEnabled;
       });
+    }
+    if (_foregroundServiceEnabled) {
+      await _startForegroundService();
+    } else {
+      await _stopForegroundService();
     }
     _probeAllRelays(loadedRelays);
   }
@@ -2633,6 +2690,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _startForegroundService() async {
+    final running = await FlutterForegroundTask.isRunningService;
+    if (running) {
+      _foregroundServiceRunning = true;
+      return;
+    }
+    await FlutterForegroundTask.startService(
+      notificationTitle: 'Pushstr running',
+      notificationText: 'Staying connected for incoming messages',
+      callback: foregroundStartCallback,
+    );
+    _foregroundServiceRunning = true;
+  }
+
+  Future<void> _stopForegroundService() async {
+    final running = await FlutterForegroundTask.isRunningService;
+    if (!running) {
+      _foregroundServiceRunning = false;
+      return;
+    }
+    await FlutterForegroundTask.stopService();
+    _foregroundServiceRunning = false;
+  }
+
   Future<void> _saveSettings() async {
     if (!mounted) return;
     setState(() {
@@ -2647,6 +2728,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
       );
       await prefs.setInt('selected_profile_index', selectedProfileIndex);
+      await prefs.setBool(
+        'foreground_service_enabled',
+        _foregroundServiceEnabled,
+      );
 
       if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
         final selectedNsec = profiles[selectedProfileIndex]['nsec']!;
@@ -2678,6 +2763,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         preferTop: true,
         duration: const Duration(milliseconds: 500),
       );
+      if (_foregroundServiceEnabled) {
+        await _startForegroundService();
+      } else {
+        await _stopForegroundService();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -3440,6 +3530,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 actionGroup(
                   'Utilities',
                   [
+                  SwitchListTile(
+                    title: const Text('Stay connected (foreground service)'),
+                    subtitle: const Text(
+                      'Keeps Pushstr running with a small notification',
+                    ),
+                    value: _foregroundEnabled,
+                    onChanged: (val) async {
+                      setState(() {
+                        _foregroundEnabled = val;
+                        _foregroundServiceEnabled = val;
+                        _foregroundToggle = val;
+                      });
+                      if (val) {
+                        await _startForegroundService();
+                      } else {
+                        await _stopForegroundService();
+                      }
+                      _markDirty(schedule: false);
+                    },
+                  ),
                     Builder(builder: (context) {
                       final holdActive = _holdActive['copy_nsec'] ?? false;
                       final progress = _holdProgress['copy_nsec'] ?? 0.0;

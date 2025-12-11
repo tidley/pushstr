@@ -50,6 +50,7 @@ dependencies:
   background_fetch: ^1.2.2
   crypto: ^3.0.3
   url_launcher: ^6.3.0
+  flutter_foreground_task: ^6.2.6
   qr_flutter: ^4.1.0
   qr_code_scanner: ^1.0.1
   permission_handler: ^11.3.1
