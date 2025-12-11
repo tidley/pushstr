@@ -16,9 +16,107 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:workmanager/workmanager.dart' as wm;
+import 'package:background_fetch/background_fetch.dart' as bg;
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
+
+const String kBackgroundSyncTask = 'pushstr_background_sync';
+bool _rustInitialized = false;
+Completer<void>? _rustInitCompleter;
+
+Future<void> _ensureRustInit() async {
+  if (_rustInitialized) return;
+  if (_rustInitCompleter != null) {
+    return _rustInitCompleter!.future;
+  }
+  final completer = Completer<void>();
+  _rustInitCompleter = completer;
+  try {
+    ExternalLibrary? externalLibrary;
+    if (Platform.isIOS) {
+      externalLibrary = ExternalLibrary.open(
+        'Frameworks/pushstr_rust.framework/pushstr_rust',
+      );
+    }
+    await RustLib.init(externalLibrary: externalLibrary);
+    _rustInitialized = true;
+    completer.complete();
+  } catch (e, st) {
+    completer.completeError(e, st);
+    _rustInitCompleter = null;
+    rethrow;
+  }
+}
+
+Future<bool> _performBackgroundSync() async {
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    await _ensureRustInit();
+    final prefs = await SharedPreferences.getInstance();
+    final nsec = prefs.getString('nostr_nsec') ?? '';
+    if (nsec.isEmpty) return true;
+    await api.initNostr(nsec: nsec);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  wm.Workmanager().executeTask((task, inputData) async {
+    return _performBackgroundSync();
+  });
+}
+
+@pragma('vm:entry-point')
+void backgroundFetchHeadless(bg.HeadlessTask task) async {
+  if (task.timeout) {
+    bg.BackgroundFetch.finish(task.taskId);
+    return;
+  }
+  await _performBackgroundSync();
+  bg.BackgroundFetch.finish(task.taskId);
+}
+
+Future<void> _setupBackgroundTasks() async {
+  try {
+    await wm.Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+    await wm.Workmanager().registerPeriodicTask(
+      'pushstr_periodic_sync',
+      kBackgroundSyncTask,
+      frequency: const Duration(minutes: 30),
+      initialDelay: const Duration(minutes: 1),
+      constraints: wm.Constraints(networkType: wm.NetworkType.connected),
+    );
+  } catch (_) {
+    // best-effort
+  }
+
+  try {
+    await bg.BackgroundFetch.configure(
+      bg.BackgroundFetchConfig(
+        minimumFetchInterval: 30,
+        stopOnTerminate: false,
+        startOnBoot: true,
+        enableHeadless: true,
+        requiredNetworkType: bg.NetworkType.ANY,
+      ),
+      (taskId) async {
+        await _performBackgroundSync();
+        bg.BackgroundFetch.finish(taskId);
+      },
+      (taskId) async {
+        bg.BackgroundFetch.finish(taskId);
+      },
+    );
+    bg.BackgroundFetch.registerHeadlessTask(backgroundFetchHeadless);
+  } catch (_) {
+    // best-effort
+  }
+}
 
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
@@ -67,14 +165,8 @@ class _HoldDeleteIcon extends StatelessWidget {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  ExternalLibrary? externalLibrary;
-  // On iOS, explicitly load the embedded framework from the app bundle.
-  if (Platform.isIOS) {
-    externalLibrary = ExternalLibrary.open(
-      'Frameworks/pushstr_rust.framework/pushstr_rust',
-    );
-  }
-  await RustLib.init(externalLibrary: externalLibrary);
+  await _ensureRustInit();
+  await _setupBackgroundTasks();
   runApp(const PushstrApp());
 }
 
@@ -1662,12 +1754,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // fall back to raw text if conversion fails
       }
     }
-    if (value.length <= 12) return value;
-    return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
-  }
-
-  String _shortHex(String text) {
-    final value = text.trim();
     if (value.length <= 12) return value;
     return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
   }
