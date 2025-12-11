@@ -11997,6 +11997,19 @@ function currentPubkey() {
   const priv = currentPrivkeyHex();
   return priv ? getPublicKey(priv) : null;
 }
+function shortPubkey(pubkey) {
+  if (!pubkey)
+    return "unknown";
+  if (pubkey.length <= 12)
+    return pubkey;
+  return `${pubkey.slice(0, 8)}...${pubkey.slice(-4)}`;
+}
+function displayNameFor(pubkey) {
+  const list = getRecipientsForCurrent();
+  const match = list.find((r) => r.pubkey === pubkey);
+  const nick = match?.nickname?.trim();
+  return nick && nick.length ? nick : shortPubkey(pubkey);
+}
 function loadMessagesForCurrent(legacyMessages = []) {
   const pub = currentPubkey();
   settings.messagesByKey = settings.messagesByKey || {};
@@ -12086,7 +12099,7 @@ async function handleGiftEvent(event) {
       relayFrom: settings.relays
     });
     if (message && !suppressNotifications) {
-      notify(`DM from ${sender.slice(0, 8)}...`, message);
+      notify(`DM from ${displayNameFor(sender)}`, message);
     }
     browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message }).catch(() => {
     });

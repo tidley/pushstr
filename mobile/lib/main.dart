@@ -16,13 +16,11 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:workmanager/workmanager.dart' as wm;
 import 'package:background_fetch/background_fetch.dart' as bg;
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
 
-const String kBackgroundSyncTask = 'pushstr_background_sync';
 bool _rustInitialized = false;
 Completer<void>? _rustInitCompleter;
 
@@ -65,13 +63,6 @@ Future<bool> _performBackgroundSync() async {
 }
 
 @pragma('vm:entry-point')
-void callbackDispatcher() {
-  wm.Workmanager().executeTask((task, inputData) async {
-    return _performBackgroundSync();
-  });
-}
-
-@pragma('vm:entry-point')
 void backgroundFetchHeadless(bg.HeadlessTask task) async {
   if (task.timeout) {
     bg.BackgroundFetch.finish(task.taskId);
@@ -82,19 +73,6 @@ void backgroundFetchHeadless(bg.HeadlessTask task) async {
 }
 
 Future<void> _setupBackgroundTasks() async {
-  try {
-    await wm.Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
-    await wm.Workmanager().registerPeriodicTask(
-      'pushstr_periodic_sync',
-      kBackgroundSyncTask,
-      frequency: const Duration(minutes: 30),
-      initialDelay: const Duration(minutes: 1),
-      constraints: wm.Constraints(networkType: wm.NetworkType.connected),
-    );
-  } catch (_) {
-    // best-effort
-  }
-
   try {
     await bg.BackgroundFetch.configure(
       bg.BackgroundFetchConfig(
