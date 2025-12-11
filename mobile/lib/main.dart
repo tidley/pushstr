@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
@@ -15,25 +16,9 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-// TODO: Re-enable when API is stable
-// import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
-
-// Top-level function for compute() to derive npub from nsec
-String _deriveNpub(String nsec) {
-  try {
-    RustLib.init();
-  } catch (_) {
-    // Ignore double-init in isolate
-  }
-  try {
-    return api.initNostr(nsec: nsec);
-  } catch (_) {
-    return '';
-  }
-}
 
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
@@ -122,7 +107,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
-  final ImagePicker _picker = ImagePicker();
   _PendingAttachment? _pendingAttachment;
   double _lastViewInsets = 0;
   String? npub;
@@ -135,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool isConnected = false;
   bool _listening = false;
   bool _didInitRust = false;
+  final ImagePicker _imagePicker = ImagePicker();
   // StreamSubscription? _intentDataStreamSubscription;
   final Map<String, bool> _copiedMessages = {};
   final Map<String, Timer> _copiedMessageTimers = {};
@@ -142,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, double> _holdProgressHome = {};
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
-  static const int _holdMillis = 5000;
+  static const int _holdMillis = 4000;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
@@ -282,65 +267,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       print('Failed to save messages: $e');
-    }
-  }
-
-  Future<void> _deleteConversation() async {
-    if (selectedContact == null) return;
-    final label = contacts.firstWhere(
-      (c) => c['pubkey'] == selectedContact,
-      orElse: () => <String, dynamic>{},
-    )['nickname'] as String? ??
-        _short(selectedContact!);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete conversation?'),
-        content: Text('Remove local history with $label?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    setState(() {
-      messages.removeWhere((m) =>
-          (m['direction'] == 'out' && m['to'] == selectedContact) ||
-          (m['direction'] == 'in' && m['from'] == selectedContact));
-    });
-    await _saveMessages();
-  }
-
-  Future<void> _deleteConversationFor(String? pubkey) async {
-    if (pubkey == null || pubkey.isEmpty) return;
-    final label = contacts.firstWhere(
-      (c) => c['pubkey'] == pubkey,
-      orElse: () => <String, dynamic>{},
-    )['nickname'] as String? ??
-        _short(pubkey);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete conversation?'),
-        content: Text('Remove local history with $label?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    setState(() {
-      messages.removeWhere((m) =>
-          (m['direction'] == 'out' && m['to'] == pubkey) ||
-          (m['direction'] == 'in' && m['from'] == pubkey));
-    });
-    await _saveMessages();
-    if (selectedContact == pubkey) {
-      setState(() {
-        selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-      });
     }
   }
 
@@ -544,9 +470,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           TextButton(
             onPressed: () async {
               var pubkey = pubkeyCtrl.text.trim();
-              final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(pubkey) : nicknameCtrl.text.trim();
+              final nickname = nicknameCtrl.text.trim();
 
-              if (nickname.isEmpty || pubkey.isEmpty) {
+              if (pubkey.isEmpty) {
                 Navigator.pop(context);
                 return;
               }
@@ -566,6 +492,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': pubkey});
                 contacts = _dedupeContacts(contacts);
                 _sortContactsByActivity();
+                selectedContact = pubkey;
               });
 
               await _saveContacts();
@@ -611,10 +538,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final scanned = await _scanQrRaw();
     if (scanned == null || scanned.trim().isEmpty) return;
     var input = scanned.trim();
+    String? displayNpub;
     try {
       if (input.startsWith('npub')) {
         input = api.npubToHex(npub: input);
       }
+      displayNpub = api.hexToNpub(hex: input);
     } catch (e) {
       if (mounted) {
         _showThemedToast('Invalid contact QR: $e', preferTop: true);
@@ -645,7 +574,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             const Text('Pubkey'),
             const SizedBox(height: 4),
-            SelectableText(input, style: const TextStyle(fontSize: 12)),
+            SelectableText(displayNpub ?? input, style: const TextStyle(fontSize: 12)),
             const SizedBox(height: 12),
             TextField(
               controller: nicknameCtrl,
@@ -668,11 +597,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (confirmed != true) return;
 
-    final nickname = nicknameCtrl.text.trim().isEmpty ? _shortHex(input) : nicknameCtrl.text.trim();
+    final nickname = nicknameCtrl.text.trim();
     setState(() {
       contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': input});
       contacts = _dedupeContacts(contacts);
       _sortContactsByActivity();
+      selectedContact = input;
     });
     await _saveContacts();
     if (mounted) {
@@ -1037,32 +967,101 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _attachImage() async {
+  Future<void> _attachFile() async {
     if (selectedContact == null) {
       _showThemedToast('Select a contact first', preferTop: true);
       return;
     }
     try {
-      final picked = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1280,
-        maxHeight: 1280,
-        imageQuality: 85,
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        withData: true,
+        type: FileType.any,
       );
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      final mime = lookupMimeType(picked.name) ?? 'image/*';
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      final name = file.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
       setState(() {
         _pendingAttachment = _PendingAttachment(
           bytes: bytes,
           mime: mime,
-          name: picked.name,
+          name: name,
         );
       });
       _scrollToBottom();
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
+  }
+
+  Future<void> _attachImage() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 88,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
+      setState(() {
+        _pendingAttachment = _PendingAttachment(
+          bytes: bytes,
+          mime: mime,
+          name: name,
+        );
+      });
+      _scrollToBottom();
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _showAttachChooser() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image),
+              title: const Text('Image'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachImage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file),
+              title: const Text('File'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachFile();
+              },
+            ),
+            const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _ensureRustInitialized() async {
@@ -1198,7 +1197,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             await _saveContacts();
                             _cancelHoldActionHome('delete_contact_${contact['pubkey']}');
                             },
-                            countdownLabel: 'Hold to delete contact',
+                            countdownLabel: 'delete contact',
                           );
                         },
                         onHoldEnd: () => _cancelHoldActionHome('delete_contact_${contact['pubkey']}'),
@@ -1377,12 +1376,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           (c) {
             final nickname = c['nickname'] ?? '';
             final pubkey = c['pubkey'] ?? '';
-            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
-            final child = Text(primary, overflow: TextOverflow.ellipsis);
+      final primary = _short(pubkey);
+      final label = nickname.trim().isNotEmpty
+          ? '$primary · $nickname'
+          : primary;
 
             return DropdownMenuItem<String>(
               value: pubkey,
-              child: child,
+        child: Text(label, overflow: TextOverflow.ellipsis),
             );
           },
         )
@@ -1419,9 +1420,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
       selectedItemBuilder: (_) => contacts
           .map((c) {
-            final nickname = c['nickname'] ?? '';
             final pubkey = c['pubkey'] ?? '';
-            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+        final nickname = (c['nickname'] ?? '').toString().trim();
+        final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
             return Align(
               alignment: Alignment.centerLeft,
               child: Text(primary, overflow: TextOverflow.ellipsis),
@@ -1510,7 +1511,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         onPressed: noContacts
                             ? () => _addContact(context)
                             : (canSend
-                                ? () => hasContent ? _sendMessage() : _attachImage()
+                                  ? () => hasContent
+                                        ? _sendMessage()
+                                        : _showAttachChooser()
                                 : null),
                         style: IconButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.primary,
@@ -1524,6 +1527,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
+        if (Platform.isAndroid) const SizedBox(height: 8),
       ],
     );
   }
@@ -2118,7 +2122,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return null;
   }
 
-  void _showThemedToast(String message, {bool preferTop = false}) {
+  void _showThemedToast(
+    String message, {
+    bool preferTop = false,
+    Duration? duration,
+  }) {
     _toastEntry?.remove();
     _toastTimer?.cancel();
     final overlay = Overlay.maybeOf(context);
@@ -2160,7 +2168,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
 
     overlay.insert(_toastEntry!);
-    _toastTimer = Timer(const Duration(milliseconds: 1600), () {
+    _toastTimer = Timer(duration ?? const Duration(milliseconds: 1600), () {
       _toastEntry?.remove();
       _toastEntry = null;
     });
@@ -2170,11 +2178,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _startHoldActionHome(String key, VoidCallback onComplete, {String? countdownLabel}) {
     _holdTimersHome[key]?.cancel();
     final start = DateTime.now();
-    _holdLastSecondHome[key] = (_holdMillis / 1000).ceil();
+    final totalSeconds = (_holdMillis / 1000).ceil();
+    _holdLastSecondHome[key] = totalSeconds;
     setState(() {
       _holdActiveHome[key] = true;
       _holdProgressHome[key] = 0;
     });
+    if (countdownLabel != null) {
+      _showHoldWarningHome('Hold ${totalSeconds}s to $countdownLabel');
+    }
     _holdTimersHome[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
@@ -2188,7 +2200,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
       if (countdownLabel != null && remainingSeconds != _holdLastSecondHome[key]) {
         _holdLastSecondHome[key] = remainingSeconds;
-        _showHoldWarningHome('$countdownLabel (${remainingSeconds}s)');
+        _showHoldWarningHome('Hold ${remainingSeconds}s to $countdownLabel');
       }
       if (progress >= 1) {
         t.cancel();
@@ -2281,7 +2293,7 @@ class _PendingPreview extends StatelessWidget {
 }
 
 class _QrScanPage extends StatefulWidget {
-  const _QrScanPage({super.key});
+  const _QrScanPage();
 
   @override
   State<_QrScanPage> createState() => _QrScanPageState();
@@ -2351,8 +2363,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController nicknameCtrl = TextEditingController();
   bool _isSaving = false;
   bool _hasPendingChanges = false;
-  String _saveStatus = 'Saved';
-  Color _saveStatusColor = Colors.greenAccent.shade200;
   bool _relayInputValid = false;
   bool _nsecCopied = false;
   bool _npubCopied = false;
@@ -2389,11 +2399,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     if (mounted) {
-      setState(() {
-        _isSaving = true;
-        _saveStatus = 'Loading...';
-        _saveStatusColor = Colors.amber.shade200;
-      });
+    setState(() {
+      _isSaving = true;
+    });
     }
     final prefs = await SharedPreferences.getInstance();
 
@@ -2455,22 +2463,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _hasPendingChanges = false;
         _isSaving = false;
-        _saveStatus = 'Saved';
-        _saveStatusColor = Colors.greenAccent.shade200;
         _relayInputValid = _isRelayInputValid(relayInputCtrl.text);
       });
     }
     _probeAllRelays(loadedRelays);
   }
 
-  void _markDirty() {
+  void _markDirty({bool schedule = true}) {
     if (!mounted) return;
     setState(() {
       _hasPendingChanges = true;
-      _saveStatus = 'Unsaved changes';
-      _saveStatusColor = Colors.amber.shade300;
     });
-    _scheduleAutoSave();
+    if (schedule) {
+      _scheduleAutoSave();
+    }
   }
 
   bool _isRelayInputValid(String relay) {
@@ -2487,36 +2493,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _handleSaveAction() async {
-    if (_isSaving) return;
-    if (!_hasPendingChanges) {
-      if (mounted) {
-        setState(() {
-          _saveStatus = 'No changes';
-          _saveStatusColor = Colors.blueGrey.shade200;
-        });
-        _showThemedToast('No changes to save', preferTop: true);
-      }
-      return;
-    }
-    await _saveSettings();
-  }
-
   Future<void> _saveSettings() async {
     if (!mounted) return;
     setState(() {
       _isSaving = true;
-      _saveStatus = 'Saving...';
-      _saveStatusColor = Colors.amber.shade300;
     });
-      try {
-        final prefs = await SharedPreferences.getInstance();
+    _showThemedToast('Saving...', preferTop: true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-        await prefs.setStringList(
-          'profiles',
-          profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
-        );
-        await prefs.setInt('selected_profile_index', selectedProfileIndex);
+      await prefs.setStringList(
+        'profiles',
+        profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
+      );
+      await prefs.setInt('selected_profile_index', selectedProfileIndex);
 
       if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
         final selectedNsec = profiles[selectedProfileIndex]['nsec']!;
@@ -2541,16 +2531,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _isSaving = false;
         _hasPendingChanges = false;
-        _saveStatus = 'Saved';
-        _saveStatusColor = Colors.greenAccent.shade200;
+        profileNickname = nicknameCtrl.text.trim();
       });
-      _showThemedToast('Settings saved', preferTop: true);
+      _showThemedToast(
+        'Saved',
+        preferTop: true,
+        duration: const Duration(milliseconds: 500),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isSaving = false;
-        _saveStatus = 'Save failed';
-        _saveStatusColor = Colors.amber.shade300;
       });
       _showThemedToast('Save failed: $e', preferTop: true);
     }
@@ -2651,6 +2642,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final nsec = profiles[selectedProfileIndex]['nsec']!;
     await Clipboard.setData(ClipboardData(text: nsec));
+    if (mounted) {
+      _showThemedToast('Copied profile secret (nSec)', preferTop: true);
+    }
   }
 
   Future<void> _copyNpub() async {
@@ -2687,7 +2681,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _showThemedToast(String message, {bool preferTop = false}) {
+  void _showThemedToast(
+    String message, {
+    bool preferTop = false,
+    Duration? duration,
+  }) {
     _toastEntry?.remove();
     _toastTimer?.cancel();
     final overlay = Overlay.maybeOf(context);
@@ -2729,7 +2727,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     overlay.insert(_toastEntry!);
-    _toastTimer = Timer(const Duration(milliseconds: 1600), () {
+    _toastTimer = Timer(duration ?? const Duration(milliseconds: 1600), () {
       _toastEntry?.remove();
       _toastEntry = null;
     });
@@ -2738,11 +2736,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _startHoldAction(String key, VoidCallback onComplete, {String? countdownLabel}) {
     _holdTimers[key]?.cancel();
     final start = DateTime.now();
-    _holdLastSecond[key] = (_holdMillis / 1000).ceil();
+    final totalSeconds = (_holdMillis / 1000).ceil();
+    _holdLastSecond[key] = totalSeconds;
     setState(() {
       _holdActive[key] = true;
       _holdProgress[key] = 0;
     });
+    if (countdownLabel != null) {
+      _showHoldWarning('Hold ${totalSeconds}s to $countdownLabel');
+    }
     _holdTimers[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
@@ -2756,7 +2758,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
       if (countdownLabel != null && remainingSeconds != _holdLastSecond[key]) {
         _holdLastSecond[key] = remainingSeconds;
-        _showHoldWarning('$countdownLabel (${remainingSeconds}s)');
+        _showHoldWarning('Hold ${remainingSeconds}s to $countdownLabel');
       }
       if (progress >= 1) {
         t.cancel();
@@ -2972,6 +2974,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     );
 
+    final textButtonStyle = ElevatedButton.styleFrom(
+      minimumSize: const Size(150, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    );
+
     Widget actionGroup(String label, List<Widget> buttons) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3086,7 +3093,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _markDirty();
                   await _saveSettings();
                   _cancelHoldAction('relay_$relay');
-                }, countdownLabel: 'Hold to remove relay');
+                }, countdownLabel: 'remove relay');
               },
               onHoldEnd: () => _cancelHoldAction('relay_$relay'),
             ),
@@ -3095,32 +3102,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
 
+    final nicknameDirty = nicknameCtrl.text.trim() != profileNickname;
+    final showProfileSave = !_isSaving && (_hasPendingChanges || nicknameDirty);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pushstr Settings'),
+        title: const Text('Settings'),
         actions: const [],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_isSaving)
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2.2),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    _saveStatus,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
           Container(
             decoration: sectionDecoration,
             padding: const EdgeInsets.all(14),
@@ -3152,18 +3144,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         items: profiles.asMap().entries.map((entry) {
                           final idx = entry.key;
                           final profile = entry.value;
-                          final npubLabel = (idx < profileNpubs.length && profileNpubs[idx].isNotEmpty)
-                              ? _shortNpub(profileNpubs[idx])
+                          final fullNpub =
+                              (idx < profileNpubs.length &&
+                                  profileNpubs[idx].isNotEmpty)
+                              ? profileNpubs[idx]
                               : '';
+                          final shortNpub = fullNpub.isNotEmpty
+                              ? _shortNpub(fullNpub)
+                              : 'Profile ${idx + 1}';
                           final nickname = (profile['nickname'] ?? '').trim();
-                          final baseLabel = npubLabel.isNotEmpty ? npubLabel : 'Profile ${idx + 1}';
-                          final label = nickname.isNotEmpty ? '$baseLabel · $nickname' : baseLabel;
+                          final label = nickname.isNotEmpty
+                              ? '$shortNpub - $nickname'
+                              : shortNpub;
 
                           return DropdownMenuItem(
                             value: idx,
                             child: Text(label),
                           );
                         }).toList(),
+                        selectedItemBuilder: (ctx) {
+                          return profiles.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final fullNpub =
+                                (idx < profileNpubs.length &&
+                                    profileNpubs[idx].isNotEmpty)
+                                ? profileNpubs[idx]
+                                : '';
+                            final shortNpub = fullNpub.isNotEmpty
+                                ? _shortNpub(fullNpub)
+                                : 'Profile ${idx + 1}';
+                            return Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(shortNpub),
+                            );
+                          }).toList();
+                        },
                         onChanged: (idx) async {
                           if (idx != null && idx < profiles.length && idx != selectedProfileIndex) {
                             final nsec = profiles[idx]['nsec'] ?? '';
@@ -3207,60 +3222,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           ),
-                          onChanged: (value) {
-                            if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-                              profiles[selectedProfileIndex]['nickname'] = value;
-                              _markDirty();
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      _HoldDeleteIcon(
-                        active: _holdActive['delete_profile'] ?? false,
-                        progress: _holdProgressFor('delete_profile'),
-                        onTap: () => _showHoldWarning('Hold 5s to delete profile'),
-                        onHoldStart: () {
-                          if (profiles.length <= 1) return;
-                          _startHoldAction('delete_profile', () async {
-                            final removing = selectedProfileIndex;
-                            setState(() {
-                              profiles.removeAt(removing);
-                              if (removing < profileNpubs.length) {
-                                profileNpubs.removeAt(removing);
-                              }
-                              if (selectedProfileIndex >= profiles.length) {
-                                selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                              }
-                              profileNickname = profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                              nicknameCtrl.text = profileNickname;
-                            });
-                            _markDirty();
-                            await _saveSettings();
-                            await _refreshProfileNpubs();
-                            _cancelHoldAction('delete_profile');
-                          }, countdownLabel: 'Hold to delete profile');
-                        },
-                        onHoldEnd: () => _cancelHoldAction('delete_profile'),
-                      ),
+                      onChanged: (value) {
+                        if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+                          profiles[selectedProfileIndex]['nickname'] = value;
+                          _markDirty(schedule: false);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 150),
+                        child: showProfileSave
+                        ? IconButton.filled(
+                            key: const ValueKey('save_profile'),
+                            onPressed: _saveSettings,
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.greenAccent.shade400,
+                              foregroundColor: Colors.black,
+                              shape: const CircleBorder(),
+                              padding: const EdgeInsets.all(10),
+                            ),
+                            icon: const Icon(Icons.check, size: 22),
+                            tooltip: 'Save profile',
+                          )
+                        : _HoldDeleteIcon(
+                            active: _holdActive['delete_profile'] ?? false,
+                            progress: _holdProgressFor('delete_profile'),
+                            onTap: () => _showHoldWarning('Hold 5s to delete profile'),
+                            onHoldStart: () {
+                              if (_isSaving || profiles.length <= 1) return;
+                              _startHoldAction('delete_profile', () async {
+                                final removing = selectedProfileIndex;
+                                setState(() {
+                                  profiles.removeAt(removing);
+                                  if (removing < profileNpubs.length) {
+                                    profileNpubs.removeAt(removing);
+                                  }
+                                  if (selectedProfileIndex >= profiles.length) {
+                                    selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+                                  }
+                                  profileNickname =
+                                      profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
+                                  nicknameCtrl.text = profileNickname;
+                                });
+                                      _hasPendingChanges = false;
+                                await _saveSettings();
+                                await _refreshProfileNpubs();
+                                _cancelHoldAction('delete_profile');
+                              }, countdownLabel: 'delete profile');
+                            },
+                            onHoldEnd: () => _cancelHoldAction('delete_profile'),
+                          ),
+                  ),
                     ],
                   ),
                   const SizedBox(height: 12),
                 ],
                 actionGroup(
-                  'Key management',
+                  'Management',
                   [
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: _generateProfile,
-                      icon: const Icon(Icons.bolt_outlined, size: 20),
-                      label: const Text('New Key'),
+                      icon: const Icon(Icons.add, size: 22),
+                    label: const Text('New Profile'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: _addProfile,
                       icon: const Icon(Icons.input_outlined, size: 20),
-                      label: const Text('Import nSec'),
+                    label: const Text('Import Profile (nSec)'),
                     ),
                   ],
                 ),
@@ -3276,21 +3308,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final label = _nsecCopied
                           ? 'Copied'
                           : holdActive
-                              ? 'Hold ${remainingSeconds}s to copy nSec'
-                              : 'Hold 5s to copy nSec';
+                          ? 'Hold ${remainingSeconds}s to copy profile secret (nSec)'
+                          : 'Hold 5s to copy profile secret (nSec)';
                       return GestureDetector(
                         onLongPressStart: (_) => _startHoldAction('copy_nsec', () async {
                           await _exportCurrentKey();
                           _setCopyState(nsec: true);
                           _cancelHoldAction('copy_nsec');
-                        }),
+                        }, countdownLabel: 'copy profile secret (nSec)'),
                         onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
                         onTap: () {},
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 120),
                           opacity: 1.0,
                           child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                            style: textButtonStyle,
                             onPressed: null,
                             icon: const Icon(Icons.vpn_key_outlined, size: 20),
                             label: Text(label),
@@ -3299,16 +3331,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     }),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: () async {
                         await _copyNpub();
                         _setCopyState(npub: true);
                       },
-                      icon: const Icon(Icons.lock_outline, size: 22),
+                      icon: const Icon(Icons.mail_outline, size: 22),
                       label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(minimumSize: const Size(140, 32)),
+                      style: textButtonStyle,
                       onPressed: _showNpubQr,
                       icon: const Icon(Icons.qr_code_2, size: 20),
                       label: const Text('Show QR'),

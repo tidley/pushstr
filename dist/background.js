@@ -11800,6 +11800,7 @@ var settings = {
   ],
   recipients: [],
   recipientsByKey: {},
+  messagesByKey: {},
   nsec: null,
   keys: [],
   useGiftwrap: true,
@@ -11883,6 +11884,7 @@ async function handleMessage(msg) {
       return { ok: false };
     settings.nsec = next;
     addKeyToList(next);
+    loadMessagesForCurrent();
     quietNotifications();
     syncRecipientsForCurrent();
     await persistSettings();
@@ -11914,6 +11916,7 @@ async function handleMessage(msg) {
     } else if (settings.nsec === target) {
       settings.nsec = settings.keys[0].nsec;
     }
+    loadMessagesForCurrent();
     syncRecipientsForCurrent();
     await persistSettings();
     await connect();
@@ -11943,6 +11946,11 @@ async function handleMessage(msg) {
     const before = messages2.length;
     messages2 = messages2.filter((m) => m.from !== target && m.to !== target);
     messageIds = new Set(messages2.map((m) => m.id).filter(Boolean));
+    const pub = currentPubkey();
+    if (pub) {
+      settings.messagesByKey = settings.messagesByKey || {};
+      settings.messagesByKey[pub] = messages2;
+    }
     await persistSettings();
     return { ok: true, removed: before - messages2.length };
   }
@@ -11955,20 +11963,25 @@ async function loadSettings() {
   settings.useGiftwrap = true;
   settings.useNip44 = true;
   settings.recipientsByKey = settings.recipientsByKey || {};
+  settings.messagesByKey = settings.messagesByKey || {};
   settings.recipients = normalizeRecipients(settings.recipients || []);
   if (settings.lastRecipient)
     settings.lastRecipient = normalizePubkey(settings.lastRecipient);
   settings.keys = settings.keys || [];
   if (settings.nsec)
     addKeyToList(settings.nsec);
-  messages2 = stored.messages || [];
-  messageIds = new Set(messages2.map((m) => m.id).filter(Boolean));
+  loadMessagesForCurrent(stored.messages || []);
   if ((settings.keys || []).length !== prevKeys)
     await persistSettings();
   syncRecipientsForCurrent();
 }
 async function persistSettings() {
-  await browser.storage.local.set({ ...settings, messages: messages2 });
+  const pub = currentPubkey();
+  settings.messagesByKey = settings.messagesByKey || {};
+  if (pub) {
+    settings.messagesByKey[pub] = messages2;
+  }
+  await browser.storage.local.set({ ...settings, messages: messages2, messagesByKey: settings.messagesByKey });
 }
 function currentPrivkeyHex() {
   if (!settings.nsec)
@@ -11984,6 +11997,15 @@ function currentPubkey() {
   const priv = currentPrivkeyHex();
   return priv ? getPublicKey(priv) : null;
 }
+function loadMessagesForCurrent(legacyMessages = []) {
+  const pub = currentPubkey();
+  settings.messagesByKey = settings.messagesByKey || {};
+  if (legacyMessages.length && pub && !settings.messagesByKey[pub]) {
+    settings.messagesByKey[pub] = legacyMessages;
+  }
+  messages2 = pub ? settings.messagesByKey[pub] || [] : legacyMessages;
+  messageIds = new Set(messages2.map((m) => m.id).filter(Boolean));
+}
 async function ensureKey() {
   if (currentPrivkeyHex())
     return;
@@ -11993,6 +12015,7 @@ async function ensureKey() {
 async function importNsec(nsec) {
   settings.nsec = nsec;
   addKeyToList(settings.nsec);
+  loadMessagesForCurrent();
   quietNotifications();
   await persistSettings();
   await connect();
@@ -12004,6 +12027,7 @@ async function generateNewKey() {
   const priv = generateSecretKey();
   settings.nsec = nip19_exports.nsecEncode(priv);
   addKeyToList(settings.nsec);
+  loadMessagesForCurrent();
   quietNotifications();
   await persistSettings();
   await connect();
@@ -12376,6 +12400,9 @@ async function decryptMediaDescriptor(descriptor, senderPubkey) {
   }
 }
 async function recordMessage(entry) {
+  const pub = currentPubkey();
+  if (!pub)
+    return;
   const clean = {
     ...entry,
     created_at: entry.created_at || Math.floor(Date.now() / 1e3)
@@ -12392,6 +12419,8 @@ async function recordMessage(entry) {
     messages2 = messages2.slice(messages2.length - MESSAGE_LIMIT);
     messageIds = new Set(messages2.map((m) => m.id).filter(Boolean));
   }
+  settings.messagesByKey = settings.messagesByKey || {};
+  settings.messagesByKey[pub] = messages2;
   await persistSettings();
   console.log("[pushstr][background] recordMessage: persisted to storage");
 }
