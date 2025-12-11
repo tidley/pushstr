@@ -50,20 +50,20 @@ All messages are encrypted for the recipient and then encrypted again during tra
 ---
 
 # Demos
-- open, show settings, add nickname
-<video controls src="2025-12-10_23-54-27.mkv" title="Title"></video>
+- First time open, show settings, add nickname
+![](demo_vids/2025-12-10_23-54-27.gif)
 
 - open, show qr, add contact via qr, message
-<video controls src="2025-12-10_23-55-46.mkv" title="Title"></video>
+![](demo_vids/2025-12-10_23-55-46.gif)
 
 - extension popout, add photo, send to mobile, mobile attaches and sends a photo back
-<video controls src="2025-12-10_23-58-08.mkv" title="Title"></video>
+![](demo_vids/2025-12-10_23-58-08.gif)
 
 - extension popout, second phone, add mobile contact, message
-<video controls src="2025-12-11_00-00-31.mkv" title="Title"></video>
+![](demo_vids/2025-12-11_00-00-31.gif)
 
 - rename contact, switch contact, send message to extension
-<video controls src="2025-12-11_00-02-21.mkv" title="Title"></video>
+![](demo_vids/2025-12-11_00-02-21.gif)
 
 ---
 
