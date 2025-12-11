@@ -2552,7 +2552,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _relayInputValid = false;
   bool _nsecCopied = false;
   bool _npubCopied = false;
-  bool _foregroundToggle = false;
   bool _foregroundEnabled = false;
   Timer? _copyResetTimer;
   Timer? _autoSaveTimer;
@@ -2655,7 +2654,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _foregroundServiceEnabled =
             prefs.getBool('foreground_service_enabled') ?? false;
         _foregroundEnabled = _foregroundServiceEnabled;
-        _foregroundToggle = _foregroundServiceEnabled;
       });
     }
     if (_foregroundServiceEnabled) {
@@ -3540,14 +3538,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       setState(() {
                         _foregroundEnabled = val;
                         _foregroundServiceEnabled = val;
-                        _foregroundToggle = val;
                       });
                       if (val) {
                         await _startForegroundService();
                       } else {
                         await _stopForegroundService();
                       }
-                      _markDirty(schedule: false);
+                      await _saveSettings();
                     },
                   ),
                     Builder(builder: (context) {
