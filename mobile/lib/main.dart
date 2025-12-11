@@ -60,10 +60,59 @@ Future<bool> _performBackgroundSync() async {
     final prefs = await SharedPreferences.getInstance();
     final nsec = prefs.getString('nostr_nsec') ?? '';
     if (nsec.isEmpty) return true;
-    await api.initNostr(nsec: nsec);
+    api.initNostr(nsec: nsec);
+
+    // Check for new messages with a short timeout
+    final result = api.waitForNewDms(timeoutSecs: BigInt.from(10));
+    if (result.isNotEmpty) {
+      // Parse the JSON result
+      final List<dynamic> dmList = jsonDecode(result);
+
+      // Show notifications for new messages
+      for (final dmJson in dmList) {
+        final fromPubkey = dmJson['from'] as String? ?? '';
+        final content = dmJson['content'] as String? ?? '';
+        final direction = dmJson['direction'] as String? ?? '';
+
+        // Only show notification for incoming messages
+        if (direction == 'incoming' && fromPubkey.isNotEmpty) {
+          await _showBackgroundNotification(fromPubkey, content);
+        }
+      }
+    }
+
     return true;
   } catch (_) {
     return false;
+  }
+}
+
+Future<void> _showBackgroundNotification(String fromPubkey, String content) async {
+  try {
+    const androidDetails = AndroidNotificationDetails(
+      'pushstr_dms',
+      'Direct Messages',
+      channelDescription: 'Incoming Pushstr DMs',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    // Truncate pubkey for display
+    final shortPubkey = fromPubkey.length > 16
+        ? '${fromPubkey.substring(0, 8)}...${fromPubkey.substring(fromPubkey.length - 8)}'
+        : fromPubkey;
+
+    await _localNotifications.show(
+      fromPubkey.hashCode,
+      'New message from $shortPubkey',
+      content.isNotEmpty ? content : 'New message',
+      details,
+    );
+  } catch (_) {
+    // Ignore notification errors in background
   }
 }
 
@@ -161,6 +210,32 @@ Future<void> _initNotifications() async {
       allowWifiLock: true,
     ),
   );
+
+  // Auto-start foreground service if it was previously enabled
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
+    if (foregroundEnabled) {
+      _foregroundServiceEnabled = foregroundEnabled;
+      await _startForegroundServiceAtLaunch();
+    }
+  } catch (_) {
+    // best-effort
+  }
+}
+
+Future<void> _startForegroundServiceAtLaunch() async {
+  final running = await FlutterForegroundTask.isRunningService;
+  if (running) {
+    _foregroundServiceRunning = true;
+    return;
+  }
+  await FlutterForegroundTask.startService(
+    notificationTitle: 'Pushstr running',
+    notificationText: 'Staying connected for incoming messages',
+    callback: foregroundStartCallback,
+  );
+  _foregroundServiceRunning = true;
 }
 
 class _HoldDeleteIcon extends StatelessWidget {
