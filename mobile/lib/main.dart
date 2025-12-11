@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -23,6 +24,7 @@ import 'bridge_generated.dart/frb_generated.dart';
 
 bool _rustInitialized = false;
 Completer<void>? _rustInitCompleter;
+final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
 Future<void> _ensureRustInit() async {
   if (_rustInitialized) return;
@@ -96,6 +98,20 @@ Future<void> _setupBackgroundTasks() async {
   }
 }
 
+Future<void> _initNotifications() async {
+  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: androidInit);
+  await _localNotifications.initialize(initSettings);
+  final androidPlugin =
+      _localNotifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+  // requestNotificationsPermission was added in 16.2.0+; guard older versions
+  try {
+    await androidPlugin?.requestNotificationsPermission();
+  } catch (_) {
+    // best-effort; permissions may not be required on older Android versions
+  }
+}
+
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
   final double progress;
@@ -145,6 +161,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _ensureRustInit();
   await _setupBackgroundTasks();
+  await _initNotifications();
   runApp(const PushstrApp());
 }
 
@@ -381,6 +398,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await _ensureRustInitialized();
       final existingLen = messages.length;
+      final existingIds = messages.map((m) => m['id'] as String?).whereType<String>().toSet();
       final dmsJson = api.fetchRecentDms(limit: BigInt.from(100));
       final List<dynamic> dmsList = jsonDecode(dmsJson);
       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
@@ -407,6 +425,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return id != null && id.startsWith('local_') && !fetchedIds.contains(id);
       }).toList();
 
+      final newIncoming = fetchedMessages.where((m) {
+        final id = m['id'] as String?;
+        return m['direction'] == 'in' && id != null && !existingIds.contains(id);
+      }).toList();
+
       final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
       final added = merged.length > existingLen;
       setState(() {
@@ -422,6 +445,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _saveContacts();
       if (added && _isNearBottom()) {
         _scrollToBottom();
+      }
+
+      for (final msg in newIncoming) {
+        final from = (msg['from'] as String?) ?? '';
+        var body = (msg['content'] as String?) ?? '';
+        final media = msg['media'];
+        if ((body.isEmpty) && media != null) {
+          body = '(attachment)';
+        }
+        _showIncomingNotification(from, body);
       }
     } catch (e) {
       setState(() {
@@ -1734,6 +1767,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (value.length <= 12) return value;
     return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
+  }
+
+  String _shortHex(String text) {
+    final value = text.trim();
+    if (value.length <= 12) return value;
+    return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
+  }
+
+  String _displayNameFor(String pubkey) {
+    final match = contacts.firstWhere(
+      (c) => c['pubkey'] == pubkey,
+      orElse: () => const <String, dynamic>{},
+    );
+    final nick = (match['nickname'] ?? '').toString().trim();
+    if (nick.isNotEmpty) return nick;
+    return _short(pubkey);
+  }
+
+  Future<void> _showIncomingNotification(String fromPubkey, String content) async {
+    if (fromPubkey.isEmpty) return;
+    final title = 'DM from ${_displayNameFor(fromPubkey)}';
+    final body = content.isNotEmpty ? content : 'New message';
+    const androidDetails = AndroidNotificationDetails(
+      'pushstr_dms',
+      'Direct Messages',
+      channelDescription: 'Incoming Pushstr DMs',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+    const details = NotificationDetails(android: androidDetails);
+    await _localNotifications.show(
+      DateTime.now().millisecondsSinceEpoch & 0x7fffffff,
+      title,
+      body,
+      details,
+    );
   }
 
   String _messageCopyKey(Map<String, dynamic> message) {
