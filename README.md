@@ -1,4 +1,4 @@
-# Pushstr – Private, Secure, Instant Communication
+# Pushstr – Private, Secure, Instant Communication (Rebrand to Noti)
 
 > **Pushstr is a lightweight, relay-backed messenger built on Nostr giftwrapped DMs.**  
 > No signup, no central server, keys stay local, and messages are end-to-end encrypted.
