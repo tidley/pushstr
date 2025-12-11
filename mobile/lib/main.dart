@@ -1949,12 +1949,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _saveMedia(Uint8List bytes, String mime) async {
     try {
-      final dir = await getTemporaryDirectory();
+      final selectedDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose where to save');
+      if (selectedDir == null) {
+        if (mounted) _showThemedToast('Save cancelled', preferTop: true, duration: const Duration(milliseconds: 800));
+        return;
+      }
       final ext = extensionFromMime(mime);
-      final file = File('${dir.path}/pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext');
+      final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final file = File('$selectedDir/$filename');
       await file.writeAsBytes(bytes);
       if (!mounted) return;
-      _showThemedToast('Saved to ${file.path}', preferTop: true);
+      _showThemedToast('Saved to $selectedDir', preferTop: true);
     } catch (e) {
       if (!mounted) return;
       _showThemedToast('Save failed: $e', preferTop: true);
