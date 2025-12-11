@@ -69,6 +69,7 @@ Future<bool> _performBackgroundSync() async {
       final List<dynamic> dmList = jsonDecode(result);
 
       // Show notifications for new messages
+      bool hasIncomingMessages = false;
       for (final dmJson in dmList) {
         final fromPubkey = dmJson['from'] as String? ?? '';
         final content = dmJson['content'] as String? ?? '';
@@ -77,7 +78,14 @@ Future<bool> _performBackgroundSync() async {
         // Only show notification for incoming messages
         if (direction == 'incoming' && fromPubkey.isNotEmpty) {
           await _showBackgroundNotification(fromPubkey, content);
+          hasIncomingMessages = true;
         }
+      }
+
+      // Reset adaptive interval when new messages are received
+      // This ensures responsive checking during active conversations
+      if (hasIncomingMessages) {
+        await _resetAdaptiveInterval();
       }
     }
 
@@ -131,13 +139,70 @@ void foregroundStartCallback() {
   FlutterForegroundTask.setTaskHandler(_PushstrTaskHandler());
 }
 
+/// Reset the adaptive interval timer to provide responsive checking
+/// Call this when user sends or receives messages
+Future<void> _resetAdaptiveInterval() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('fg_service_start_time', DateTime.now().millisecondsSinceEpoch);
+  } catch (_) {
+    // Ignore if prefs unavailable
+  }
+}
+
+/// Calculate adaptive sync interval based on elapsed time since service started
+/// Starts at 5 seconds, gradually increases to 15 minutes over 3 hours
+int _calculateAdaptiveInterval(DateTime serviceStartTime) {
+  final elapsed = DateTime.now().difference(serviceStartTime);
+  final elapsedSeconds = elapsed.inSeconds;
+
+  // Define the curve: 5s -> 15min over 3 hours (10800 seconds)
+  const minInterval = 5;           // 5 seconds
+  const maxInterval = 15 * 60;     // 15 minutes
+  const rampUpDuration = 3 * 60 * 60; // 3 hours
+
+  if (elapsedSeconds <= 0) return minInterval;
+  if (elapsedSeconds >= rampUpDuration) return maxInterval;
+
+  // Use exponential curve for gradual increase
+  // Formula: min + (max - min) * (elapsed / duration)^2
+  final progress = elapsedSeconds / rampUpDuration;
+  final exponentialProgress = progress * progress; // Square for smoother curve
+  final interval = minInterval + ((maxInterval - minInterval) * exponentialProgress);
+
+  return interval.round();
+}
+
 class _PushstrTaskHandler extends TaskHandler {
   @override
-  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {}
+  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+    // Record when the service started
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('fg_service_start_time', timestamp.millisecondsSinceEpoch);
+    await prefs.setInt('fg_last_sync_time', 0); // Reset last sync time
+  }
 
   @override
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
-    await _performBackgroundSync();
+    final prefs = await SharedPreferences.getInstance();
+
+    // Get service start time
+    final startTimeMs = prefs.getInt('fg_service_start_time') ?? timestamp.millisecondsSinceEpoch;
+    final serviceStartTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
+
+    // Get last sync time
+    final lastSyncMs = prefs.getInt('fg_last_sync_time') ?? 0;
+    final lastSyncTime = DateTime.fromMillisecondsSinceEpoch(lastSyncMs);
+
+    // Calculate how much time should pass before next sync
+    final desiredInterval = _calculateAdaptiveInterval(serviceStartTime);
+    final timeSinceLastSync = timestamp.difference(lastSyncTime).inSeconds;
+
+    // Only sync if enough time has passed
+    if (timeSinceLastSync >= desiredInterval) {
+      await _performBackgroundSync();
+      await prefs.setInt('fg_last_sync_time', timestamp.millisecondsSinceEpoch);
+    }
   }
 
   @override
@@ -204,7 +269,7 @@ Future<void> _initNotifications() async {
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
     foregroundTaskOptions: const ForegroundTaskOptions(
-      interval: 15 * 60 * 1000,
+      interval: 10 * 1000, // Check every 10 seconds, adaptive logic determines actual sync
       isOnceEvent: false,
       allowWakeLock: true,
       allowWifiLock: true,
@@ -393,6 +458,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     // _intentDataStreamSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    // Reset adaptive interval when app comes to foreground
+    if (state == AppLifecycleState.resumed) {
+      _resetAdaptiveInterval();
+    }
   }
 
   @override
@@ -653,6 +728,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Save messages to persist them
       await _saveMessages();
       _scrollToBottom();
+
+      // Reset adaptive interval when sending a message
+      // This ensures responsive checking for the reply
+      await _resetAdaptiveInterval();
     } catch (e) {
       setState(() {
         lastError = 'Send failed: $e';
