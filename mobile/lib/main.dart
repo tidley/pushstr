@@ -490,6 +490,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Handle shared content from Android intents
     _initShareListener();
 
+    // Request permissions and enable background service on first run
+    await _ensurePermissionsAndService();
+
     try {
       await _ensureRustInitialized();
       final initedNpub = api.initNostr(nsec: savedNsec);
@@ -538,6 +541,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = 'Init failed: $e';
         isConnected = false;
       });
+    }
+  }
+
+  /// Ensure all necessary permissions are granted and background service is enabled
+  Future<void> _ensurePermissionsAndService() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasRequestedPermissions = prefs.getBool('has_requested_permissions') ?? false;
+
+      // Request notification permission (Android 13+)
+      if (!hasRequestedPermissions) {
+        final notifStatus = await Permission.notification.status;
+        if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
+          await Permission.notification.request();
+        }
+
+        // Enable background service by default on first run
+        final foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
+        if (!foregroundEnabled) {
+          await prefs.setBool('foreground_service_enabled', true);
+          _foregroundServiceEnabled = true;
+
+          // Start the foreground service
+          if (Platform.isAndroid) {
+            await _startForegroundServiceAtLaunch();
+          }
+        }
+
+        // Mark as done
+        await prefs.setBool('has_requested_permissions', true);
+      } else {
+        // Check if service should already be running
+        final foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
+        if (foregroundEnabled && Platform.isAndroid) {
+          _foregroundServiceEnabled = true;
+          // Service should already be running from _initNotifications, but check
+          final running = await FlutterForegroundTask.isRunningService;
+          if (!running) {
+            await _startForegroundServiceAtLaunch();
+          }
+        }
+      }
+    } catch (e) {
+      // Best effort - don't block app startup
     }
   }
 
