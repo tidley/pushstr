@@ -2843,6 +2843,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _startForegroundService() async {
+    final notifStatus = await Permission.notification.status;
+    if (!notifStatus.isGranted) {
+      final req = await Permission.notification.request();
+      if (!req.isGranted) {
+        _showThemedToast('Notification permission is required to stay connected', preferTop: true);
+        return;
+      }
+    }
     final running = await FlutterForegroundTask.isRunningService;
     if (running) {
       _foregroundServiceRunning = true;
