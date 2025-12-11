@@ -3535,6 +3535,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     value: _foregroundEnabled,
                     onChanged: (val) async {
+                      _showThemedToast(
+                        val
+                            ? 'Enabling background service…'
+                            : 'Disabling background service…',
+                        preferTop: true,
+                      );
                       setState(() {
                         _foregroundEnabled = val;
                         _foregroundServiceEnabled = val;
