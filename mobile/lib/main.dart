@@ -110,6 +110,11 @@ Future<void> _initNotifications() async {
   } catch (_) {
     // best-effort; permissions may not be required on older Android versions
   }
+  // Android 13+ runtime notification permission fallback
+  final notifStatus = await Permission.notification.status;
+  if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
+    await Permission.notification.request();
+  }
 }
 
 class _HoldDeleteIcon extends StatelessWidget {
