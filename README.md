@@ -122,14 +122,6 @@ See `mobile/QUICKSTART.md` for more detail.
 - Relay outages aren’t retried automatically; reload/refresh to reconnect.
 - Vendored `vendor/nostr-tools.bundle.js`; bump there to update nostr-tools.
 
-# Browser extension
-![alt text](image.png)
-
-# Mobile app
-![alt text](image-1.png)
-
-![alt text](image-3.png)
-
 ## Next Steps
 
 1. Publish to Zapstore / mobile app stores
