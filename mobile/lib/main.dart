@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -19,14 +19,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:background_fetch/background_fetch.dart' as bg;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter/widgets.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
+import 'notifications.dart';
 import 'permissions_gate.dart';
+import 'sync/sync_controller.dart';
 
 bool _rustInitialized = false;
 Completer<void>? _rustInitCompleter;
-final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 bool _foregroundServiceEnabled = false;
 bool _foregroundServiceRunning = false;
 
@@ -54,85 +56,22 @@ Future<void> _ensureRustInit() async {
   }
 }
 
-Future<bool> _performBackgroundSync() async {
-  try {
-    WidgetsFlutterBinding.ensureInitialized();
-    await _ensureRustInit();
-    final prefs = await SharedPreferences.getInstance();
-    final nsec = prefs.getString('nostr_nsec') ?? '';
-    if (nsec.isEmpty) return true;
-    api.initNostr(nsec: nsec);
-
-    // Check for new messages with a short timeout
-    final result = api.waitForNewDms(timeoutSecs: BigInt.from(10));
-    if (result.isNotEmpty) {
-      // Parse the JSON result
-      final List<dynamic> dmList = jsonDecode(result);
-
-      // Show notifications for new messages
-      bool hasIncomingMessages = false;
-      for (final dmJson in dmList) {
-        final fromPubkey = dmJson['from'] as String? ?? '';
-        final content = dmJson['content'] as String? ?? '';
-        final direction = dmJson['direction'] as String? ?? '';
-
-        // Only show notification for incoming messages
-        if (direction == 'incoming' && fromPubkey.isNotEmpty) {
-          await _showBackgroundNotification(fromPubkey, content);
-          hasIncomingMessages = true;
-        }
-      }
-
-      // Reset adaptive interval when new messages are received
-      // This ensures responsive checking during active conversations
-      if (hasIncomingMessages) {
-        await _resetAdaptiveInterval();
-      }
-    }
-
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-Future<void> _showBackgroundNotification(String fromPubkey, String content) async {
-  try {
-    const androidDetails = AndroidNotificationDetails(
-      'pushstr_dms',
-      'Direct Messages',
-      channelDescription: 'Incoming Pushstr DMs',
-      importance: Importance.high,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-    );
-    const details = NotificationDetails(android: androidDetails);
-
-    // Truncate pubkey for display
-    final shortPubkey = fromPubkey.length > 16
-        ? '${fromPubkey.substring(0, 8)}...${fromPubkey.substring(fromPubkey.length - 8)}'
-        : fromPubkey;
-
-    await _localNotifications.show(
-      fromPubkey.hashCode,
-      'New message from $shortPubkey',
-      content.isNotEmpty ? content : 'New message',
-      details,
-    );
-  } catch (_) {
-    // Ignore notification errors in background
-  }
-}
-
 @pragma('vm:entry-point')
 void backgroundFetchHeadless(bg.HeadlessTask task) async {
-  if (task.timeout) {
+  DartPluginRegistrant.ensureInitialized();
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    if (task.timeout) return;
+    await _ensureRustInit();
+    await SyncController.performSyncTick(
+      trigger: SyncTrigger.backgroundFetch,
+      budget: const Duration(seconds: 6),
+    );
+  } catch (e, st) {
+    debugPrint('Headless fetch error: $e\n$st');
+  } finally {
     bg.BackgroundFetch.finish(task.taskId);
-    return;
   }
-  await _performBackgroundSync();
-  bg.BackgroundFetch.finish(task.taskId);
 }
 
 @pragma('vm:entry-point')
@@ -177,6 +116,7 @@ int _calculateAdaptiveInterval(DateTime serviceStartTime) {
 class _PushstrTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+    DartPluginRegistrant.ensureInitialized();
     // Record when the service started
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('fg_service_start_time', timestamp.millisecondsSinceEpoch);
@@ -185,6 +125,7 @@ class _PushstrTaskHandler extends TaskHandler {
 
   @override
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
+    DartPluginRegistrant.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
 
     // Get service start time
@@ -201,7 +142,10 @@ class _PushstrTaskHandler extends TaskHandler {
 
     // Only sync if enough time has passed
     if (timeSinceLastSync >= desiredInterval) {
-      await _performBackgroundSync();
+      await SyncController.performSyncTick(
+        trigger: SyncTrigger.foregroundService,
+        budget: const Duration(seconds: 6),
+      );
       await prefs.setInt('fg_last_sync_time', timestamp.millisecondsSinceEpoch);
     }
   }
@@ -214,8 +158,6 @@ class _PushstrTaskHandler extends TaskHandler {
 }
 
 Future<void> _setupBackgroundTasks() async {
-  const budget = Duration(seconds: 10);
-
   try {
     await bg.BackgroundFetch.configure(
       bg.BackgroundFetchConfig(
@@ -228,11 +170,15 @@ Future<void> _setupBackgroundTasks() async {
       (taskId) async {
         final sw = Stopwatch()..start();
         try {
-          await _performBackgroundSync().timeout(budget);
+          await SyncController.performSyncTick(
+            trigger: SyncTrigger.backgroundFetch,
+            budget: const Duration(seconds: 6),
+          );
         } catch (e, st) {
-          // log: taskId, sw.elapsed, e, st
+          debugPrint('BackgroundFetch($taskId) error: $e\n$st');
         } finally {
           bg.BackgroundFetch.finish(taskId);
+          debugPrint('BackgroundFetch($taskId) finished in ${sw.elapsedMilliseconds}ms');
         }
       },
       (taskId) async {
@@ -249,9 +195,7 @@ Future<void> _setupBackgroundTasks() async {
 
 
 Future<void> _initNotifications() async {
-  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const initSettings = InitializationSettings(android: androidInit);
-  await _localNotifications.initialize(initSettings);
+  await initLocalNotifications();
 
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
@@ -268,7 +212,7 @@ Future<void> _initNotifications() async {
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
     foregroundTaskOptions: const ForegroundTaskOptions(
-      interval: 10 * 1000, // Check every 10 seconds, adaptive logic determines actual sync
+      interval: 15 * 1000, // Base tick; adaptive logic only skips work, never faster than this
       isOnceEvent: false,
       allowWakeLock: true,
       allowWifiLock: true,
@@ -2024,22 +1968,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (fromPubkey.isEmpty) return;
     final title = 'DM from ${_displayNameFor(fromPubkey)}';
     final body = content.isNotEmpty ? content : 'New message';
-    const androidDetails = AndroidNotificationDetails(
-      'pushstr_dms',
-      'Direct Messages',
-      channelDescription: 'Incoming Pushstr DMs',
-      importance: Importance.high,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-    );
-    const details = NotificationDetails(android: androidDetails);
-    await _localNotifications.show(
-      DateTime.now().millisecondsSinceEpoch & 0x7fffffff,
-      title,
-      body,
-      details,
-    );
+    await showDmNotification(title: title, body: body);
   }
 
   String _messageCopyKey(Map<String, dynamic> message) {
