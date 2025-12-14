@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../notifications.dart';
@@ -88,6 +89,7 @@ class SyncController {
       await prefs.setStringList('notified_dm_ids', trimmed);
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       debugPrint('[sync] done trigger=$trigger emitted=$emitted rust=${rustMs}ms total=${elapsed}ms');
+      await _updateForegroundStatus(DateTime.now());
     } catch (e, st) {
       debugPrint('[sync] error: $e\n$st');
     } finally {
@@ -98,6 +100,23 @@ class SyncController {
   static String _shortPubkey(String pubkey) {
     if (pubkey.length <= 16) return pubkey;
     return '${pubkey.substring(0, 8)}...${pubkey.substring(pubkey.length - 8)}';
+  }
+
+  static Future<void> _updateForegroundStatus(DateTime ts) async {
+    try {
+      final running = await FlutterForegroundTask.isRunningService;
+      if (!running) return;
+      final h = ts.hour.toString().padLeft(2, '0');
+      final m = ts.minute.toString().padLeft(2, '0');
+      final s = ts.second.toString().padLeft(2, '0');
+      final text = 'Staying connected · Last sync $h:$m:$s';
+      await FlutterForegroundTask.updateService(
+        notificationTitle: 'Pushstr running',
+        notificationText: text,
+      );
+    } catch (_) {
+      // best-effort; ignore update errors
+    }
   }
 }
 
