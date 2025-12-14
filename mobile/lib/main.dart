@@ -339,10 +339,15 @@ class _HoldDeleteIcon extends StatelessWidget {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await _ensureRustInit();
-  await _setupBackgroundTasks();
-  await _initNotifications();
   runApp(const PushstrApp());
+  // Defer heavy init so first frame is not blocked.
+  unawaited(_prewarmApp());
+}
+
+Future<void> _prewarmApp() async {
+  await _ensureRustInit();
+  await _initNotifications();
+  await _setupBackgroundTasks();
 }
 
 class PushstrApp extends StatelessWidget {
@@ -411,7 +416,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     });
     super.initState();
-    _init();
+    // Allow first frame to paint before heavy init.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _init();
+    });
     // TODO: Re-enable Android share support when API is stable
     // // Handle shared content (when app is already running)
     // _intentDataStreamSubscription = ReceiveSharingIntent.textStream.listen((String value) {
