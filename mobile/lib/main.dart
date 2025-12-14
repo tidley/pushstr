@@ -214,6 +214,8 @@ class _PushstrTaskHandler extends TaskHandler {
 }
 
 Future<void> _setupBackgroundTasks() async {
+  const budget = Duration(seconds: 10);
+
   try {
     await bg.BackgroundFetch.configure(
       bg.BackgroundFetchConfig(
@@ -224,18 +226,27 @@ Future<void> _setupBackgroundTasks() async {
         requiredNetworkType: bg.NetworkType.ANY,
       ),
       (taskId) async {
-        await _performBackgroundSync();
-        bg.BackgroundFetch.finish(taskId);
+        final sw = Stopwatch()..start();
+        try {
+          await _performBackgroundSync().timeout(budget);
+        } catch (e, st) {
+          // log: taskId, sw.elapsed, e, st
+        } finally {
+          bg.BackgroundFetch.finish(taskId);
+        }
       },
       (taskId) async {
+        // Timeout callback: keep it trivial.
         bg.BackgroundFetch.finish(taskId);
       },
     );
+
     bg.BackgroundFetch.registerHeadlessTask(backgroundFetchHeadless);
-  } catch (_) {
-    // best-effort
+  } catch (e, st) {
+    // log e/st; best-effort is OK, but keep a breadcrumb.
   }
 }
+
 
 Future<void> _initNotifications() async {
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
