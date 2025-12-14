@@ -22,6 +22,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
+import 'permissions_gate.dart';
 
 bool _rustInitialized = false;
 Completer<void>? _rustInitCompleter;
@@ -240,27 +241,14 @@ Future<void> _initNotifications() async {
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
   const initSettings = InitializationSettings(android: androidInit);
   await _localNotifications.initialize(initSettings);
-  final androidPlugin =
-      _localNotifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-  // requestNotificationsPermission was added in 16.2.0+; guard older versions
-  try {
-    await androidPlugin?.requestNotificationsPermission();
-  } catch (_) {
-    // best-effort; permissions may not be required on older Android versions
-  }
-  // Android 13+ runtime notification permission fallback
-  final notifStatus = await Permission.notification.status;
-  if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
-    await Permission.notification.request();
-  }
 
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'pushstr_fg',
       channelName: 'Pushstr background service',
       channelDescription: 'Keeps Pushstr connected for notifications',
-      channelImportance: NotificationChannelImportance(2),
-      priority: NotificationPriority(-1),
+      channelImportance: NotificationChannelImportance.LOW,
+      priority: NotificationPriority.LOW,
       iconData: const NotificationIconData(
         resType: ResourceType.mipmap,
         resPrefix: ResourcePrefix.ic,
@@ -275,21 +263,11 @@ Future<void> _initNotifications() async {
       allowWifiLock: true,
     ),
   );
-
-  // Auto-start foreground service if it was previously enabled
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    final foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
-    if (foregroundEnabled) {
-      _foregroundServiceEnabled = foregroundEnabled;
-      await _startForegroundServiceAtLaunch();
-    }
-  } catch (_) {
-    // best-effort
-  }
 }
 
 Future<void> _startForegroundServiceAtLaunch() async {
+  final notifStatus = await Permission.notification.status;
+  if (!notifStatus.isGranted) return;
   final running = await FlutterForegroundTask.isRunningService;
   if (running) {
     _foregroundServiceRunning = true;
@@ -490,7 +468,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Handle shared content from Android intents
     _initShareListener();
 
-    // Request permissions and enable background service on first run
+    // Run permission gate and restore background service if enabled
+    await PermissionsGate.ensureAtLaunch(context, prefs: prefs);
     await _ensurePermissionsAndService();
 
     try {
@@ -548,39 +527,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _ensurePermissionsAndService() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final hasRequestedPermissions = prefs.getBool('has_requested_permissions') ?? false;
-
-      // Request notification permission (Android 13+)
-      if (!hasRequestedPermissions) {
-        final notifStatus = await Permission.notification.status;
-        if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
-          await Permission.notification.request();
-        }
-
-        // Enable background service by default on first run
-        final foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
-        if (!foregroundEnabled) {
-          await prefs.setBool('foreground_service_enabled', true);
-          _foregroundServiceEnabled = true;
-
-          // Start the foreground service
-          if (Platform.isAndroid) {
-            await _startForegroundServiceAtLaunch();
-          }
-        }
-
-        // Mark as done
-        await prefs.setBool('has_requested_permissions', true);
-      } else {
-        // Check if service should already be running
-        final foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
-        if (foregroundEnabled && Platform.isAndroid) {
-          _foregroundServiceEnabled = true;
-          // Service should already be running from _initNotifications, but check
-          final running = await FlutterForegroundTask.isRunningService;
-          if (!running) {
-            await _startForegroundServiceAtLaunch();
-          }
+      var foregroundEnabled = prefs.getBool('foreground_service_enabled');
+      if (foregroundEnabled == null && Platform.isAndroid) {
+        foregroundEnabled = true;
+        await prefs.setBool('foreground_service_enabled', true);
+      }
+      _foregroundServiceEnabled = foregroundEnabled ?? false;
+      if (_foregroundServiceEnabled && Platform.isAndroid) {
+        final running = await FlutterForegroundTask.isRunningService;
+        if (!running) {
+          await _startForegroundServiceAtLaunch();
         }
       }
     } catch (e) {
@@ -2890,13 +2846,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _startForegroundService() async {
-    final notifStatus = await Permission.notification.status;
-    if (!notifStatus.isGranted) {
-      final req = await Permission.notification.request();
-      if (!req.isGranted) {
-        _showThemedToast('Notification permission is required to stay connected', preferTop: true);
-        return;
-      }
+    final notifGranted = await PermissionsGate.ensureNotificationPermission(context);
+    if (!notifGranted) {
+      _showThemedToast('Notification permission is required to stay connected', preferTop: true);
+      return;
     }
     final running = await FlutterForegroundTask.isRunningService;
     if (running) {
@@ -3756,9 +3709,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       });
                       // Ensure notification permission is granted when enabling
                       if (val) {
-                        final notifStatus = await Permission.notification.status;
-                        if (!notifStatus.isGranted && !notifStatus.isPermanentlyDenied) {
-                          await Permission.notification.request();
+                        final notifGranted = await PermissionsGate.ensureNotificationPermission(context);
+                        if (!notifGranted) {
+                          setState(() {
+                            _foregroundEnabled = false;
+                            _foregroundServiceEnabled = false;
+                          });
+                          await _saveSettings();
+                          return;
                         }
                       }
 

@@ -1,9 +1,12 @@
 package com.pushstr.pushstr_mobile
 
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.Settings
 import java.io.ByteArrayOutputStream
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -11,7 +14,9 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.pushstr.share"
+    private val permissionsChannelName = "com.pushstr.permissions"
     private var channel: MethodChannel? = null
+    private var permissionsChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -20,6 +25,15 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "getInitialShare" -> {
                     result.success(extractShareData(intent))
+                }
+                else -> result.notImplemented()
+            }
+        }
+        permissionsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, permissionsChannelName)
+        permissionsChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "openAutoStartSettings" -> {
+                    result.success(openAutoStartSettings())
                 }
                 else -> result.notImplemented()
             }
@@ -35,6 +49,68 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sendShareToDart(intent)
+    }
+
+    private fun openAutoStartSettings(): Boolean {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val intents = mutableListOf<Intent>()
+        when (manufacturer) {
+            "xiaomi", "redmi", "poco" -> intents.add(
+                Intent().apply {
+                    component = ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                    )
+                }
+            )
+            "oppo", "realme" -> intents.add(
+                Intent().apply {
+                    component = ComponentName(
+                        "com.coloros.safecenter",
+                        "com.coloros.safecenter.startupapp.StartupAppListActivity"
+                    )
+                }
+            )
+            "oneplus" -> intents.add(
+                Intent().apply {
+                    component = ComponentName(
+                        "com.oneplus.security",
+                        "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"
+                    )
+                }
+            )
+            "vivo" -> intents.add(
+                Intent().apply {
+                    component = ComponentName(
+                        "com.vivo.permissionmanager",
+                        "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"
+                    )
+                }
+            )
+            "samsung" -> intents.add(
+                Intent().apply {
+                    component = ComponentName(
+                        "com.samsung.android.lool",
+                        "com.samsung.android.sm.ui.battery.BatteryActivity"
+                    )
+                }
+            )
+        }
+        intents.add(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+        )
+        for (intent in intents) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                return true
+            } catch (_: Exception) {
+                // Try next intent if this one fails
+            }
+        }
+        return false
     }
 
     private fun sendShareToDart(intent: Intent?) {
