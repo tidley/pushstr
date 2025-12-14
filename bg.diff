@@ -1,0 +1,1588 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 65933ce..1c5bdee 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,4 +7,4 @@
+ - UI refresh for extension options and popup: redesigned settings cards/labels, grouped profile tools, floating labels, sticky save, updated copy/QR/buttons, and cleaned conversation actions and message copy/preview behaviors.
+ - Added relay status probing (live dots), slimmer relay rows, better contact editing (nickname badge), and improved status handling across options.
+ - Mobile: overhauled settings layout, nickname editing, profile/relay management polish, new copy/QR actions, unsaved-change handling, and relay status indicators with WebSocket probing; added sharing support and various UX tweaks.
+-- Icon and manifest updates: new pushstr icons, trimmed orange asset, manifest tweaks/publish bump.
+\ No newline at end of file
++- Icon and manifest updates: new pushtr icons, trimmed orange asset, manifest tweaks/publish bump.
+\ No newline at end of file
+diff --git a/README.md b/README.md
+index 2cbfcba..3932523 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# Pushstr – Private, Secure, Instant Communication
++# Pushstr – Private, Secure, Instant Communication (Rebrand to Noti)
+ 
+ > **Pushstr is a lightweight, relay-backed messenger built on Nostr giftwrapped DMs.**  
+ > No signup, no central server, keys stay local, and messages are end-to-end encrypted.
+diff --git a/dist/background.js b/dist/background.js
+index 6fb265b..bb4b88e 100644
+--- a/dist/background.js
++++ b/dist/background.js
+@@ -11997,6 +11997,19 @@ function currentPubkey() {
+   const priv = currentPrivkeyHex();
+   return priv ? getPublicKey(priv) : null;
+ }
++function shortPubkey(pubkey) {
++  if (!pubkey)
++    return "unknown";
++  if (pubkey.length <= 12)
++    return pubkey;
++  return `${pubkey.slice(0, 8)}...${pubkey.slice(-4)}`;
++}
++function displayNameFor(pubkey) {
++  const list = getRecipientsForCurrent();
++  const match = list.find((r) => r.pubkey === pubkey);
++  const nick = match?.nickname?.trim();
++  return nick && nick.length ? nick : shortPubkey(pubkey);
++}
+ function loadMessagesForCurrent(legacyMessages = []) {
+   const pub = currentPubkey();
+   settings.messagesByKey = settings.messagesByKey || {};
+@@ -12086,7 +12099,7 @@ async function handleGiftEvent(event) {
+       relayFrom: settings.relays
+     });
+     if (message && !suppressNotifications) {
+-      notify(`DM from ${sender.slice(0, 8)}...`, message);
++      notify(`DM from ${displayNameFor(sender)}`, message);
+     }
+     browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message }).catch(() => {
+     });
+@@ -12173,10 +12186,10 @@ async function sendGift(recipient, content) {
+ function notify(title, message) {
+   try {
+     browser.notifications.create({
+-      type: 'basic',
+-      iconUrl: browser.runtime.getURL('pushstr_96.png'),
++      type: "basic",
++      iconUrl: browser.runtime.getURL("pushtr_96.png"),
+       title,
+-      message,
++      message
+     });
+   } catch (err2) {
+     console.warn("Notifications unavailable", err2);
+diff --git a/dist/manifest.json b/dist/manifest.json
+index 060fa62..b6e6ea8 100644
+--- a/dist/manifest.json
++++ b/dist/manifest.json
+@@ -4,9 +4,9 @@
+   "description": "Secure messaging via Nostr",
+   "version": "0.0.4",
+   "icons": {
+-    "48": "pushstr_48.png",
+-    "96": "pushstr_96.png",
+-    "128": "pushstr_128.png"
++    "48": "pushtr_48.png",
++    "96": "pushtr_96.png",
++    "128": "pushtr_128.png"
+   },
+   "permissions": [
+     "storage",
+@@ -32,9 +32,9 @@
+     "default_title": "Pushstr",
+     "default_popup": "popup.html",
+     "default_icon": {
+-      "48": "pushstr_48.png",
+-      "96": "pushstr_96.png",
+-      "128": "pushstr_128.png"
++      "48": "pushtr_48.png",
++      "96": "pushtr_96.png",
++      "128": "pushtr_128.png"
+     }
+   },
+   "options_ui": {
+diff --git a/dist/pushstr_128.png b/dist/pushtr_128.png
+similarity index 100%
+rename from dist/pushstr_128.png
+rename to dist/pushtr_128.png
+diff --git a/dist/pushstr_48.png b/dist/pushtr_48.png
+similarity index 100%
+rename from dist/pushstr_48.png
+rename to dist/pushtr_48.png
+diff --git a/dist/pushstr_96.png b/dist/pushtr_96.png
+similarity index 100%
+rename from dist/pushstr_96.png
+rename to dist/pushtr_96.png
+diff --git a/icon/pushstr_128.png b/icon/pushtr_128.png
+similarity index 100%
+rename from icon/pushstr_128.png
+rename to icon/pushtr_128.png
+diff --git a/icon/pushstr_48.png b/icon/pushtr_48.png
+similarity index 100%
+rename from icon/pushstr_48.png
+rename to icon/pushtr_48.png
+diff --git a/icon/pushstr_96.png b/icon/pushtr_96.png
+similarity index 100%
+rename from icon/pushstr_96.png
+rename to icon/pushtr_96.png
+diff --git a/icon/pushstr_orange.png b/icon/pushtr_orange.png
+similarity index 100%
+rename from icon/pushstr_orange.png
+rename to icon/pushtr_orange.png
+diff --git a/manifest.chrome.json b/manifest.chrome.json
+index 6a57d8e..053812f 100644
+--- a/manifest.chrome.json
++++ b/manifest.chrome.json
+@@ -4,9 +4,9 @@
+   "description": "Pushbullet-style notifier over Nostr DMs.",
+   "version": "0.1.0",
+   "icons": {
+-    "48": "pushstr_48.png",
+-    "96": "pushstr_96.png",
+-    "128": "pushstr_128.png"
++    "48": "pushtr_48.png",
++    "96": "pushtr_96.png",
++    "128": "pushtr_128.png"
+   },
+   "permissions": [
+     "storage",
+@@ -25,9 +25,9 @@
+     "default_title": "Pushstr",
+     "default_popup": "popup.html",
+     "default_icon": {
+-      "48": "pushstr_48.png",
+-      "96": "pushstr_96.png",
+-      "128": "pushstr_128.png"
++      "48": "pushtr_48.png",
++      "96": "pushtr_96.png",
++      "128": "pushtr_128.png"
+     }
+   },
+   "content_security_policy": {
+diff --git a/manifest.json b/manifest.json
+index 060fa62..b6e6ea8 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -4,9 +4,9 @@
+   "description": "Secure messaging via Nostr",
+   "version": "0.0.4",
+   "icons": {
+-    "48": "pushstr_48.png",
+-    "96": "pushstr_96.png",
+-    "128": "pushstr_128.png"
++    "48": "pushtr_48.png",
++    "96": "pushtr_96.png",
++    "128": "pushtr_128.png"
+   },
+   "permissions": [
+     "storage",
+@@ -32,9 +32,9 @@
+     "default_title": "Pushstr",
+     "default_popup": "popup.html",
+     "default_icon": {
+-      "48": "pushstr_48.png",
+-      "96": "pushstr_96.png",
+-      "128": "pushstr_128.png"
++      "48": "pushtr_48.png",
++      "96": "pushtr_96.png",
++      "128": "pushtr_128.png"
+     }
+   },
+   "options_ui": {
+diff --git a/mobile/android/app/src/main/AndroidManifest.xml b/mobile/android/app/src/main/AndroidManifest.xml
+index c34eebf..2b83937 100644
+--- a/mobile/android/app/src/main/AndroidManifest.xml
++++ b/mobile/android/app/src/main/AndroidManifest.xml
+@@ -1,9 +1,24 @@
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools">
+     <!-- Permissions for network access -->
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+     <uses-permission android:name="android.permission.CAMERA" />
+ 
++    <!-- Notification permissions (Android 13+) -->
++    <uses-permission
++        android:name="android.permission.POST_NOTIFICATIONS"
++        tools:targetApi="33" />
++
++    <!-- Foreground service permissions -->
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
++    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
++    <uses-permission android:name="android.permission.WAKE_LOCK" />
++    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
++
++    <!-- Background work (for background_fetch) -->
++    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++
+     <application
+ android:label="Pushstr"
+         android:name="${applicationName}"
+@@ -42,6 +57,14 @@ android:label="Pushstr"
+                 <data android:mimeType="image/*"/>
+             </intent-filter>
+         </activity>
++
++        <!-- Foreground service for background message listening -->
++        <service
++            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
++            android:foregroundServiceType="dataSync"
++            android:exported="false"
++            android:stopWithTask="false" />
++
+         <!-- Don't delete the meta-data below.
+              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+         <meta-data
+diff --git a/mobile/android/app/src/main/kotlin/com/pushstr/pushstr_mobile/MainActivity.kt b/mobile/android/app/src/main/kotlin/com/pushstr/pushstr_mobile/MainActivity.kt
+index 2358d3d..16aef55 100644
+--- a/mobile/android/app/src/main/kotlin/com/pushstr/pushstr_mobile/MainActivity.kt
++++ b/mobile/android/app/src/main/kotlin/com/pushstr/pushstr_mobile/MainActivity.kt
+@@ -1,9 +1,12 @@
+ package com.pushstr.pushstr_mobile
+ 
++import android.content.ComponentName
+ import android.content.Intent
+ import android.net.Uri
++import android.os.Build
+ import android.os.Bundle
+ import android.provider.OpenableColumns
++import android.provider.Settings
+ import java.io.ByteArrayOutputStream
+ import io.flutter.embedding.android.FlutterActivity
+ import io.flutter.embedding.engine.FlutterEngine
+@@ -11,7 +14,9 @@ import io.flutter.plugin.common.MethodChannel
+ 
+ class MainActivity : FlutterActivity() {
+     private val channelName = "com.pushstr.share"
++    private val permissionsChannelName = "com.pushstr.permissions"
+     private var channel: MethodChannel? = null
++    private var permissionsChannel: MethodChannel? = null
+ 
+     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+         super.configureFlutterEngine(flutterEngine)
+@@ -24,6 +29,15 @@ class MainActivity : FlutterActivity() {
+                 else -> result.notImplemented()
+             }
+         }
++        permissionsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, permissionsChannelName)
++        permissionsChannel?.setMethodCallHandler { call, result ->
++            when (call.method) {
++                "openAutoStartSettings" -> {
++                    result.success(openAutoStartSettings())
++                }
++                else -> result.notImplemented()
++            }
++        }
+     }
+ 
+     override fun onNewIntent(intent: Intent) {
+@@ -37,6 +51,68 @@ class MainActivity : FlutterActivity() {
+         sendShareToDart(intent)
+     }
+ 
++    private fun openAutoStartSettings(): Boolean {
++        val manufacturer = Build.MANUFACTURER.lowercase()
++        val intents = mutableListOf<Intent>()
++        when (manufacturer) {
++            "xiaomi", "redmi", "poco" -> intents.add(
++                Intent().apply {
++                    component = ComponentName(
++                        "com.miui.securitycenter",
++                        "com.miui.permcenter.autostart.AutoStartManagementActivity"
++                    )
++                }
++            )
++            "oppo", "realme" -> intents.add(
++                Intent().apply {
++                    component = ComponentName(
++                        "com.coloros.safecenter",
++                        "com.coloros.safecenter.startupapp.StartupAppListActivity"
++                    )
++                }
++            )
++            "oneplus" -> intents.add(
++                Intent().apply {
++                    component = ComponentName(
++                        "com.oneplus.security",
++                        "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"
++                    )
++                }
++            )
++            "vivo" -> intents.add(
++                Intent().apply {
++                    component = ComponentName(
++                        "com.vivo.permissionmanager",
++                        "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"
++                    )
++                }
++            )
++            "samsung" -> intents.add(
++                Intent().apply {
++                    component = ComponentName(
++                        "com.samsung.android.lool",
++                        "com.samsung.android.sm.ui.battery.BatteryActivity"
++                    )
++                }
++            )
++        }
++        intents.add(
++            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
++                data = Uri.parse("package:$packageName")
++            }
++        )
++        for (intent in intents) {
++            try {
++                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++                startActivity(intent)
++                return true
++            } catch (_: Exception) {
++                // Try next intent if this one fails
++            }
++        }
++        return false
++    }
++
+     private fun sendShareToDart(intent: Intent?) {
+         val data = extractShareData(intent) ?: return
+         channel?.invokeMethod("onShare", data)
+diff --git a/mobile/lib/main.dart b/mobile/lib/main.dart
+index c888c50..962e13a 100644
+--- a/mobile/lib/main.dart
++++ b/mobile/lib/main.dart
+@@ -6,6 +6,7 @@ import 'dart:math' as math;
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart';
++import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+ import 'package:file_picker/file_picker.dart';
+ import 'package:image_picker/image_picker.dart';
+@@ -16,9 +17,280 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
+ import 'package:qr_flutter/qr_flutter.dart';
+ import 'package:shared_preferences/shared_preferences.dart';
+ import 'package:url_launcher/url_launcher.dart';
++import 'package:background_fetch/background_fetch.dart' as bg;
++import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+ 
+ import 'bridge_generated.dart/api.dart' as api;
+ import 'bridge_generated.dart/frb_generated.dart';
++import 'permissions_gate.dart';
++
++bool _rustInitialized = false;
++Completer<void>? _rustInitCompleter;
++final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
++bool _foregroundServiceEnabled = false;
++bool _foregroundServiceRunning = false;
++
++Future<void> _ensureRustInit() async {
++  if (_rustInitialized) return;
++  if (_rustInitCompleter != null) {
++    return _rustInitCompleter!.future;
++  }
++  final completer = Completer<void>();
++  _rustInitCompleter = completer;
++  try {
++    ExternalLibrary? externalLibrary;
++    if (Platform.isIOS) {
++      externalLibrary = ExternalLibrary.open(
++        'Frameworks/pushstr_rust.framework/pushstr_rust',
++      );
++    }
++    await RustLib.init(externalLibrary: externalLibrary);
++    _rustInitialized = true;
++    completer.complete();
++  } catch (e, st) {
++    completer.completeError(e, st);
++    _rustInitCompleter = null;
++    rethrow;
++  }
++}
++
++Future<bool> _performBackgroundSync() async {
++  try {
++    WidgetsFlutterBinding.ensureInitialized();
++    await _ensureRustInit();
++    final prefs = await SharedPreferences.getInstance();
++    final nsec = prefs.getString('nostr_nsec') ?? '';
++    if (nsec.isEmpty) return true;
++    api.initNostr(nsec: nsec);
++
++    // Check for new messages with a short timeout
++    final result = api.waitForNewDms(timeoutSecs: BigInt.from(10));
++    if (result.isNotEmpty) {
++      // Parse the JSON result
++      final List<dynamic> dmList = jsonDecode(result);
++
++      // Show notifications for new messages
++      bool hasIncomingMessages = false;
++      for (final dmJson in dmList) {
++        final fromPubkey = dmJson['from'] as String? ?? '';
++        final content = dmJson['content'] as String? ?? '';
++        final direction = dmJson['direction'] as String? ?? '';
++
++        // Only show notification for incoming messages
++        if (direction == 'incoming' && fromPubkey.isNotEmpty) {
++          await _showBackgroundNotification(fromPubkey, content);
++          hasIncomingMessages = true;
++        }
++      }
++
++      // Reset adaptive interval when new messages are received
++      // This ensures responsive checking during active conversations
++      if (hasIncomingMessages) {
++        await _resetAdaptiveInterval();
++      }
++    }
++
++    return true;
++  } catch (_) {
++    return false;
++  }
++}
++
++Future<void> _showBackgroundNotification(String fromPubkey, String content) async {
++  try {
++    const androidDetails = AndroidNotificationDetails(
++      'pushstr_dms',
++      'Direct Messages',
++      channelDescription: 'Incoming Pushstr DMs',
++      importance: Importance.high,
++      priority: Priority.high,
++      playSound: true,
++      enableVibration: true,
++    );
++    const details = NotificationDetails(android: androidDetails);
++
++    // Truncate pubkey for display
++    final shortPubkey = fromPubkey.length > 16
++        ? '${fromPubkey.substring(0, 8)}...${fromPubkey.substring(fromPubkey.length - 8)}'
++        : fromPubkey;
++
++    await _localNotifications.show(
++      fromPubkey.hashCode,
++      'New message from $shortPubkey',
++      content.isNotEmpty ? content : 'New message',
++      details,
++    );
++  } catch (_) {
++    // Ignore notification errors in background
++  }
++}
++
++@pragma('vm:entry-point')
++void backgroundFetchHeadless(bg.HeadlessTask task) async {
++  if (task.timeout) {
++    bg.BackgroundFetch.finish(task.taskId);
++    return;
++  }
++  await _performBackgroundSync();
++  bg.BackgroundFetch.finish(task.taskId);
++}
++
++@pragma('vm:entry-point')
++void foregroundStartCallback() {
++  FlutterForegroundTask.setTaskHandler(_PushstrTaskHandler());
++}
++
++/// Reset the adaptive interval timer to provide responsive checking
++/// Call this when user sends or receives messages
++Future<void> _resetAdaptiveInterval() async {
++  try {
++    final prefs = await SharedPreferences.getInstance();
++    await prefs.setInt('fg_service_start_time', DateTime.now().millisecondsSinceEpoch);
++  } catch (_) {
++    // Ignore if prefs unavailable
++  }
++}
++
++/// Calculate adaptive sync interval based on elapsed time since service started
++/// Starts at 5 seconds, gradually increases to 15 minutes over 3 hours
++int _calculateAdaptiveInterval(DateTime serviceStartTime) {
++  final elapsed = DateTime.now().difference(serviceStartTime);
++  final elapsedSeconds = elapsed.inSeconds;
++
++  // Define the curve: 5s -> 15min over 3 hours (10800 seconds)
++  const minInterval = 5;           // 5 seconds
++  const maxInterval = 15 * 60;     // 15 minutes
++  const rampUpDuration = 3 * 60 * 60; // 3 hours
++
++  if (elapsedSeconds <= 0) return minInterval;
++  if (elapsedSeconds >= rampUpDuration) return maxInterval;
++
++  // Use exponential curve for gradual increase
++  // Formula: min + (max - min) * (elapsed / duration)^2
++  final progress = elapsedSeconds / rampUpDuration;
++  final exponentialProgress = progress * progress; // Square for smoother curve
++  final interval = minInterval + ((maxInterval - minInterval) * exponentialProgress);
++
++  return interval.round();
++}
++
++class _PushstrTaskHandler extends TaskHandler {
++  @override
++  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
++    // Record when the service started
++    final prefs = await SharedPreferences.getInstance();
++    await prefs.setInt('fg_service_start_time', timestamp.millisecondsSinceEpoch);
++    await prefs.setInt('fg_last_sync_time', 0); // Reset last sync time
++  }
++
++  @override
++  Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
++    final prefs = await SharedPreferences.getInstance();
++
++    // Get service start time
++    final startTimeMs = prefs.getInt('fg_service_start_time') ?? timestamp.millisecondsSinceEpoch;
++    final serviceStartTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
++
++    // Get last sync time
++    final lastSyncMs = prefs.getInt('fg_last_sync_time') ?? 0;
++    final lastSyncTime = DateTime.fromMillisecondsSinceEpoch(lastSyncMs);
++
++    // Calculate how much time should pass before next sync
++    final desiredInterval = _calculateAdaptiveInterval(serviceStartTime);
++    final timeSinceLastSync = timestamp.difference(lastSyncTime).inSeconds;
++
++    // Only sync if enough time has passed
++    if (timeSinceLastSync >= desiredInterval) {
++      await _performBackgroundSync();
++      await prefs.setInt('fg_last_sync_time', timestamp.millisecondsSinceEpoch);
++    }
++  }
++
++  @override
++  Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {}
++
++  @override
++  void onReceiveData(Object? data) {}
++}
++
++Future<void> _setupBackgroundTasks() async {
++  const budget = Duration(seconds: 10);
++
++  try {
++    await bg.BackgroundFetch.configure(
++      bg.BackgroundFetchConfig(
++        minimumFetchInterval: 30,
++        stopOnTerminate: false,
++        startOnBoot: true,
++        enableHeadless: true,
++        requiredNetworkType: bg.NetworkType.ANY,
++      ),
++      (taskId) async {
++        final sw = Stopwatch()..start();
++        try {
++          await _performBackgroundSync().timeout(budget);
++        } catch (e, st) {
++          // log: taskId, sw.elapsed, e, st
++        } finally {
++          bg.BackgroundFetch.finish(taskId);
++        }
++      },
++      (taskId) async {
++        // Timeout callback: keep it trivial.
++        bg.BackgroundFetch.finish(taskId);
++      },
++    );
++
++    bg.BackgroundFetch.registerHeadlessTask(backgroundFetchHeadless);
++  } catch (e, st) {
++    // log e/st; best-effort is OK, but keep a breadcrumb.
++  }
++}
++
++
++Future<void> _initNotifications() async {
++  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
++  const initSettings = InitializationSettings(android: androidInit);
++  await _localNotifications.initialize(initSettings);
++
++  FlutterForegroundTask.init(
++    androidNotificationOptions: AndroidNotificationOptions(
++      channelId: 'pushstr_fg',
++      channelName: 'Pushstr background service',
++      channelDescription: 'Keeps Pushstr connected for notifications',
++      channelImportance: NotificationChannelImportance.LOW,
++      priority: NotificationPriority.LOW,
++      iconData: const NotificationIconData(
++        resType: ResourceType.mipmap,
++        resPrefix: ResourcePrefix.ic,
++        name: 'launcher',
++      ),
++    ),
++    iosNotificationOptions: const IOSNotificationOptions(),
++    foregroundTaskOptions: const ForegroundTaskOptions(
++      interval: 10 * 1000, // Check every 10 seconds, adaptive logic determines actual sync
++      isOnceEvent: false,
++      allowWakeLock: true,
++      allowWifiLock: true,
++    ),
++  );
++}
++
++Future<void> _startForegroundServiceAtLaunch() async {
++  final notifStatus = await Permission.notification.status;
++  if (!notifStatus.isGranted) return;
++  final running = await FlutterForegroundTask.isRunningService;
++  if (running) {
++    _foregroundServiceRunning = true;
++    return;
++  }
++  await FlutterForegroundTask.startService(
++    notificationTitle: 'Pushstr running',
++    notificationText: 'Staying connected for incoming messages',
++    callback: foregroundStartCallback,
++  );
++  _foregroundServiceRunning = true;
++}
+ 
+ class _HoldDeleteIcon extends StatelessWidget {
+   final bool active;
+@@ -67,15 +339,15 @@ class _HoldDeleteIcon extends StatelessWidget {
+ 
+ void main() async {
+   WidgetsFlutterBinding.ensureInitialized();
+-  ExternalLibrary? externalLibrary;
+-  // On iOS, explicitly load the embedded framework from the app bundle.
+-  if (Platform.isIOS) {
+-    externalLibrary = ExternalLibrary.open(
+-      'Frameworks/pushstr_rust.framework/pushstr_rust',
+-    );
+-  }
+-  await RustLib.init(externalLibrary: externalLibrary);
+   runApp(const PushstrApp());
++  // Defer heavy init so first frame is not blocked.
++  unawaited(_prewarmApp());
++}
++
++Future<void> _prewarmApp() async {
++  await _ensureRustInit();
++  await _initNotifications();
++  await _setupBackgroundTasks();
+ }
+ 
+ class PushstrApp extends StatelessWidget {
+@@ -144,7 +416,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+       }
+     });
+     super.initState();
+-    _init();
++    // Allow first frame to paint before heavy init.
++    WidgetsBinding.instance.addPostFrameCallback((_) {
++      _init();
++    });
+     // TODO: Re-enable Android share support when API is stable
+     // // Handle shared content (when app is already running)
+     // _intentDataStreamSubscription = ReceiveSharingIntent.textStream.listen((String value) {
+@@ -182,6 +457,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+     super.dispose();
+   }
+ 
++  @override
++  void didChangeAppLifecycleState(AppLifecycleState state) {
++    super.didChangeAppLifecycleState(state);
++
++    // Reset adaptive interval when app comes to foreground
++    if (state == AppLifecycleState.resumed) {
++      _resetAdaptiveInterval();
++    }
++  }
++
+   @override
+   void didChangeMetrics() {
+     final bottom = WidgetsBinding.instance.window.viewInsets.bottom;
+@@ -202,6 +487,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+     // Handle shared content from Android intents
+     _initShareListener();
+ 
++    // Run permission gate and restore background service if enabled
++    await PermissionsGate.ensureAtLaunch(context, prefs: prefs);
++    await _ensurePermissionsAndService();
++
+     try {
+       await _ensureRustInitialized();
+       final initedNpub = api.initNostr(nsec: savedNsec);
+@@ -253,6 +542,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+     }
+   }
+ 
++  /// Ensure all necessary permissions are granted and background service is enabled
++  Future<void> _ensurePermissionsAndService() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      var foregroundEnabled = prefs.getBool('foreground_service_enabled');
++      if (foregroundEnabled == null && Platform.isAndroid) {
++          final notifStatus = await Permission.notification.status;
++          foregroundEnabled = notifStatus.isGranted;
++          await prefs.setBool('foreground_service_enabled', foregroundEnabled);
++      }
++      if ((foregroundEnabled ?? false) && Platform.isAndroid) {
++        final notifStatus = await Permission.notification.status;
++        if (!notifStatus.isGranted) {
++          foregroundEnabled = false;
++          await prefs.setBool('foreground_service_enabled', false);
++        }
++      }
++      _foregroundServiceEnabled = foregroundEnabled ?? false;
++      if (_foregroundServiceEnabled && Platform.isAndroid) {
++        final running = await FlutterForegroundTask.isRunningService;
++        if (!running) {
++          await _startForegroundServiceAtLaunch();
++        }
++      }
++    } catch (e) {
++      // Best effort - don't block app startup
++    }
++  }
++
+   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+ 
+@@ -311,6 +629,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+     try {
+       await _ensureRustInitialized();
+       final existingLen = messages.length;
++      final existingIds = messages.map((m) => m['id'] as String?).whereType<String>().toSet();
+       final dmsJson = api.fetchRecentDms(limit: BigInt.from(100));
+       final List<dynamic> dmsList = jsonDecode(dmsJson);
+       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
+@@ -337,6 +656,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+         return id != null && id.startsWith('local_') && !fetchedIds.contains(id);
+       }).toList();
+ 
++      final newIncoming = fetchedMessages.where((m) {
++        final id = m['id'] as String?;
++        return m['direction'] == 'in' && id != null && !existingIds.contains(id);
++      }).toList();
++
+       final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
+       final added = merged.length > existingLen;
+       setState(() {
+@@ -353,6 +677,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+       if (added && _isNearBottom()) {
+         _scrollToBottom();
+       }
++
++      for (final msg in newIncoming) {
++        final from = (msg['from'] as String?) ?? '';
++        var body = (msg['content'] as String?) ?? '';
++        final media = msg['media'];
++        if ((body.isEmpty) && media != null) {
++          body = '(attachment)';
++        }
++        _showIncomingNotification(from, body);
++      }
+     } catch (e) {
+       setState(() {
+         lastError = 'Fetch failed: $e';
+@@ -424,6 +758,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+       // Save messages to persist them
+       await _saveMessages();
+       _scrollToBottom();
++
++      // Reset adaptive interval when sending a message
++      // This ensures responsive checking for the reply
++      await _resetAdaptiveInterval();
+     } catch (e) {
+       setState(() {
+         lastError = 'Send failed: $e';
+@@ -1672,6 +2010,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+     return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
+   }
+ 
++  String _displayNameFor(String pubkey) {
++    final match = contacts.firstWhere(
++      (c) => c['pubkey'] == pubkey,
++      orElse: () => const <String, dynamic>{},
++    );
++    final nick = (match['nickname'] ?? '').toString().trim();
++    if (nick.isNotEmpty) return nick;
++    return _short(pubkey);
++  }
++
++  Future<void> _showIncomingNotification(String fromPubkey, String content) async {
++    if (fromPubkey.isEmpty) return;
++    final title = 'DM from ${_displayNameFor(fromPubkey)}';
++    final body = content.isNotEmpty ? content : 'New message';
++    const androidDetails = AndroidNotificationDetails(
++      'pushstr_dms',
++      'Direct Messages',
++      channelDescription: 'Incoming Pushstr DMs',
++      importance: Importance.high,
++      priority: Priority.high,
++      playSound: true,
++      enableVibration: true,
++    );
++    const details = NotificationDetails(android: androidDetails);
++    await _localNotifications.show(
++      DateTime.now().millisecondsSinceEpoch & 0x7fffffff,
++      title,
++      body,
++      details,
++    );
++  }
++
+   String _messageCopyKey(Map<String, dynamic> message) {
+     final id = message['id']?.toString();
+     if (id != null && id.isNotEmpty) return id;
+@@ -1949,17 +2319,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+ 
+   Future<void> _saveMedia(Uint8List bytes, String mime) async {
+     try {
+-      final selectedDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose where to save');
+-      if (selectedDir == null) {
+-        if (mounted) _showThemedToast('Save cancelled', preferTop: true, duration: const Duration(milliseconds: 800));
+-        return;
+-      }
++      final dir = await getTemporaryDirectory();
+       final ext = extensionFromMime(mime);
+-      final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+-      final file = File('$selectedDir/$filename');
++      final file = File('${dir.path}/pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext');
+       await file.writeAsBytes(bytes);
+       if (!mounted) return;
+-      _showThemedToast('Saved to $selectedDir', preferTop: true);
++      _showThemedToast('Saved to ${file.path}', preferTop: true);
+     } catch (e) {
+       if (!mounted) return;
+       _showThemedToast('Save failed: $e', preferTop: true);
+@@ -2371,6 +2736,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
+   bool _relayInputValid = false;
+   bool _nsecCopied = false;
+   bool _npubCopied = false;
++  bool _foregroundEnabled = false;
+   Timer? _copyResetTimer;
+   Timer? _autoSaveTimer;
+   final Map<String, Timer> _holdTimers = {};
+@@ -2469,8 +2835,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
+         _hasPendingChanges = false;
+         _isSaving = false;
+         _relayInputValid = _isRelayInputValid(relayInputCtrl.text);
++        _foregroundServiceEnabled =
++            prefs.getBool('foreground_service_enabled') ?? false;
++        _foregroundEnabled = _foregroundServiceEnabled;
+       });
+     }
++    if (_foregroundServiceEnabled) {
++      await _startForegroundService();
++    } else {
++      await _stopForegroundService();
++    }
+     _probeAllRelays(loadedRelays);
+   }
+ 
+@@ -2498,6 +2872,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
+     }
+   }
+ 
++  Future<void> _startForegroundService() async {
++    final notifGranted = await PermissionsGate.ensureNotificationPermission(context);
++    if (!notifGranted) {
++      _showThemedToast('Notification permission is required to stay connected', preferTop: true);
++      return;
++    }
++    final running = await FlutterForegroundTask.isRunningService;
++    if (running) {
++      _foregroundServiceRunning = true;
++      return;
++    }
++    await FlutterForegroundTask.startService(
++      notificationTitle: 'Pushstr running',
++      notificationText: 'Staying connected for incoming messages',
++      callback: foregroundStartCallback,
++    );
++    _foregroundServiceRunning = true;
++  }
++
++  Future<void> _stopForegroundService() async {
++    final running = await FlutterForegroundTask.isRunningService;
++    if (!running) {
++      _foregroundServiceRunning = false;
++      return;
++    }
++    await FlutterForegroundTask.stopService();
++    _foregroundServiceRunning = false;
++  }
++
+   Future<void> _saveSettings() async {
+     if (!mounted) return;
+     setState(() {
+@@ -2512,6 +2915,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
+         profiles.map((p) => '${p['nsec']}|${p['nickname'] ?? ''}').toList(),
+       );
+       await prefs.setInt('selected_profile_index', selectedProfileIndex);
++      await prefs.setBool(
++        'foreground_service_enabled',
++        _foregroundServiceEnabled,
++      );
+ 
+       if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
+         final selectedNsec = profiles[selectedProfileIndex]['nsec']!;
+@@ -2543,6 +2950,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
+         preferTop: true,
+         duration: const Duration(milliseconds: 500),
+       );
++      if (_foregroundServiceEnabled) {
++        await _startForegroundService();
++      } else {
++        await _stopForegroundService();
++      }
+     } catch (e) {
+       if (!mounted) return;
+       setState(() {
+@@ -3305,6 +3717,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
+                 actionGroup(
+                   'Utilities',
+                   [
++                  SwitchListTile(
++                    title: const Text('Stay connected (foreground service)'),
++                    subtitle: const Text(
++                      'Keeps Pushstr running with a small notification',
++                    ),
++                    value: _foregroundEnabled,
++                    onChanged: (val) async {
++                      _showThemedToast(
++                        val
++                            ? 'Enabling background service…'
++                            : 'Disabling background service…',
++                        preferTop: true,
++                      );
++                      setState(() {
++                        _foregroundEnabled = val;
++                        _foregroundServiceEnabled = val;
++                      });
++                      // Ensure notification permission is granted when enabling
++                      if (val) {
++                        final notifGranted = await PermissionsGate.ensureNotificationPermission(context);
++                        if (!notifGranted) {
++                          setState(() {
++                            _foregroundEnabled = false;
++                            _foregroundServiceEnabled = false;
++                          });
++                          await _saveSettings();
++                          return;
++                        }
++                      }
++
++                      if (val) {
++                        await _startForegroundService();
++                      } else {
++                        await _stopForegroundService();
++                      }
++                      await _saveSettings();
++                    },
++                  ),
+                     Builder(builder: (context) {
+                       final holdActive = _holdActive['copy_nsec'] ?? false;
+                       final progress = _holdProgress['copy_nsec'] ?? 0.0;
+diff --git a/mobile/lib/permissions_gate.dart b/mobile/lib/permissions_gate.dart
+new file mode 100644
+index 0000000..b85c1d5
+--- /dev/null
++++ b/mobile/lib/permissions_gate.dart
+@@ -0,0 +1,460 @@
++import 'dart:io';
++
++import 'package:device_info_plus/device_info_plus.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import 'package:permission_handler/permission_handler.dart';
++import 'package:shared_preferences/shared_preferences.dart';
++
++const MethodChannel _permissionsChannel = MethodChannel('com.pushstr.permissions');
++
++class PermissionsGate {
++  static const _gateVersion = 2;
++
++  /// Runs once per changed permission state. Only prompts when a required
++  /// permission/setting is missing or when the device/OEM requires guidance.
++  static Future<void> ensureAtLaunch(
++    BuildContext context, {
++    SharedPreferences? prefs,
++  }) async {
++    if (!Platform.isAndroid) return;
++    final sharedPrefs = prefs ?? await SharedPreferences.getInstance();
++    final state = await _GateState.load();
++    final gatePrefs = await _GatePrefs.load(sharedPrefs);
++
++    final needsNotifPrompt = state.needsNotificationPermission &&
++        (!gatePrefs.askedPostNotifications || (gatePrefs.cachedNotificationsGranted && !state.notificationGranted));
++    final needsBatteryPrompt = state.needsBatteryExemption &&
++        (!gatePrefs.askedBatteryOpt || (gatePrefs.cachedBatteryExempt && !state.batteryExempt));
++    final needsOemPrompt = state.showOemGuidance && gatePrefs.oemGuidanceShownFor != state.manufacturer;
++    final shouldPrompt = needsNotifPrompt || needsBatteryPrompt || needsOemPrompt;
++
++    if (!shouldPrompt || !context.mounted) {
++      await gatePrefs.save(sharedPrefs, state: state);
++      return;
++    }
++
++    gatePrefs
++      ..askedPostNotifications = gatePrefs.askedPostNotifications || needsNotifPrompt
++      ..askedBatteryOpt = gatePrefs.askedBatteryOpt || needsBatteryPrompt
++      ..oemGuidanceShownFor = needsOemPrompt ? state.manufacturer : gatePrefs.oemGuidanceShownFor;
++    await gatePrefs.save(sharedPrefs, state: state);
++
++    await showModalBottomSheet(
++      context: context,
++      isScrollControlled: true,
++      builder: (ctx) => _PermissionsSheet(
++        initialState: state,
++        prefs: gatePrefs,
++        sharedPrefs: sharedPrefs,
++      ),
++    );
++  }
++
++  /// Requests notification permission with a short rationale dialog.
++  static Future<bool> ensureNotificationPermission(
++    BuildContext context, {
++    SharedPreferences? prefs,
++  }) async {
++    if (!Platform.isAndroid) return true;
++    final sharedPrefs = prefs ?? await SharedPreferences.getInstance();
++    final gatePrefs = await _GatePrefs.load(sharedPrefs);
++    gatePrefs.askedPostNotifications = true;
++    final status = await Permission.notification.status;
++    if (status.isGranted) {
++      gatePrefs.cachedNotificationsGranted = true;
++      await gatePrefs.save(sharedPrefs);
++      return true;
++    }
++
++    final proceed = await _confirmDialog(
++      context,
++      title: 'Allow notifications',
++      message: 'Pushstr shows an ongoing status notification for background sync. Allow to keep it visible and reliable.',
++      approveLabel: 'Allow',
++    );
++    if (proceed != true) {
++      await gatePrefs.save(sharedPrefs);
++      return false;
++    }
++
++    final req = await Permission.notification.request();
++    gatePrefs.cachedNotificationsGranted = req.isGranted;
++    await gatePrefs.save(sharedPrefs);
++    if (req.isPermanentlyDenied) {
++      await openAppSettings();
++    }
++    return req.isGranted;
++  }
++
++  static Future<bool?> _confirmDialog(
++    BuildContext context, {
++    required String title,
++    required String message,
++    String approveLabel = 'OK',
++    String cancelLabel = 'Not now',
++  }) async {
++    if (!context.mounted) return false;
++    return showDialog<bool>(
++      context: context,
++      builder: (ctx) => AlertDialog(
++        title: Text(title),
++        content: Text(message),
++        actions: [
++          TextButton(
++            onPressed: () => Navigator.of(ctx).pop(false),
++            child: Text(cancelLabel),
++          ),
++          TextButton(
++            onPressed: () => Navigator.of(ctx).pop(true),
++            child: Text(approveLabel),
++          ),
++        ],
++      ),
++    );
++  }
++}
++
++class _GateState {
++  final int sdkInt;
++  final bool notificationGranted;
++  final bool notificationPermanentlyDenied;
++  final bool batteryExempt;
++  final String manufacturer;
++
++  const _GateState._({
++    required this.sdkInt,
++    required this.notificationGranted,
++    required this.notificationPermanentlyDenied,
++    required this.batteryExempt,
++    required this.manufacturer,
++  });
++
++  bool get needsNotificationPermission => sdkInt >= 33 && !notificationGranted;
++
++  bool get needsBatteryExemption => sdkInt >= 23 && !batteryExempt;
++
++  bool get showOemGuidance =>
++      manufacturer.isNotEmpty &&
++      (_oemVendors.contains(manufacturer) ||
++          _oemVendors.any((vendor) => manufacturer.contains(vendor)));
++
++  String get oemDisplayName =>
++      manufacturer.isEmpty ? 'Device' : '${manufacturer[0].toUpperCase()}${manufacturer.substring(1)}';
++
++  static Future<_GateState> load() async {
++    if (!Platform.isAndroid) {
++      return const _GateState._(
++        sdkInt: 0,
++        notificationGranted: true,
++        notificationPermanentlyDenied: false,
++        batteryExempt: true,
++        manufacturer: '',
++      );
++    }
++
++    final info = await DeviceInfoPlugin().androidInfo;
++    final notifStatus = await Permission.notification.status;
++    final batteryStatus = await Permission.ignoreBatteryOptimizations.status;
++    final manufacturer = (info.manufacturer ?? '').toLowerCase();
++
++    return _GateState._(
++      sdkInt: info.version.sdkInt,
++      notificationGranted: notifStatus.isGranted,
++      notificationPermanentlyDenied: notifStatus.isPermanentlyDenied || notifStatus.isRestricted,
++      batteryExempt: batteryStatus.isGranted,
++      manufacturer: manufacturer,
++    );
++  }
++}
++
++class _PermissionsSheet extends StatefulWidget {
++  final _GateState initialState;
++  final _GatePrefs prefs;
++  final SharedPreferences sharedPrefs;
++
++  const _PermissionsSheet({
++    required this.initialState,
++    required this.prefs,
++    required this.sharedPrefs,
++  });
++
++  @override
++  State<_PermissionsSheet> createState() => _PermissionsSheetState();
++}
++
++class _PermissionsSheetState extends State<_PermissionsSheet> {
++  late bool _notifGranted;
++  late bool _batteryExempt;
++
++  @override
++  void initState() {
++    super.initState();
++    _notifGranted = !widget.initialState.needsNotificationPermission;
++    _batteryExempt = !widget.initialState.needsBatteryExemption;
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final needsNotif = widget.initialState.needsNotificationPermission;
++    final needsBattery = widget.initialState.needsBatteryExemption;
++    final showOem = widget.initialState.showOemGuidance;
++    return SafeArea(
++      child: Padding(
++        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
++        child: Column(
++          mainAxisSize: MainAxisSize.min,
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            const Text(
++              'Keep Pushstr running',
++              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
++            ),
++            const SizedBox(height: 12),
++            if (needsNotif)
++              _PermissionTile(
++                title: 'Allow notifications',
++                subtitle:
++                    'Needed so the foreground service can show its ongoing status icon.',
++                actionLabel: _notifGranted ? 'Allowed' : 'Allow',
++                done: _notifGranted,
++                onTap: _notifGranted
++                    ? null
++                    : () async {
++                        final granted =
++                            await PermissionsGate.ensureNotificationPermission(context, prefs: widget.sharedPrefs);
++                        if (mounted && granted) {
++                          setState(() => _notifGranted = true);
++                          widget.prefs.cachedNotificationsGranted = true;
++                          await widget.prefs.save(widget.sharedPrefs, state: widget.initialState);
++                        }
++                      },
++              ),
++            if (needsBattery)
++              _PermissionTile(
++                title: 'Battery optimisation',
++                subtitle: 'Let Pushstr ignore Doze so Android does not stop background sync.',
++                actionLabel: _batteryExempt ? 'Allowed' : 'Allow',
++                done: _batteryExempt,
++                onTap: _batteryExempt
++                    ? null
++                    : () async {
++                        final granted = await _requestBatteryExemption();
++                        if (mounted && granted) {
++                          setState(() => _batteryExempt = true);
++                          widget.prefs.cachedBatteryExempt = true;
++                          await widget.prefs.save(widget.sharedPrefs, state: widget.initialState);
++                        }
++                      },
++              ),
++            if (showOem)
++              _PermissionTile(
++                title: '${widget.initialState.oemDisplayName} auto-start (optional)',
++                subtitle:
++                    'Enable Auto-start / background run so OEM restrictions do not kill Pushstr.',
++                actionLabel: 'Open settings',
++                optional: true,
++                onTap: () async {
++                  await _openAutoStartSettings();
++                },
++              ),
++            const SizedBox(height: 8),
++            Align(
++              alignment: Alignment.centerRight,
++              child: TextButton(
++                onPressed: () => Navigator.of(context).pop(),
++                child: const Text('Done'),
++              ),
++            ),
++          ],
++        ),
++      ),
++    );
++  }
++
++  Future<bool> _requestBatteryExemption() async {
++    final currentStatus = await Permission.ignoreBatteryOptimizations.status;
++    if (currentStatus.isGranted) return true;
++
++    final proceed = await PermissionsGate._confirmDialog(
++      context,
++      title: 'Allow background running',
++      message: 'Allow Pushstr to ignore battery optimisations to reduce the OS killing background sync.',
++      approveLabel: 'Allow',
++    );
++    if (proceed != true) return false;
++
++    final req = await Permission.ignoreBatteryOptimizations.request();
++    if (req.isPermanentlyDenied || req.isRestricted) {
++      // Best effort: send the user to app settings where battery usage can be set to Unrestricted.
++      await openAppSettings();
++    }
++    return req.isGranted;
++  }
++
++  Future<void> _openAutoStartSettings() async {
++    try {
++      final ok = await _permissionsChannel.invokeMethod<bool>('openAutoStartSettings');
++      if (ok != true) {
++        await openAppSettings();
++      }
++    } catch (_) {
++      await openAppSettings();
++    }
++  }
++}
++
++class _GatePrefs {
++  bool askedPostNotifications;
++  bool cachedNotificationsGranted;
++  bool askedBatteryOpt;
++  bool cachedBatteryExempt;
++  String oemGuidanceShownFor;
++  int version;
++
++  _GatePrefs({
++    required this.askedPostNotifications,
++    required this.cachedNotificationsGranted,
++    required this.askedBatteryOpt,
++    required this.cachedBatteryExempt,
++    required this.oemGuidanceShownFor,
++    required this.version,
++  });
++
++  static Future<_GatePrefs> load(SharedPreferences prefs) async {
++    final storedVersion = prefs.getInt('permissions_gate_version') ?? 0;
++    if (storedVersion != PermissionsGate._gateVersion) {
++      return _GatePrefs(
++        askedPostNotifications: false,
++        cachedNotificationsGranted: false,
++        askedBatteryOpt: false,
++        cachedBatteryExempt: false,
++        oemGuidanceShownFor: '',
++        version: PermissionsGate._gateVersion,
++      );
++    }
++    return _GatePrefs(
++      askedPostNotifications: prefs.getBool('permissions_gate_asked_notif') ?? false,
++      cachedNotificationsGranted: prefs.getBool('permissions_gate_cached_notif') ?? false,
++      askedBatteryOpt: prefs.getBool('permissions_gate_asked_battery') ?? false,
++      cachedBatteryExempt: prefs.getBool('permissions_gate_cached_battery') ?? false,
++      oemGuidanceShownFor: prefs.getString('permissions_gate_oem_shown') ?? '',
++      version: storedVersion,
++    );
++  }
++
++  Future<void> save(
++    SharedPreferences prefs, {
++    _GateState? state,
++  }) async {
++    if (state != null) {
++      cachedNotificationsGranted = state.notificationGranted;
++      cachedBatteryExempt = state.batteryExempt;
++    }
++    await prefs.setInt('permissions_gate_version', PermissionsGate._gateVersion);
++    await prefs.setBool('permissions_gate_asked_notif', askedPostNotifications);
++    await prefs.setBool('permissions_gate_cached_notif', cachedNotificationsGranted);
++    await prefs.setBool('permissions_gate_asked_battery', askedBatteryOpt);
++    await prefs.setBool('permissions_gate_cached_battery', cachedBatteryExempt);
++    await prefs.setString('permissions_gate_oem_shown', oemGuidanceShownFor);
++  }
++}
++
++class _PermissionTile extends StatelessWidget {
++  final String title;
++  final String subtitle;
++  final String actionLabel;
++  final bool done;
++  final bool optional;
++  final VoidCallback? onTap;
++
++  const _PermissionTile({
++    required this.title,
++    required this.subtitle,
++    required this.actionLabel,
++    this.done = false,
++    this.optional = false,
++    this.onTap,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    final bg = Colors.white.withOpacity(0.05);
++    final border = Colors.white.withOpacity(0.08);
++    return Container(
++      margin: const EdgeInsets.symmetric(vertical: 6),
++      padding: const EdgeInsets.all(12),
++      decoration: BoxDecoration(
++        color: bg,
++        borderRadius: BorderRadius.circular(12),
++        border: Border.all(color: border),
++      ),
++      child: Row(
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          Expanded(
++            child: Column(
++              crossAxisAlignment: CrossAxisAlignment.start,
++              children: [
++                Row(
++                  children: [
++                    Text(
++                      title,
++                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
++                    ),
++                    if (optional)
++                      Padding(
++                        padding: const EdgeInsets.only(left: 8),
++                        child: Container(
++                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
++                          decoration: BoxDecoration(
++                            color: Colors.white.withOpacity(0.08),
++                            borderRadius: BorderRadius.circular(6),
++                          ),
++                          child: const Text(
++                            'Recommended',
++                            style: TextStyle(fontSize: 11),
++                          ),
++                        ),
++                      ),
++                    if (done)
++                      const Padding(
++                        padding: EdgeInsets.only(left: 6),
++                        child: Icon(Icons.check_circle, color: Colors.greenAccent, size: 18),
++                      ),
++                  ],
++                ),
++                const SizedBox(height: 4),
++                Text(
++                  subtitle,
++                  style: const TextStyle(fontSize: 13),
++                ),
++              ],
++            ),
++          ),
++          const SizedBox(width: 12),
++          ElevatedButton(
++            onPressed: onTap,
++            style: ElevatedButton.styleFrom(
++              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
++            ),
++            child: Text(done ? 'Done' : actionLabel),
++          ),
++        ],
++      ),
++    );
++  }
++}
++
++const Set<String> _oemVendors = {
++  'xiaomi',
++  'redmi',
++  'poco',
++  'oppo',
++  'realme',
++  'oneplus',
++  'vivo',
++  'samsung',
++  'huawei',
++  'honor',
++};
+diff --git a/mobile/pubspec.yaml b/mobile/pubspec.yaml
+index 4415ce8..083be94 100644
+--- a/mobile/pubspec.yaml
++++ b/mobile/pubspec.yaml
+@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+ # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+ # In Windows, build-name is used as the major, minor, and patch parts
+ # of the product and file versions while build-number is used as the build suffix.
+-version: 0.0.3
++version: 0.1.0
+ 
+ environment:
+   sdk: ^3.10.1
+@@ -47,11 +47,15 @@ dependencies:
+   path_provider: ^2.1.3
+   http: ^1.2.0
+   mime: ^1.0.4
++  background_fetch: ^1.2.2
+   crypto: ^3.0.3
+   url_launcher: ^6.3.0
++  flutter_foreground_task: ^6.2.6
+   qr_flutter: ^4.1.0
+   qr_code_scanner: ^1.0.1
+   permission_handler: ^11.3.1
++  flutter_local_notifications: ^17.1.2
++  device_info_plus: ^11.1.0
+   # receive_sharing_intent: ^1.6.1  # Commented out - causes JVM compatibility issues
+ 
+ dependency_overrides:
+diff --git a/pushstr_orange.png b/pushtr_orange.png
+similarity index 100%
+rename from pushstr_orange.png
+rename to pushtr_orange.png
+diff --git a/scripts/build.js b/scripts/build.js
+index 47473bf..4384d94 100644
+--- a/scripts/build.js
++++ b/scripts/build.js
+@@ -30,20 +30,17 @@ await esbuild.build({
+ // Copy static files
+ for (const file of [
+   manifestFile,
+-  'src/background.html',
+-  'src/popup.html',
+-  'src/options.html',
+-  'src/popup.css',
+-  'src/options.css',
+-  'src/icon.png',
+-  'icon/pushstr_48.png',
+-  'icon/pushstr_96.png',
+-  'icon/pushstr_128.png',
++  "src/background.html",
++  "src/popup.html",
++  "src/options.html",
++  "src/popup.css",
++  "src/options.css",
++  "src/icon.png",
++  "icon/pushtr_48.png",
++  "icon/pushtr_96.png",
++  "icon/pushtr_128.png"
+ ]) {
+-  const dest = path.join(
+-    outdir,
+-    path.basename(file === manifestFile ? 'manifest.json' : file),
+-  );
++  const dest = path.join(outdir, path.basename(file === manifestFile ? "manifest.json" : file));
+   fs.copyFileSync(file, dest);
+ }
+ 
+diff --git a/src/background.js b/src/background.js
+index cd218e5..552701d 100644
+--- a/src/background.js
++++ b/src/background.js
+@@ -276,6 +276,19 @@ function currentPubkey() {
+   return priv ? nt.getPublicKey(priv) : null;
+ }
+ 
++function shortPubkey(pubkey) {
++  if (!pubkey) return "unknown";
++  if (pubkey.length <= 12) return pubkey;
++  return `${pubkey.slice(0, 8)}...${pubkey.slice(-4)}`;
++}
++
++function displayNameFor(pubkey) {
++  const list = getRecipientsForCurrent();
++  const match = list.find((r) => r.pubkey === pubkey);
++  const nick = match?.nickname?.trim();
++  return nick && nick.length ? nick : shortPubkey(pubkey);
++}
++
+ function loadMessagesForCurrent(legacyMessages = []) {
+   const pub = currentPubkey();
+   settings.messagesByKey = settings.messagesByKey || {};
+@@ -367,7 +380,7 @@ async function handleGiftEvent(event) {
+       relayFrom: settings.relays
+     });
+     if (message && !suppressNotifications) {
+-      notify(`DM from ${sender.slice(0, 8)}...`, message);
++      notify(`DM from ${displayNameFor(sender)}`, message);
+     }
+     browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message }).catch(() => {});
+   } catch (err) {
+@@ -462,10 +475,10 @@ async function sendGift(recipient, content) {
+ function notify(title, message) {
+   try {
+     browser.notifications.create({
+-      type: 'basic',
+-      iconUrl: browser.runtime.getURL('pushstr_96.png'),
++      type: "basic",
++      iconUrl: browser.runtime.getURL("pushtr_96.png"),
+       title,
+-      message,
++      message
+     });
+   } catch (err) {
+     console.warn("Notifications unavailable", err);
+diff --git a/zapstore.yaml b/zapstore.yaml
+index 6e7334d..22303e8 100644
+--- a/zapstore.yaml
++++ b/zapstore.yaml
+@@ -1,15 +1,19 @@
+-identifier: com.pushstr.mobile
++identifier: com.pushstr.pushstr_mobile
++version: 0.0.3
+ name: Pushstr
+ summary: Private Nostr-based messaging across browser and mobile
+-description: Pushbullet-style messaging over Nostr using NIP-44 encrypted, gift-wrapped DMs. Generate or import profiles, keep separate keys per contact or group, and move chats or attachments between the browser extension and Android/iOS apps within seconds.
++description: |
++  Pushbullet-style messaging over Nostr Giftwrapped DMs with double-encrypted delivery. Generate or import profiles, keep parallel addresses for different contacts, and move chats or attachments between the browser extension and Android/iOS apps within seconds.
+ repository: https://gittr.space/npub19at4nqjjymca2lh3v546vcg5ktun3al4c5xu2pts3ewckv0y70ys0gupzr/pushstr
+-release_repository: https://github.com/tidley/pushstr/releases
+-homepage: https://github.com/tidley/pushstr
++release_repository: https://gittr.space/npub19at4nqjjymca2lh3v546vcg5ktun3al4c5xu2pts3ewckv0y70ys0gupzr/pushstr/releases
++homepage: https://gittr.space/npub19at4nqjjymca2lh3v546vcg5ktun3al4c5xu2pts3ewckv0y70ys0gupzr/pushstr
++icon: icon/pushtr_128.png
++changelog: CHANGELOG.md
++tags: nostr messaging privacy filesharing android extension
++license: UNLICENSED
+ remote_metadata:
+   - github
+-icon: icon/pushstr_128.png
+-changelog: CHANGELOG.md
+-tags: nostr messaging privacy file-sharing android ios extension
+-license: AGPL-3.0-only
+ assets:
+-  - mobile/build/app/outputs/flutter-apk/.*-release\.apk$
++  - mobile/build/app/outputs/flutter-apk/.*release.*\.apk
++executables:
++  - ^app-.*\.apk$
