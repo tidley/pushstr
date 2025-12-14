@@ -31,6 +31,7 @@ class SyncController {
         debugPrint('[sync] skip (no nsec)');
         return;
       }
+      final contacts = _loadContacts(prefs, nsec);
       await ensureDmChannel();
 
       Duration remaining() => budget - DateTime.now().difference(start);
@@ -75,7 +76,7 @@ class SyncController {
         final from = (msg['from'] ?? '').toString();
         final content = (msg['content'] ?? '').toString();
         await showDmNotification(
-          title: 'New message from ${_shortPubkey(from)}',
+          title: 'DM from ${_displayName(from, contacts)}',
           body: content.isNotEmpty ? content : 'New message',
         );
         emitted++;
@@ -100,6 +101,29 @@ class SyncController {
   static String _shortPubkey(String pubkey) {
     if (pubkey.length <= 16) return pubkey;
     return '${pubkey.substring(0, 8)}...${pubkey.substring(pubkey.length - 8)}';
+  }
+
+  static Map<String, String> _loadContacts(SharedPreferences prefs, String nsec) {
+    final key = 'contacts_$nsec';
+    final entries = prefs.getStringList(key) ?? prefs.getStringList('contacts') ?? <String>[];
+    final Map<String, String> map = {};
+    for (final entry in entries) {
+      final parts = entry.split('|');
+      if (parts.length >= 2) {
+        final nickname = parts[0].trim();
+        final pubkey = parts[1].trim();
+        if (pubkey.isNotEmpty) {
+          map[pubkey] = nickname;
+        }
+      }
+    }
+    return map;
+  }
+
+  static String _displayName(String pubkey, Map<String, String> contacts) {
+    final nick = contacts[pubkey]?.trim();
+    if (nick != null && nick.isNotEmpty) return nick;
+    return _shortPubkey(pubkey);
   }
 
   static Future<void> _updateForegroundStatus(DateTime ts) async {
