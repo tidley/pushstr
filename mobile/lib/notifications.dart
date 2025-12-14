@@ -32,7 +32,15 @@ Future<void> showDmNotification({
   required String body,
 }) async {
   await ensureDmChannel();
-  const androidDetails = AndroidNotificationDetails(
+  final sender = Person(name: title);
+  final style = MessagingStyleInformation(
+    sender,
+    groupConversation: true,
+    messages: [
+      Message(body, DateTime.now(), sender),
+    ],
+  );
+  final androidDetails = AndroidNotificationDetails(
     'pushstr_dms',
     'Direct Messages',
     channelDescription: 'Incoming Pushstr DMs',
@@ -40,8 +48,11 @@ Future<void> showDmNotification({
     priority: Priority.high,
     playSound: true,
     enableVibration: true,
+    category: AndroidNotificationCategory.message,
+    groupKey: 'pushstr_dm_group',
+    styleInformation: style,
   );
-  const details = NotificationDetails(android: androidDetails);
+  final details = NotificationDetails(android: androidDetails);
   await localNotifications.show(
     DateTime.now().millisecondsSinceEpoch & 0x7fffffff,
     title,
