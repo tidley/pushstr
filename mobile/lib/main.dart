@@ -25,6 +25,7 @@ import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
 import 'notifications.dart';
 import 'permissions_gate.dart';
+import 'sync/rust_sync_worker.dart';
 import 'sync/sync_controller.dart';
 
 bool _rustInitialized = false;
@@ -913,15 +914,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _listening = true;
     while (mounted) {
       try {
-        final result = await Isolate.run(() async {
-          try {
-            await RustLib.init();
-          } catch (_) {
-            // Ignore double-init warning in isolate.
-          }
-          return api.waitForNewDms(timeoutSecs: BigInt.from(30));
-        });
-        if (result.isNotEmpty && result != '[]') {
+        final result = await RustSyncWorker.waitForNewDms(
+          nsec: nsec ?? '',
+          wait: const Duration(seconds: 2),
+        );
+        if (result != null && result.isNotEmpty && result != '[]') {
           final List<dynamic> list = jsonDecode(result);
           var newMessages = list.cast<Map<String, dynamic>>();
           newMessages = await _decodeMessages(newMessages);
