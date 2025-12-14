@@ -4,9 +4,9 @@
   "description": "Secure messaging via Nostr",
   "version": "0.0.4",
   "icons": {
-    "48": "pushtr_48.png",
-    "96": "pushtr_96.png",
-    "128": "pushtr_128.png"
+    "48": "pushstr_48.png",
+    "96": "pushstr_96.png",
+    "128": "pushstr_128.png"
   },
   "permissions": [
     "storage",
@@ -32,9 +32,9 @@
     "default_title": "Pushstr",
     "default_popup": "popup.html",
     "default_icon": {
-      "48": "pushtr_48.png",
-      "96": "pushtr_96.png",
-      "128": "pushtr_128.png"
+      "48": "pushstr_48.png",
+      "96": "pushstr_96.png",
+      "128": "pushstr_128.png"
     }
   },
   "options_ui": {

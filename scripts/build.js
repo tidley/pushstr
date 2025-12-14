@@ -30,17 +30,20 @@ await esbuild.build({
 // Copy static files
 for (const file of [
   manifestFile,
-  "src/background.html",
-  "src/popup.html",
-  "src/options.html",
-  "src/popup.css",
-  "src/options.css",
-  "src/icon.png",
-  "icon/pushtr_48.png",
-  "icon/pushtr_96.png",
-  "icon/pushtr_128.png"
+  'src/background.html',
+  'src/popup.html',
+  'src/options.html',
+  'src/popup.css',
+  'src/options.css',
+  'src/icon.png',
+  'icon/pushstr_48.png',
+  'icon/pushstr_96.png',
+  'icon/pushstr_128.png',
 ]) {
-  const dest = path.join(outdir, path.basename(file === manifestFile ? "manifest.json" : file));
+  const dest = path.join(
+    outdir,
+    path.basename(file === manifestFile ? 'manifest.json' : file),
+  );
   fs.copyFileSync(file, dest);
 }
 

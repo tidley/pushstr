@@ -462,10 +462,10 @@ async function sendGift(recipient, content) {
 function notify(title, message) {
   try {
     browser.notifications.create({
-      type: "basic",
-      iconUrl: browser.runtime.getURL("pushtr_96.png"),
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('pushstr_96.png'),
       title,
-      message
+      message,
     });
   } catch (err) {
     console.warn("Notifications unavailable", err);
