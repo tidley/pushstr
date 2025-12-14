@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 const MethodChannel _permissionsChannel = MethodChannel('com.pushstr.permissions');
 
 class PermissionsGate {
-  static const _lastSignatureKey = 'permissions_gate_last_signature_v1';
+  static const _gateVersion = 2;
 
   /// Runs once per changed permission state. Only prompts when a required
   /// permission/setting is missing or when the device/OEM requires guidance.
@@ -20,37 +20,67 @@ class PermissionsGate {
     if (!Platform.isAndroid) return;
     final sharedPrefs = prefs ?? await SharedPreferences.getInstance();
     final state = await _GateState.load();
-    final signature = state.signature;
-    final lastSignature = sharedPrefs.getString(_lastSignatureKey);
-    final shouldPrompt = (lastSignature != signature) &&
-        (state.needsNotificationPermission || state.needsBatteryExemption || state.showOemGuidance);
+    final gatePrefs = await _GatePrefs.load(sharedPrefs);
 
-    await sharedPrefs.setString(_lastSignatureKey, signature);
-    if (!shouldPrompt || !context.mounted) return;
+    final needsNotifPrompt = state.needsNotificationPermission &&
+        (!gatePrefs.askedPostNotifications || (gatePrefs.cachedNotificationsGranted && !state.notificationGranted));
+    final needsBatteryPrompt = state.needsBatteryExemption &&
+        (!gatePrefs.askedBatteryOpt || (gatePrefs.cachedBatteryExempt && !state.batteryExempt));
+    final needsOemPrompt = state.showOemGuidance && gatePrefs.oemGuidanceShownFor != state.manufacturer;
+    final shouldPrompt = needsNotifPrompt || needsBatteryPrompt || needsOemPrompt;
+
+    if (!shouldPrompt || !context.mounted) {
+      await gatePrefs.save(sharedPrefs, state: state);
+      return;
+    }
+
+    gatePrefs
+      ..askedPostNotifications = gatePrefs.askedPostNotifications || needsNotifPrompt
+      ..askedBatteryOpt = gatePrefs.askedBatteryOpt || needsBatteryPrompt
+      ..oemGuidanceShownFor = needsOemPrompt ? state.manufacturer : gatePrefs.oemGuidanceShownFor;
+    await gatePrefs.save(sharedPrefs, state: state);
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => _PermissionsSheet(initialState: state),
+      builder: (ctx) => _PermissionsSheet(
+        initialState: state,
+        prefs: gatePrefs,
+        sharedPrefs: sharedPrefs,
+      ),
     );
   }
 
   /// Requests notification permission with a short rationale dialog.
-  static Future<bool> ensureNotificationPermission(BuildContext context) async {
+  static Future<bool> ensureNotificationPermission(
+    BuildContext context, {
+    SharedPreferences? prefs,
+  }) async {
     if (!Platform.isAndroid) return true;
+    final sharedPrefs = prefs ?? await SharedPreferences.getInstance();
+    final gatePrefs = await _GatePrefs.load(sharedPrefs);
+    gatePrefs.askedPostNotifications = true;
     final status = await Permission.notification.status;
-    if (status.isGranted) return true;
+    if (status.isGranted) {
+      gatePrefs.cachedNotificationsGranted = true;
+      await gatePrefs.save(sharedPrefs);
+      return true;
+    }
 
     final proceed = await _confirmDialog(
       context,
       title: 'Allow notifications',
-      message:
-          'Pushstr shows a small ongoing notification for its foreground service. Allow notifications so background sync stays alive.',
+      message: 'Pushstr shows an ongoing status notification for background sync. Allow to keep it visible and reliable.',
       approveLabel: 'Allow',
     );
-    if (proceed != true) return false;
+    if (proceed != true) {
+      await gatePrefs.save(sharedPrefs);
+      return false;
+    }
 
     final req = await Permission.notification.request();
+    gatePrefs.cachedNotificationsGranted = req.isGranted;
+    await gatePrefs.save(sharedPrefs);
     if (req.isPermanentlyDenied) {
       await openAppSettings();
     }
@@ -112,17 +142,6 @@ class _GateState {
   String get oemDisplayName =>
       manufacturer.isEmpty ? 'Device' : '${manufacturer[0].toUpperCase()}${manufacturer.substring(1)}';
 
-  String get signature {
-    final notifPart = notificationGranted
-        ? 'notif:ok'
-        : notificationPermanentlyDenied
-            ? 'notif:blocked'
-            : 'notif:missing';
-    final batteryPart = batteryExempt ? 'battery:ok' : 'battery:missing';
-    final oemPart = showOemGuidance ? 'oem:$manufacturer' : 'oem:none';
-    return 'sdk:$sdkInt|$notifPart|$batteryPart|$oemPart';
-  }
-
   static Future<_GateState> load() async {
     if (!Platform.isAndroid) {
       return const _GateState._(
@@ -151,8 +170,14 @@ class _GateState {
 
 class _PermissionsSheet extends StatefulWidget {
   final _GateState initialState;
+  final _GatePrefs prefs;
+  final SharedPreferences sharedPrefs;
 
-  const _PermissionsSheet({required this.initialState});
+  const _PermissionsSheet({
+    required this.initialState,
+    required this.prefs,
+    required this.sharedPrefs,
+  });
 
   @override
   State<_PermissionsSheet> createState() => _PermissionsSheetState();
@@ -196,9 +221,12 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                 onTap: _notifGranted
                     ? null
                     : () async {
-                        final granted = await PermissionsGate.ensureNotificationPermission(context);
+                        final granted =
+                            await PermissionsGate.ensureNotificationPermission(context, prefs: widget.sharedPrefs);
                         if (mounted && granted) {
                           setState(() => _notifGranted = true);
+                          widget.prefs.cachedNotificationsGranted = true;
+                          await widget.prefs.save(widget.sharedPrefs, state: widget.initialState);
                         }
                       },
               ),
@@ -214,6 +242,8 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                         final granted = await _requestBatteryExemption();
                         if (mounted && granted) {
                           setState(() => _batteryExempt = true);
+                          widget.prefs.cachedBatteryExempt = true;
+                          await widget.prefs.save(widget.sharedPrefs, state: widget.initialState);
                         }
                       },
               ),
@@ -249,13 +279,14 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
     final proceed = await PermissionsGate._confirmDialog(
       context,
       title: 'Allow background running',
-      message: 'Allow Pushstr to ignore battery optimisations so background sync is not killed.',
+      message: 'Allow Pushstr to ignore battery optimisations to reduce the OS killing background sync.',
       approveLabel: 'Allow',
     );
     if (proceed != true) return false;
 
     final req = await Permission.ignoreBatteryOptimizations.request();
     if (req.isPermanentlyDenied || req.isRestricted) {
+      // Best effort: send the user to app settings where battery usage can be set to Unrestricted.
       await openAppSettings();
     }
     return req.isGranted;
@@ -270,6 +301,62 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
     } catch (_) {
       await openAppSettings();
     }
+  }
+}
+
+class _GatePrefs {
+  bool askedPostNotifications;
+  bool cachedNotificationsGranted;
+  bool askedBatteryOpt;
+  bool cachedBatteryExempt;
+  String oemGuidanceShownFor;
+  int version;
+
+  _GatePrefs({
+    required this.askedPostNotifications,
+    required this.cachedNotificationsGranted,
+    required this.askedBatteryOpt,
+    required this.cachedBatteryExempt,
+    required this.oemGuidanceShownFor,
+    required this.version,
+  });
+
+  static Future<_GatePrefs> load(SharedPreferences prefs) async {
+    final storedVersion = prefs.getInt('permissions_gate_version') ?? 0;
+    if (storedVersion != PermissionsGate._gateVersion) {
+      return _GatePrefs(
+        askedPostNotifications: false,
+        cachedNotificationsGranted: false,
+        askedBatteryOpt: false,
+        cachedBatteryExempt: false,
+        oemGuidanceShownFor: '',
+        version: PermissionsGate._gateVersion,
+      );
+    }
+    return _GatePrefs(
+      askedPostNotifications: prefs.getBool('permissions_gate_asked_notif') ?? false,
+      cachedNotificationsGranted: prefs.getBool('permissions_gate_cached_notif') ?? false,
+      askedBatteryOpt: prefs.getBool('permissions_gate_asked_battery') ?? false,
+      cachedBatteryExempt: prefs.getBool('permissions_gate_cached_battery') ?? false,
+      oemGuidanceShownFor: prefs.getString('permissions_gate_oem_shown') ?? '',
+      version: storedVersion,
+    );
+  }
+
+  Future<void> save(
+    SharedPreferences prefs, {
+    _GateState? state,
+  }) async {
+    if (state != null) {
+      cachedNotificationsGranted = state.notificationGranted;
+      cachedBatteryExempt = state.batteryExempt;
+    }
+    await prefs.setInt('permissions_gate_version', PermissionsGate._gateVersion);
+    await prefs.setBool('permissions_gate_asked_notif', askedPostNotifications);
+    await prefs.setBool('permissions_gate_cached_notif', cachedNotificationsGranted);
+    await prefs.setBool('permissions_gate_asked_battery', askedBatteryOpt);
+    await prefs.setBool('permissions_gate_cached_battery', cachedBatteryExempt);
+    await prefs.setString('permissions_gate_oem_shown', oemGuidanceShownFor);
   }
 }
 

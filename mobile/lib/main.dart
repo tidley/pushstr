@@ -529,8 +529,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final prefs = await SharedPreferences.getInstance();
       var foregroundEnabled = prefs.getBool('foreground_service_enabled');
       if (foregroundEnabled == null && Platform.isAndroid) {
-        foregroundEnabled = true;
-        await prefs.setBool('foreground_service_enabled', true);
+          final notifStatus = await Permission.notification.status;
+          foregroundEnabled = notifStatus.isGranted;
+          await prefs.setBool('foreground_service_enabled', foregroundEnabled);
+      }
+      if ((foregroundEnabled ?? false) && Platform.isAndroid) {
+        final notifStatus = await Permission.notification.status;
+        if (!notifStatus.isGranted) {
+          foregroundEnabled = false;
+          await prefs.setBool('foreground_service_enabled', false);
+        }
       }
       _foregroundServiceEnabled = foregroundEnabled ?? false;
       if (_foregroundServiceEnabled && Platform.isAndroid) {
