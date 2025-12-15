@@ -35,6 +35,9 @@ class SyncController {
       final seenState = _loadSeenState(prefs, nsec);
       var lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
       var lastSeenTs = seenState.maxTs > 0 ? seenState.maxTs : (prefs.getInt('last_seen_ts_$nsec') ?? 0);
+      if (lastSeenTs < lastNotifiedTs) {
+        lastSeenTs = lastNotifiedTs;
+      }
       await ensureDmChannel();
 
       Duration remaining() => budget - DateTime.now().difference(start);

@@ -664,13 +664,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sendMessage() async {
-    final text = messageCtrl.text.trim();
-    if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
+      final text = messageCtrl.text.trim();
+      if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
+      if (_sendCooldown) return;
 
-    try {
-      String payload = text;
-      Map<String, dynamic>? localMedia;
-      String localText = text;
+      try {
+      _sendCooldown = true;
+      Future.delayed(const Duration(milliseconds: 600), () {
+        _sendCooldown = false;
+      });
+
+        String payload = text;
+        Map<String, dynamic>? localMedia;
+        String localText = text;
 
       if (_pendingAttachment != null) {
         final desc = api.encryptMedia(
@@ -2779,6 +2785,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Map<String, bool> _holdActive = {};
   final Map<String, int> _holdLastSecond = {};
   static const int _holdMillis = 5000;
+  bool _sendCooldown = false;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
