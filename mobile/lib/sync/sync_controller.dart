@@ -46,7 +46,13 @@ class SyncController {
       if (remaining().isNegative) return;
 
       final rustStart = DateTime.now();
-      final result = await RustSyncWorker.fetchRecentDms(nsec: nsec, limit: 50);
+      // Fetch messages since the last seen timestamp (or last 10 minutes as fallback)
+      final sinceTs = lastSeenTs > 0 ? lastSeenTs : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 600;
+      final result = await RustSyncWorker.fetchRecentDms(
+        nsec: nsec,
+        limit: 50,
+        sinceTimestamp: sinceTs,
+      );
       final rustMs = DateTime.now().difference(rustStart).inMilliseconds;
       if (result == null || result.isEmpty || result == '[]') {
         debugPrint('[sync] no data (trigger=$trigger, rust=${rustMs}ms)');

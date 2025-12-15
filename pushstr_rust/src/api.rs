@@ -451,17 +451,22 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
 /// Fetches kind 1059 addressed to us, unwraps inner event
 /// Each message contains: id, from, to, content (plaintext), created_at, direction
 #[frb(sync)]
-pub fn fetch_recent_dms(limit: u64) -> Result<String> {
+pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
     RUNTIME.block_on(async {
         let (client, keys) = get_client_and_keys().await?;
 
         let my_pubkey = keys.public_key();
 
-        // Fetch giftwraps addressed to me
-        let filter_received = Filter::new()
+        // Fetch giftwraps addressed to me, optionally filtered by timestamp
+        let mut filter_received = Filter::new()
             .kind(Kind::GiftWrap)
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), my_pubkey.to_hex())
             .limit(limit as usize);
+
+        // Add since filter if timestamp provided (0 = fetch all)
+        if since_timestamp > 0 {
+            filter_received = filter_received.since(Timestamp::from(since_timestamp));
+        }
 
         let events_received = client
             .fetch_events(filter_received, std::time::Duration::from_secs(5))

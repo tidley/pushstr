@@ -589,7 +589,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _ensureRustInitialized();
       final existingLen = messages.length;
       final existingIds = messages.map((m) => m['id'] as String?).whereType<String>().toSet();
-      final dmsJson = api.fetchRecentDms(limit: BigInt.from(100));
+      // Fetch all messages on initial load (since_timestamp = 0)
+      final dmsJson = api.fetchRecentDms(
+        limit: BigInt.from(100),
+        sinceTimestamp: BigInt.from(0),
+      );
       final List<dynamic> dmsList = jsonDecode(dmsJson);
       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
       fetchedMessages = await _decodeMessages(fetchedMessages);
