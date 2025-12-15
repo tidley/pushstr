@@ -1692,9 +1692,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final m = convo[idx];
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
-        final color = isOut
-            ? const Color(0xFF232A32)
-            : const Color(0xFF10923A);
+        final color = const Color(0xFF1E3A5F);
         final blossomUrl = _extractBlossomUrl(m['content']);
           final actions = !isOut
               ? Column(
