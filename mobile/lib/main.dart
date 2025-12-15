@@ -66,7 +66,7 @@ void backgroundFetchHeadless(bg.HeadlessTask task) async {
     await _ensureRustInit();
     await SyncController.performSyncTick(
       trigger: SyncTrigger.backgroundFetch,
-      budget: const Duration(seconds: 6),
+      budget: const Duration(seconds: 10),
     );
   } catch (e, st) {
     debugPrint('Headless fetch error: $e\n$st');
@@ -97,9 +97,9 @@ int _calculateAdaptiveInterval(DateTime serviceStartTime) {
   final elapsed = DateTime.now().difference(serviceStartTime);
   final elapsedSeconds = elapsed.inSeconds;
 
-  // Define the curve: 5s -> 15min over 3 hours (10800 seconds)
-  const minInterval = 5;           // 5 seconds
-  const maxInterval = 15 * 60;     // 15 minutes
+  // Define the curve: 30s -> 15min over 3 hours (10800 seconds)
+  const minInterval = 30;          // 30 seconds (initial active sync)
+  const maxInterval = 15 * 60;     // 15 minutes (settled background sync)
   const rampUpDuration = 3 * 60 * 60; // 3 hours
 
   if (elapsedSeconds <= 0) return minInterval;
@@ -145,7 +145,7 @@ class _PushstrTaskHandler extends TaskHandler {
     if (timeSinceLastSync >= desiredInterval) {
       await SyncController.performSyncTick(
         trigger: SyncTrigger.foregroundService,
-        budget: const Duration(seconds: 6),
+        budget: const Duration(seconds: 10),
       );
       await prefs.setInt('fg_last_sync_time', timestamp.millisecondsSinceEpoch);
     }
@@ -173,7 +173,7 @@ Future<void> _setupBackgroundTasks() async {
         try {
           await SyncController.performSyncTick(
             trigger: SyncTrigger.backgroundFetch,
-            budget: const Duration(seconds: 6),
+            budget: const Duration(seconds: 10),
           );
         } catch (e, st) {
           debugPrint('BackgroundFetch($taskId) error: $e\n$st');
@@ -213,7 +213,7 @@ Future<void> _setupBackgroundTasks() async {
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
     foregroundTaskOptions: const ForegroundTaskOptions(
-      interval: 5 * 1000, // Start fast; adaptive logic will back off
+      interval: 30 * 1000, // Check every 30s; adaptive logic controls actual sync frequency
       isOnceEvent: false,
       allowWakeLock: true,
       allowWifiLock: true,
