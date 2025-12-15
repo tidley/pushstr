@@ -62,7 +62,8 @@ class SyncController {
         final createdAt = _createdAtSeconds(m);
         final id = m['id']?.toString();
         if (id != null && seenState.ids.contains(id)) return false;
-        return createdAt == 0 || createdAt > lastSeenTs;
+        if (id == null && createdAt > 0 && createdAt <= lastSeenTs) return false;
+        return true;
       }).toList();
 
       if (newMessages.isEmpty) {
@@ -104,7 +105,7 @@ class SyncController {
       if (maxSeenTs > lastSeenTs) {
         await prefs.setInt('last_seen_ts_$nsec', maxSeenTs);
       }
-      if (maxSeenTs > lastNotifiedTs) {
+      if (emitted > 0 && maxSeenTs > lastNotifiedTs) {
         lastNotifiedTs = maxSeenTs;
         await prefs.setInt('last_notified_ts_$nsec', lastNotifiedTs);
       }

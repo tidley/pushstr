@@ -665,19 +665,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sendMessage() async {
-      final text = messageCtrl.text.trim();
-      if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
-      if (_sendCooldown) return;
+    final text = messageCtrl.text.trim();
+    if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
+    if (_sendCooldown) return;
 
-      try {
+    try {
       _sendCooldown = true;
       Future.delayed(const Duration(milliseconds: 600), () {
         _sendCooldown = false;
       });
 
-        String payload = text;
-        Map<String, dynamic>? localMedia;
-        String localText = text;
+      String payload = text;
+      Map<String, dynamic>? localMedia;
+      String localText = text;
 
       if (_pendingAttachment != null) {
         final desc = api.encryptMedia(
@@ -733,9 +733,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _scrollToBottom();
 
       // Fire the send in the background
-      unawaited(Future(() async {
+      unawaited(Future.microtask(() async {
         try {
-          api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
+          await api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
         } catch (e) {
           // best effort; in a real app we might mark failed
         } finally {
@@ -1699,9 +1699,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               )
             : null;
 
-        final border = isOut
-            ? null
-            : Border.all(color: const Color(0xFF24FF8A).withOpacity(0.35), width: 1.2);
         return Column(
           crossAxisAlignment: isOut ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
@@ -1717,17 +1714,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
                     decoration: BoxDecoration(
                       color: color,
-                      border: border,
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: isOut
-                          ? null
-                          : [
-                              BoxShadow(
-                                color: const Color(0xFF24FF8A).withOpacity(0.14),
-                                blurRadius: 10,
-                                spreadRadius: 0.5,
-                              )
-                            ],
                     ),
                     child: _buildMessageContent(
                       m,
