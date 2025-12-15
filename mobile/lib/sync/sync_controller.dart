@@ -64,6 +64,7 @@ class SyncController {
         debugPrint('[sync] no incoming messages');
         return;
       }
+      await _persistIncoming(nsec, incoming);
 
       final notifiedIds = prefs.getStringList('notified_dm_ids') ?? <String>[];
       final seen = notifiedIds.toSet();
@@ -140,6 +141,41 @@ class SyncController {
       );
     } catch (_) {
       // best-effort; ignore update errors
+    }
+  }
+
+  static Future<void> _persistIncoming(String nsec, List<Map<String, dynamic>> incoming) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'pending_dms_$nsec';
+      final existingJson = prefs.getString(key);
+      final List<Map<String, dynamic>> existing = [];
+      if (existingJson != null && existingJson.isNotEmpty) {
+        try {
+          final parsed = jsonDecode(existingJson) as List<dynamic>;
+          for (final item in parsed) {
+            if (item is Map<String, dynamic>) {
+              existing.add(item);
+            } else if (item is Map) {
+              existing.add(Map<String, dynamic>.from(item));
+            }
+          }
+        } catch (_) {
+          // ignore parse errors
+        }
+      }
+      final seen = existing.map((e) => e['id']?.toString()).whereType<String>().toSet();
+      for (final msg in incoming) {
+        final id = msg['id']?.toString();
+        if (id != null && seen.contains(id)) continue;
+        existing.add(msg);
+        if (id != null) seen.add(id);
+      }
+      // keep last 200
+      final trimmed = existing.length > 200 ? existing.sublist(existing.length - 200) : existing;
+      await prefs.setString(key, jsonEncode(trimmed));
+    } catch (_) {
+      // best-effort
     }
   }
 }

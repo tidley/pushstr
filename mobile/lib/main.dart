@@ -518,6 +518,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+  String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
 
   Future<void> _saveMessages() async {
     try {
@@ -579,6 +580,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final List<dynamic> dmsList = jsonDecode(dmsJson);
       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
       fetchedMessages = await _decodeMessages(fetchedMessages);
+      // Merge any pending background-cached messages
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final pendingKey = nsec != null ? _pendingDmsKeyFor(nsec!) : 'pending_dms';
+        final pendingJson = prefs.getString(pendingKey);
+        if (pendingJson != null && pendingJson.isNotEmpty) {
+          final pendingList = (jsonDecode(pendingJson) as List<dynamic>).cast<Map<String, dynamic>>();
+          final decodedPending = await _decodeMessages(pendingList);
+          fetchedMessages = _mergeMessages([...fetchedMessages, ...decodedPending]);
+          await prefs.remove(pendingKey);
+        }
+      } catch (e) {
+        // ignore pending errors
+      }
 
       // Auto-add contacts from incoming messages
       final incomingPubkeys = fetchedMessages
@@ -676,15 +691,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         };
         localText = '(attachment)';
       }
-
-      api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
-
-      // Add to local messages immediately
+      // Add to local messages immediately (presume success)
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       _sessionMessages.add(localId); // Mark as session message
       final displayContent = localMedia != null
           ? {'text': localText, 'media': localMedia}
-          : await _decodeContent(payload, npub ?? '', localId);
+          : {'text': text, 'media': null};
       setState(() {
         messages.add(<String, dynamic>{
           'id': localId,
@@ -703,6 +715,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Save messages to persist them
       await _saveMessages();
       _scrollToBottom();
+
+      // Fire the send in the background
+      unawaited(Future(() async {
+        try {
+          api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
+        } catch (e) {
+          // best effort; in a real app we might mark failed
+        } finally {
+          _sessionMessages.remove(localId);
+        }
+      }));
 
       // Reset adaptive interval when sending a message
       // This ensures responsive checking for the reply
@@ -1035,16 +1058,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     final contactsKey = profileNsec != null && profileNsec.isNotEmpty ? _contactsKeyFor(profileNsec) : 'contacts';
     final messagesKey = profileNsec != null && profileNsec.isNotEmpty ? _messagesKeyFor(profileNsec) : 'messages';
+    final pendingKey = profileNsec != null && profileNsec.isNotEmpty ? _pendingDmsKeyFor(profileNsec) : 'pending_dms';
 
     final savedContacts = prefs.getStringList(contactsKey) ?? [];
     final savedMessages = prefs.getString(messagesKey);
+    final pendingMessagesJson = prefs.getString(pendingKey);
     List<Map<String, dynamic>> loadedMessages = [];
+    List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
       try {
         final List<dynamic> msgsList = jsonDecode(savedMessages);
         loadedMessages = msgsList.cast<Map<String, dynamic>>();
       } catch (e) {
         print('Failed to load saved messages for profile: $e');
+      }
+    }
+    if (pendingMessagesJson != null && pendingMessagesJson.isNotEmpty) {
+      try {
+        final List<dynamic> pendingList = jsonDecode(pendingMessagesJson);
+        pendingMessages = pendingList.cast<Map<String, dynamic>>();
+      } catch (e) {
+        print('Failed to load pending messages: $e');
       }
     }
 
@@ -1062,7 +1096,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         contacts = _dedupeContacts(loadedContacts);
       }
       if (overrideLoaded || messages.isEmpty) {
-        messages = loadedMessages;
+        messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
       }
       _sortContactsByActivity();
     });
