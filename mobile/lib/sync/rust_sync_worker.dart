@@ -42,7 +42,6 @@ class RustSyncWorker {
   static Future<String?> fetchRecentDms({
     required String nsec,
     int limit = 50,
-    int sinceTimestamp = 0,
   }) async {
     if (nsec.isEmpty) return null;
     if (!await _mutex.tryAcquire()) return null;
@@ -57,7 +56,6 @@ class RustSyncWorker {
         try {
           return api.fetchRecentDms(
             limit: BigInt.from(limit),
-            sinceTimestamp: BigInt.from(sinceTimestamp),
           );
         } catch (_) {
           return null;
