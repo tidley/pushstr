@@ -19,7 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:background_fetch/background_fetch.dart' as bg;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:flutter/widgets.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
@@ -2200,14 +2200,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
+                icon: const Icon(Icons.share, size: 20),
+                color: Colors.white,
+                tooltip: 'Share',
+                onPressed: () => _shareMedia(bytes, mime),
+              ),
+              IconButton(
                 icon: const Icon(Icons.download, size: 20),
                 color: Colors.white,
+                tooltip: 'Save to device',
                 onPressed: () => _saveMedia(bytes, mime),
               ),
               if (!isImage)
                 IconButton(
                   icon: const Icon(Icons.copy, size: 20),
                   color: Colors.white,
+                  tooltip: 'Copy',
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: 'Attachment (${mime})'));
                     _showThemedToast('Attachment copied', preferTop: true);
@@ -2374,11 +2382,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _saveMedia(Uint8List bytes, String mime) async {
+  Future<void> _shareMedia(Uint8List bytes, String mime) async {
     try {
       final dir = await getTemporaryDirectory();
       final ext = extensionFromMime(mime);
-      final file = File('${dir.path}/pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext');
+      final file = File('${dir.path}/pushstr_share_${DateTime.now().millisecondsSinceEpoch}.$ext');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: mime)],
+        text: 'Shared from Pushstr',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showThemedToast('Share failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _saveMedia(Uint8List bytes, String mime) async {
+    try {
+      // Use file picker to let user choose save location
+      final ext = extensionFromMime(mime);
+      final suggestedName = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save attachment',
+        fileName: suggestedName,
+        type: FileType.any,
+        allowedExtensions: null,
+      );
+
+      if (result == null) {
+        // User cancelled
+        return;
+      }
+
+      final file = File(result);
       await file.writeAsBytes(bytes);
       if (!mounted) return;
       _showThemedToast('Saved to ${file.path}', preferTop: true);
