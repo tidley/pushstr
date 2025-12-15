@@ -1693,7 +1693,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
         final color = isOut
-            ? const Color(0xFF1E3A5F)
+            ? const Color(0xFF232A32)
             : const Color(0xFF10923A);
         final blossomUrl = _extractBlossomUrl(m['content']);
           final actions = !isOut
@@ -2130,6 +2130,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final content = message['content']?.toString() ?? '';
     final media = message['media'] as Map<String, dynamic>?;
     final cleaned = _stripNip18(content);
+    final textColor = isOut ? const Color(0xFFE6EDF3) : Colors.white;
 
     // Media attachment that needs decryption
     if (media != null && media['needsDecryption'] == true) {
@@ -2286,7 +2287,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (textPart.isNotEmpty)
             Text(
               textPart,
-              style: const TextStyle(fontSize: 15),
+              style: TextStyle(fontSize: 15, color: textColor),
             ),
           TextButton(
             onPressed: () => _launchUrl(url),
@@ -2330,7 +2331,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
 
-    return Text(cleaned, style: const TextStyle(fontSize: 15));
+    return Text(cleaned, style: TextStyle(fontSize: 15, color: textColor));
   }
 
   Future<void> _decryptMedia(Map<String, dynamic> message) async {
