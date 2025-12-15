@@ -1740,6 +1740,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
                     decoration: BoxDecoration(
                       color: color,
+                      border: isOut
+                          ? null
+                          : Border.all(
+                              color: const Color(0xFF24FF8A).withOpacity(0.25),
+                              width: 1,
+                            ),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: _buildMessageContent(
