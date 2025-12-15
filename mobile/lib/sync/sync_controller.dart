@@ -46,8 +46,9 @@ class SyncController {
       if (remaining().isNegative) return;
 
       final rustStart = DateTime.now();
-      // Fetch messages since the last seen timestamp (or last 10 minutes as fallback)
+      // Fetch messages since last seen timestamp (or last 10 min as fallback)
       final sinceTs = lastSeenTs > 0 ? lastSeenTs : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 600;
+      debugPrint('[sync] fetching since timestamp: $sinceTs');
       final result = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
         limit: 50,
