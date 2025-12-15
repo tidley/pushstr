@@ -1897,10 +1897,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               border: const OutlineInputBorder(
                                 borderSide: BorderSide(color: Colors.transparent),
                               ),
-                              enabledBorder: const OutlineInputBorder(
-                                borderSide: BorderSide(color: Colors.transparent),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.greenAccent.withOpacity(0.35)),
                               ),
-                              focusedBorder: OutlineInputBorder(
+                              focusedBorder: const OutlineInputBorder(
                                 borderSide: BorderSide(color: Colors.greenAccent),
                               ),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
