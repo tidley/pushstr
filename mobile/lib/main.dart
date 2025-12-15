@@ -348,6 +348,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _pendingPoller;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
+  bool _sendCooldown = false;
 
   // Session-based decryption caching
   final Map<String, Uint8List> _decryptedMediaCache = {};
