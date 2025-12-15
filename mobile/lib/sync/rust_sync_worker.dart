@@ -37,6 +37,32 @@ class RustSyncWorker {
       _mutex.release();
     }
   }
+
+  /// Fetches recent DMs (bounded) on a background isolate.
+  static Future<String?> fetchRecentDms({
+    required String nsec,
+    int limit = 50,
+  }) async {
+    if (nsec.isEmpty) return null;
+    if (!await _mutex.tryAcquire()) return null;
+    try {
+      return Isolate.run(() async {
+        try {
+          await RustLib.init();
+        } catch (_) {}
+        try {
+          api.initNostr(nsec: nsec);
+        } catch (_) {}
+        try {
+          return api.fetchRecentDms(limit: BigInt.from(limit));
+        } catch (_) {
+          return null;
+        }
+      });
+    } finally {
+      _mutex.release();
+    }
+  }
 }
 
 class _AsyncMutex {

@@ -33,14 +33,14 @@ class SyncController {
       }
       final contacts = _loadContacts(prefs, nsec);
       final lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
+      final lastSeenTs = prefs.getInt('last_seen_ts_$nsec') ?? 0;
       await ensureDmChannel();
 
       Duration remaining() => budget - DateTime.now().difference(start);
       if (remaining().isNegative) return;
 
-      final wait = Duration(seconds: remaining().inSeconds.clamp(1, 3));
       final rustStart = DateTime.now();
-      final result = await RustSyncWorker.waitForNewDms(nsec: nsec, wait: wait);
+      final result = await RustSyncWorker.fetchRecentDms(nsec: nsec, limit: 50);
       final rustMs = DateTime.now().difference(rustStart).inMilliseconds;
       if (result == null || result.isEmpty || result == '[]') {
         debugPrint('[sync] no data (trigger=$trigger, rust=${rustMs}ms)');
@@ -53,25 +53,23 @@ class SyncController {
       }
 
       final decoded = await Isolate.run(() => jsonDecode(result) as List<dynamic>);
-      final incoming = decoded
-          .whereType<Map<String, dynamic>>()
-          .where((m) {
-            final dir = (m['direction'] ?? m['dir'] ?? '').toString().toLowerCase();
-            return dir == 'incoming' || dir == 'in';
-          })
-          .toList();
+      final incomingAll = decoded.whereType<Map<String, dynamic>>().map(_normalizedIncoming).toList();
+      final newMessages = incomingAll.where((m) {
+        final createdAt = _createdAtSeconds(m);
+        return createdAt == 0 || createdAt > lastSeenTs;
+      }).toList();
 
-      if (incoming.isEmpty) {
-        debugPrint('[sync] no incoming messages');
+      if (newMessages.isEmpty) {
+        debugPrint('[sync] no new incoming messages');
         return;
       }
-      await _persistIncoming(nsec, incoming);
+      await _persistIncoming(nsec, newMessages);
 
       final notifiedIds = prefs.getStringList('notified_dm_ids') ?? <String>[];
       final seen = notifiedIds.toSet();
       var emitted = 0;
-      var maxSeenTs = lastNotifiedTs;
-      for (final msg in incoming) {
+      var maxSeenTs = lastSeenTs;
+      for (final msg in newMessages) {
         if (remaining().inMilliseconds <= 0) break;
         if (emitted >= 3) break; // rate-limit per tick
         final id = msg['id']?.toString();
@@ -96,6 +94,9 @@ class SyncController {
       // Trim cache
       final trimmed = seen.toList().reversed.take(50).toList();
       await prefs.setStringList('notified_dm_ids', trimmed);
+      if (maxSeenTs > lastSeenTs) {
+        await prefs.setInt('last_seen_ts_$nsec', maxSeenTs);
+      }
       if (maxSeenTs > lastNotifiedTs) {
         await prefs.setInt('last_notified_ts_$nsec', maxSeenTs);
       }
