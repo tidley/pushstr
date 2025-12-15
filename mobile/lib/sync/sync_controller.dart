@@ -178,7 +178,7 @@ class SyncController {
       for (final msg in incoming) {
         final id = msg['id']?.toString();
         if (id != null && seen.contains(id)) continue;
-        existing.add(msg);
+        existing.add(_normalizedIncoming(msg));
         if (id != null) seen.add(id);
       }
       // keep last 200
@@ -197,6 +197,18 @@ class SyncController {
       return int.tryParse(raw) ?? 0;
     }
     return 0;
+  }
+
+  static Map<String, dynamic> _normalizedIncoming(Map<String, dynamic> msg) {
+    final copy = Map<String, dynamic>.from(msg);
+    final dir = (copy['direction'] ?? copy['dir'] ?? '').toString().toLowerCase();
+    if (dir == 'incoming') {
+      copy['direction'] = 'in';
+    }
+    if (copy['created_at'] == null) {
+      copy['created_at'] = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    }
+    return copy;
   }
 }
 

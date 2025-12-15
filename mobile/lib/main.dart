@@ -592,7 +592,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final pendingKey = nsec != null ? _pendingDmsKeyFor(nsec!) : 'pending_dms';
         final pendingJson = prefs.getString(pendingKey);
         if (pendingJson != null && pendingJson.isNotEmpty) {
-          final pendingList = (jsonDecode(pendingJson) as List<dynamic>).cast<Map<String, dynamic>>();
+          final pendingList = (jsonDecode(pendingJson) as List<dynamic>)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .map(_normalizeIncomingMessage)
+              .toList();
           final decodedPending = await _decodeMessages(pendingList);
           fetchedMessages = _mergeMessages([...fetchedMessages, ...decodedPending]);
           await prefs.remove(pendingKey);
@@ -1117,7 +1120,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final pendingKey = _pendingDmsKeyFor(nsec!);
       final pendingJson = prefs.getString(pendingKey);
       if (pendingJson == null || pendingJson.isEmpty) return;
-      final pendingList = (jsonDecode(pendingJson) as List<dynamic>).cast<Map<String, dynamic>>();
+      final pendingList = (jsonDecode(pendingJson) as List<dynamic>)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .map(_normalizeIncomingMessage)
+          .toList();
       final decoded = await _decodeMessages(pendingList);
       if (!mounted) return;
       setState(() {
@@ -1167,6 +1173,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     }
     return decoded;
+  }
+
+  Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
+    final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
+    if (dir == 'incoming') {
+      msg['direction'] = 'in';
+    }
+    if (msg['created_at'] == null) {
+      msg['created_at'] = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    }
+    return msg;
   }
 
   Future<Map<String, dynamic>> _decodeContent(String raw, String senderPubkey, String? messageId) async {
