@@ -1777,12 +1777,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onRemove: () => setState(() => _pendingAttachment = null),
             ),
           ),
-        Container(
-          padding: const EdgeInsets.all(8.0),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.3),
-            border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
-          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1807,8 +1803,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             maxLines: null, // allow scrolling inside the field
                             decoration: const InputDecoration(
                               hintText: 'Message',
-                              filled: true,
-                              border: OutlineInputBorder(),
+                              filled: false,
+                              border: OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.transparent),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.transparent),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: BorderSide(color: Colors.transparent),
+                              ),
                               contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             ),
                           ),
@@ -1820,6 +1824,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           noContacts
                               ? Icons.person_add_alt
                               : (hasContent ? Icons.send : Icons.attach_file),
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                         onPressed: noContacts
                             ? () => _addContact(context)
@@ -1829,8 +1834,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         : _showAttachChooser()
                                 : null),
                         style: IconButton.styleFrom(
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          foregroundColor: Colors.black,
+                          backgroundColor: Colors.transparent,
+                          foregroundColor: Theme.of(context).colorScheme.primary,
+                          highlightColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                          splashFactory: NoSplash.splashFactory,
                         ),
                       ),
                     ],
