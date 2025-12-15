@@ -1189,9 +1189,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (dir == 'incoming') {
       msg['direction'] = 'in';
     }
-    if (msg['created_at'] == null) {
-      msg['created_at'] = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    }
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    int ts = 0;
+    final raw = msg['created_at'];
+    if (raw is int) ts = raw;
+    else if (raw is double) ts = raw.round();
+    else if (raw is String) ts = int.tryParse(raw) ?? 0;
+    if (ts <= 0) ts = nowSec;
+    if (ts > nowSec + 300) ts = nowSec; // clamp future to now to avoid ordering/regression issues
+    msg['created_at'] = ts;
     return msg;
   }
 
@@ -1677,8 +1683,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     IconButton(
                       icon: Icon(
                         _copiedMessages[_messageCopyKey(m)] == true ? Icons.check_circle : Icons.copy,
-                        size: 18,
-                        color: _copiedMessages[_messageCopyKey(m)] == true ? Colors.greenAccent : null,
+                        size: 16,
+                        color: _copiedMessages[_messageCopyKey(m)] == true
+                            ? Colors.greenAccent
+                            : Colors.grey.shade400,
                       ),
                       tooltip: 'Copy message',
                       onPressed: () {

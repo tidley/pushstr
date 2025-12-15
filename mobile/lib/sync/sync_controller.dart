@@ -239,12 +239,19 @@ class SyncController {
 
   static int _createdAtSeconds(Map<String, dynamic> msg) {
     final raw = msg['created_at'];
-    if (raw is int) return raw;
-    if (raw is double) return raw.round();
-    if (raw is String) {
-      return int.tryParse(raw) ?? 0;
+    int ts;
+    if (raw is int) ts = raw;
+    else if (raw is double) ts = raw.round();
+    else if (raw is String) {
+      ts = int.tryParse(raw) ?? 0;
+    } else {
+      ts = 0;
     }
-    return 0;
+    if (ts <= 0) return 0;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // Clamp to avoid future timestamps blocking later messages.
+    if (ts > now + 300) return now;
+    return ts;
   }
 
   static Map<String, dynamic> _normalizedIncoming(Map<String, dynamic> msg) {
@@ -253,9 +260,9 @@ class SyncController {
     if (dir == 'incoming') {
       copy['direction'] = 'in';
     }
-    if (copy['created_at'] == null) {
-      copy['created_at'] = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    }
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ts = _createdAtSeconds(copy);
+    copy['created_at'] = ts > 0 ? ts : nowSec;
     return copy;
   }
 }
