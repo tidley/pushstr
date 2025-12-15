@@ -32,8 +32,9 @@ class SyncController {
         return;
       }
       final contacts = _loadContacts(prefs, nsec);
-      final lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
-      final lastSeenTs = prefs.getInt('last_seen_ts_$nsec') ?? 0;
+      final seenState = _loadSeenState(prefs, nsec);
+      var lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
+      var lastSeenTs = seenState.maxTs > 0 ? seenState.maxTs : (prefs.getInt('last_seen_ts_$nsec') ?? 0);
       await ensureDmChannel();
 
       Duration remaining() => budget - DateTime.now().difference(start);
@@ -56,6 +57,8 @@ class SyncController {
       final incomingAll = decoded.whereType<Map<String, dynamic>>().map(_normalizedIncoming).toList();
       final newMessages = incomingAll.where((m) {
         final createdAt = _createdAtSeconds(m);
+        final id = m['id']?.toString();
+        if (id != null && seenState.ids.contains(id)) return false;
         return createdAt == 0 || createdAt > lastSeenTs;
       }).toList();
 
@@ -76,6 +79,7 @@ class SyncController {
         if (id != null && seen.contains(id)) continue;
         final createdAt = _createdAtSeconds(msg);
         if (createdAt > 0 && createdAt <= lastNotifiedTs) continue; // don't notify old items
+        if (id != null && seenState.ids.contains(id)) continue; // already displayed/stored
         final from = (msg['from'] ?? '').toString();
         final content = (msg['content'] ?? '').toString();
         await showDmNotification(
@@ -98,7 +102,8 @@ class SyncController {
         await prefs.setInt('last_seen_ts_$nsec', maxSeenTs);
       }
       if (maxSeenTs > lastNotifiedTs) {
-        await prefs.setInt('last_notified_ts_$nsec', maxSeenTs);
+        lastNotifiedTs = maxSeenTs;
+        await prefs.setInt('last_notified_ts_$nsec', lastNotifiedTs);
       }
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       debugPrint('[sync] done trigger=$trigger emitted=$emitted rust=${rustMs}ms total=${elapsed}ms');
@@ -190,6 +195,44 @@ class SyncController {
     }
   }
 
+  static _SeenState _loadSeenState(SharedPreferences prefs, String nsec) {
+    final ids = <String>{};
+    var maxTs = 0;
+
+    void ingestList(List<dynamic>? list) {
+      if (list == null) return;
+      for (final item in list) {
+        if (item is Map) {
+          final map = Map<String, dynamic>.from(item);
+          final id = map['id']?.toString();
+          if (id != null) ids.add(id);
+          final ts = _createdAtSeconds(map);
+          if (ts > maxTs) maxTs = ts;
+        }
+      }
+    }
+
+    String? safeGet(String key) {
+      try {
+        return prefs.getString(key);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    for (final key in ['messages_$nsec', 'messages', 'pending_dms_$nsec', 'pending_dms']) {
+      final json = safeGet(key);
+      if (json == null || json.isEmpty) continue;
+      try {
+        final list = jsonDecode(json) as List<dynamic>;
+        ingestList(list);
+      } catch (_) {
+        // ignore bad json
+      }
+    }
+    return _SeenState(ids: ids, maxTs: maxTs);
+  }
+
   static int _createdAtSeconds(Map<String, dynamic> msg) {
     final raw = msg['created_at'];
     if (raw is int) return raw;
@@ -213,6 +256,12 @@ class SyncController {
   }
 }
 
+class _SeenState {
+  final Set<String> ids;
+  final int maxTs;
+
+  _SeenState({required this.ids, required this.maxTs});
+}
 class _AsyncMutex {
   Completer<void>? _c;
 
