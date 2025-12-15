@@ -1692,7 +1692,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final m = convo[idx];
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
-        final color = const Color(0xFF1E3A5F);
+        final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF232A32);
         final blossomUrl = _extractBlossomUrl(m['content']);
           final actions = !isOut
               ? Column(
@@ -2128,7 +2128,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final content = message['content']?.toString() ?? '';
     final media = message['media'] as Map<String, dynamic>?;
     final cleaned = _stripNip18(content);
-    final textColor = isOut ? const Color(0xFFE6EDF3) : Colors.white;
+    final textColor = const Color(0xFFE6EDF3);
 
     // Media attachment that needs decryption
     if (media != null && media['needsDecryption'] == true) {
