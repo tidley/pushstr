@@ -72,6 +72,7 @@ class SyncController {
         debugPrint('[sync] no new incoming messages');
         return;
       }
+      debugPrint('[sync] new incoming: ${newMessages.length} items. First ids: ${newMessages.map((m) => m['id']).take(3).toList()}');
       await _persistIncoming(nsec, newMessages);
 
       final notifiedIds = prefs.getStringList('notified_dm_ids') ?? <String>[];
@@ -90,6 +91,7 @@ class SyncController {
           final from = (msg['from'] ?? '').toString();
           final to = (msg['to'] ?? '').toString();
           if (from == visibleContact || to == visibleContact) {
+            debugPrint('[sync] skip notify (active convo) id=$id from=$from to=$to');
             continue; // active convo visible; skip notification
           }
         }

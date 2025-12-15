@@ -1140,6 +1140,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .toList();
       final decoded = await _decodeMessages(pendingList);
       if (!mounted) return;
+      debugPrint('[pending] merging ${decoded.length} messages into UI');
       setState(() {
         messages = _mergeMessages([...messages, ...decoded]);
         contacts = _dedupeContacts(contacts);
