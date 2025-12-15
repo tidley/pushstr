@@ -52,6 +52,7 @@ class SyncController {
         debugPrint('[sync] no data (trigger=$trigger, rust=${rustMs}ms)');
         return;
       }
+      debugPrint('[sync] rust returned data: ${result.length} bytes');
 
       if (remaining().isNegative) {
         debugPrint('[sync] budget exceeded before parse');
@@ -60,11 +61,20 @@ class SyncController {
 
       final decoded = await Isolate.run(() => jsonDecode(result) as List<dynamic>);
       final incomingAll = decoded.whereType<Map<String, dynamic>>().map(_normalizedIncoming).toList();
+      debugPrint('[sync] decoded ${incomingAll.length} messages from rust');
+      debugPrint('[sync] seenState has ${seenState.ids.length} IDs, maxTs=$lastSeenTs');
+
       final newMessages = incomingAll.where((m) {
         final createdAt = _createdAtSeconds(m);
         final id = m['id']?.toString();
-        if (id != null && seenState.ids.contains(id)) return false;
-        if (id == null && createdAt > 0 && createdAt <= lastSeenTs) return false;
+        if (id != null && seenState.ids.contains(id)) {
+          debugPrint('[sync] filtered (seen ID): ${id?.substring(0, 8)}... ts=$createdAt');
+          return false;
+        }
+        if (id == null && createdAt > 0 && createdAt <= lastSeenTs) {
+          debugPrint('[sync] filtered (old ts): no-id ts=$createdAt <= $lastSeenTs');
+          return false;
+        }
         return true;
       }).toList();
 
