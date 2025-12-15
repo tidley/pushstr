@@ -97,8 +97,8 @@ int _calculateAdaptiveInterval(DateTime serviceStartTime) {
   final elapsed = DateTime.now().difference(serviceStartTime);
   final elapsedSeconds = elapsed.inSeconds;
 
-  // Define the curve: 30s -> 15min over 3 hours (10800 seconds)
-  const minInterval = 30;          // 30 seconds (initial active sync)
+  // Define the curve: 10s -> 15min over 3 hours (10800 seconds)
+  const minInterval = 10;          // 10 seconds (active conversation sync)
   const maxInterval = 15 * 60;     // 15 minutes (settled background sync)
   const rampUpDuration = 3 * 60 * 60; // 3 hours
 

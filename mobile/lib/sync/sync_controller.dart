@@ -75,6 +75,9 @@ class SyncController {
       debugPrint('[sync] new incoming: ${newMessages.length} items. First ids: ${newMessages.map((m) => m['id']).take(3).toList()}');
       await _persistIncoming(nsec, newMessages);
 
+      // Reset adaptive interval timer for responsive follow-up messages
+      await _resetAdaptiveInterval(prefs);
+
       final notifiedIds = prefs.getStringList('notified_dm_ids') ?? <String>[];
       final seen = notifiedIds.toSet();
       var emitted = 0;
@@ -275,6 +278,16 @@ class SyncController {
     final ts = _createdAtSeconds(copy);
     copy['created_at'] = ts > 0 ? ts : nowSec;
     return copy;
+  }
+
+  /// Reset the adaptive interval timer to provide responsive checking
+  /// when new messages are received
+  static Future<void> _resetAdaptiveInterval(SharedPreferences prefs) async {
+    try {
+      await prefs.setInt('fg_service_start_time', DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {
+      // Ignore if unable to reset
+    }
   }
 }
 
