@@ -345,6 +345,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 4000;
+  Timer? _pendingPoller;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
@@ -364,6 +365,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Allow first frame to paint before heavy init.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _init();
+      _pendingPoller = Timer.periodic(const Duration(seconds: 5), (_) {
+        _loadPendingMessagesIntoUi();
+      });
     });
     // TODO: Re-enable Android share support when API is stable
     // // Handle shared content (when app is already running)
@@ -397,6 +401,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     _toastTimer?.cancel();
     _toastEntry?.remove();
+    _pendingPoller?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     // _intentDataStreamSubscription?.cancel();
     super.dispose();
