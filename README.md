@@ -1,6 +1,8 @@
-# Pushstr – Private, Secure, Instant Communication
+# Pushstr
+> Private, Secure, Instant Communication
 
-> **Pushstr is a lightweight, relay-backed messenger built on Nostr giftwrapped DMs.**  
+**Pushstr is a lightweight, relay-backed messenger built on Nostr giftwrapped DMs.**
+
 > No signup, no central server, keys stay local, and messages are end-to-end encrypted.
 
 Generate an address and start communicating within seconds. Everything lives locally until you choose to back it up. Add a contact to begin sending, or share your address to receive messages; the minimal UI surfaces contact activity in real time.
