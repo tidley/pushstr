@@ -1631,9 +1631,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     final convo = messages
-        .where((m) =>
-            (m['direction'] == 'out' && m['to'] == selectedContact) ||
-            (m['direction'] == 'in' && m['from'] == selectedContact))
+        .where((m) {
+          final dir = (m['direction'] ?? '').toString();
+          final from = (m['from'] ?? '').toString();
+          final to = (m['to'] ?? '').toString();
+          if (dir == 'out') return to == selectedContact;
+          if (dir == 'in' || dir == 'incoming') return from == selectedContact;
+          // Fallback: include if either side matches selected contact
+          return from == selectedContact || to == selectedContact;
+        })
         .toList()
       ..sort((a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0));
 
@@ -1651,7 +1657,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final m = convo[idx];
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
-        final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
+        final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF1F5A2A);
         final blossomUrl = _extractBlossomUrl(m['content']);
           final actions = !isOut
               ? Column(
