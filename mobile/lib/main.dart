@@ -349,6 +349,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
   bool _sendCooldown = false;
+  bool _appVisible = true;
 
   // Session-based decryption caching
   final Map<String, Uint8List> _decryptedMediaCache = {};
@@ -414,8 +415,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     // Reset adaptive interval when app comes to foreground
     if (state == AppLifecycleState.resumed) {
+      _appVisible = true;
+      _persistVisibleState();
       _resetAdaptiveInterval();
       _loadPendingMessagesIntoUi();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
+      _appVisible = false;
+      _persistVisibleState();
     }
   }
 
@@ -1117,6 +1123,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _sortContactsByActivity();
     });
     _ensureSelectedContact();
+    _persistVisibleState();
   }
 
   Future<void> _loadPendingMessagesIntoUi() async {
@@ -1199,6 +1206,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (ts > nowSec + 300) ts = nowSec; // clamp future to now to avoid ordering/regression issues
     msg['created_at'] = ts;
     return msg;
+  }
+
+  Future<void> _persistVisibleState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('app_visible', _appVisible);
+      if (selectedContact != null && selectedContact!.isNotEmpty) {
+        await prefs.setString('visible_contact', selectedContact!);
+      }
+    } catch (_) {
+      // ignore
+    }
   }
 
   Future<Map<String, dynamic>> _decodeContent(String raw, String senderPubkey, String? messageId) async {
@@ -1644,6 +1663,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (selectedContact == null) {
       return const Center(child: Text('Select a contact to start messaging'));
     }
+    _persistVisibleState();
 
     final convo = messages
         .where((m) {

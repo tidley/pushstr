@@ -33,6 +33,8 @@ class SyncController {
       }
       final contacts = _loadContacts(prefs, nsec);
       final seenState = _loadSeenState(prefs, nsec);
+      final appVisible = prefs.getBool('app_visible') ?? false;
+      final visibleContact = prefs.getString('visible_contact') ?? '';
       var lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
       var lastSeenTs = seenState.maxTs > 0 ? seenState.maxTs : (prefs.getInt('last_seen_ts_$nsec') ?? 0);
       if (lastSeenTs < lastNotifiedTs) {
@@ -84,6 +86,13 @@ class SyncController {
         final createdAt = _createdAtSeconds(msg);
         if (createdAt > 0 && createdAt <= lastNotifiedTs) continue; // don't notify old items
         if (id != null && seenState.ids.contains(id)) continue; // already displayed/stored
+        if (appVisible && visibleContact.isNotEmpty) {
+          final from = (msg['from'] ?? '').toString();
+          final to = (msg['to'] ?? '').toString();
+          if (from == visibleContact || to == visibleContact) {
+            continue; // active convo visible; skip notification
+          }
+        }
         final from = (msg['from'] ?? '').toString();
         final content = (msg['content'] ?? '').toString();
         await showDmNotification(

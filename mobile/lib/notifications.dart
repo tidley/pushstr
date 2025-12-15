@@ -51,6 +51,7 @@ Future<void> showDmNotification({
     category: AndroidNotificationCategory.message,
     groupKey: 'pushstr_dm_group',
     styleInformation: style,
+    icon: 'ic_launcher',
   );
   final details = NotificationDetails(android: androidDetails);
   await localNotifications.show(
