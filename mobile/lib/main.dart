@@ -195,11 +195,11 @@ Future<void> _setupBackgroundTasks() async {
 }
 
 
-Future<void> _initNotifications() async {
-  await initLocalNotifications();
+  Future<void> _initNotifications() async {
+    await initLocalNotifications();
 
-  FlutterForegroundTask.init(
-    androidNotificationOptions: AndroidNotificationOptions(
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'pushstr_fg',
       channelName: 'Pushstr background service',
       channelDescription: 'Keeps Pushstr connected for notifications',
@@ -213,7 +213,7 @@ Future<void> _initNotifications() async {
     ),
     iosNotificationOptions: const IOSNotificationOptions(),
     foregroundTaskOptions: const ForegroundTaskOptions(
-      interval: 15 * 1000, // Base tick; adaptive logic only skips work, never faster than this
+      interval: 5 * 1000, // Start fast; adaptive logic will back off
       isOnceEvent: false,
       allowWakeLock: true,
       allowWifiLock: true,
@@ -1692,7 +1692,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final m = convo[idx];
         final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
-        final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF232A32);
+        final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF0E5A57);
         final blossomUrl = _extractBlossomUrl(m['content']);
           final actions = !isOut
               ? Column(
@@ -1740,12 +1740,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
                     decoration: BoxDecoration(
                       color: color,
-                      border: isOut
-                          ? null
-                          : Border.all(
-                              color: const Color(0xFF24FF8A).withOpacity(0.25),
-                              width: 1,
-                            ),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: _buildMessageContent(
