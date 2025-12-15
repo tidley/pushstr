@@ -409,6 +409,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Reset adaptive interval when app comes to foreground
     if (state == AppLifecycleState.resumed) {
       _resetAdaptiveInterval();
+      _loadPendingMessagesIntoUi();
     }
   }
 
@@ -1101,6 +1102,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _sortContactsByActivity();
     });
     _ensureSelectedContact();
+  }
+
+  Future<void> _loadPendingMessagesIntoUi() async {
+    if (!mounted) return;
+    if (nsec == null || nsec!.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pendingKey = _pendingDmsKeyFor(nsec!);
+      final pendingJson = prefs.getString(pendingKey);
+      if (pendingJson == null || pendingJson.isEmpty) return;
+      final pendingList = (jsonDecode(pendingJson) as List<dynamic>).cast<Map<String, dynamic>>();
+      final decoded = await _decodeMessages(pendingList);
+      if (!mounted) return;
+      setState(() {
+        messages = _mergeMessages([...messages, ...decoded]);
+        contacts = _dedupeContacts(contacts);
+        _sortContactsByActivity();
+      });
+      await prefs.remove(pendingKey);
+    } catch (_) {
+      // ignore pending load errors
+    }
   }
 
   List<Map<String, dynamic>> _mergeMessages(List<Map<String, dynamic>> incoming) {
@@ -1801,19 +1824,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             keyboardType: TextInputType.multiline,
                             minLines: 1,
                             maxLines: null, // allow scrolling inside the field
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               hintText: 'Message',
                               filled: false,
-                              border: OutlineInputBorder(
+                              border: const OutlineInputBorder(
                                 borderSide: BorderSide(color: Colors.transparent),
                               ),
-                              enabledBorder: OutlineInputBorder(
+                              enabledBorder: const OutlineInputBorder(
                                 borderSide: BorderSide(color: Colors.transparent),
                               ),
                               focusedBorder: OutlineInputBorder(
-                                borderSide: BorderSide(color: Colors.transparent),
+                                borderSide: BorderSide(color: Colors.greenAccent),
                               ),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             ),
                           ),
                         ),

@@ -32,6 +32,7 @@ class SyncController {
         return;
       }
       final contacts = _loadContacts(prefs, nsec);
+      final lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
       await ensureDmChannel();
 
       Duration remaining() => budget - DateTime.now().difference(start);
@@ -69,11 +70,14 @@ class SyncController {
       final notifiedIds = prefs.getStringList('notified_dm_ids') ?? <String>[];
       final seen = notifiedIds.toSet();
       var emitted = 0;
+      var maxSeenTs = lastNotifiedTs;
       for (final msg in incoming) {
         if (remaining().inMilliseconds <= 0) break;
         if (emitted >= 3) break; // rate-limit per tick
         final id = msg['id']?.toString();
         if (id != null && seen.contains(id)) continue;
+        final createdAt = _createdAtSeconds(msg);
+        if (createdAt > 0 && createdAt <= lastNotifiedTs) continue; // don't notify old items
         final from = (msg['from'] ?? '').toString();
         final content = (msg['content'] ?? '').toString();
         await showDmNotification(
@@ -84,11 +88,17 @@ class SyncController {
         if (id != null && id.isNotEmpty) {
           seen.add(id);
         }
+        if (createdAt > maxSeenTs) {
+          maxSeenTs = createdAt;
+        }
       }
 
       // Trim cache
       final trimmed = seen.toList().reversed.take(50).toList();
       await prefs.setStringList('notified_dm_ids', trimmed);
+      if (maxSeenTs > lastNotifiedTs) {
+        await prefs.setInt('last_notified_ts_$nsec', maxSeenTs);
+      }
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       debugPrint('[sync] done trigger=$trigger emitted=$emitted rust=${rustMs}ms total=${elapsed}ms');
       await _updateForegroundStatus(DateTime.now());
@@ -177,6 +187,16 @@ class SyncController {
     } catch (_) {
       // best-effort
     }
+  }
+
+  static int _createdAtSeconds(Map<String, dynamic> msg) {
+    final raw = msg['created_at'];
+    if (raw is int) return raw;
+    if (raw is double) return raw.round();
+    if (raw is String) {
+      return int.tryParse(raw) ?? 0;
+    }
+    return 0;
   }
 }
 
