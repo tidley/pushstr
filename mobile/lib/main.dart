@@ -579,11 +579,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
 
-      // Merge fetched messages with local messages (keep local messages that aren't in fetched)
+      // Merge fetched messages with stored messages that weren't fetched
+      // Keep ALL stored messages that aren't in the fresh fetch (not just local_ ones)
+      // This prevents losing messages when relay doesn't return full history
       final fetchedIds = fetchedMessages.map((m) => m['id'] as String?).where((id) => id != null).toSet();
-      final localOnly = messages.where((m) {
+      final storedNotFetched = messages.where((m) {
         final id = m['id'] as String?;
-        return id != null && id.startsWith('local_') && !fetchedIds.contains(id);
+        return id != null && !fetchedIds.contains(id);
       }).toList();
 
       final newIncoming = fetchedMessages.where((m) {
@@ -591,7 +593,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return m['direction'] == 'in' && id != null && !existingIds.contains(id);
       }).toList();
 
-      final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
+      final merged = _mergeMessages([...fetchedMessages, ...storedNotFetched]);
       final added = merged.length > existingLen;
       setState(() {
         messages = merged;
