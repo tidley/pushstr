@@ -439,6 +439,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await prefs.setString('nostr_nsec', nsec!);
       }
 
+      // Migrate old messages from npub to hex format
+      _migrateNpubMessages();
+
       // Fetch recent messages
       _fetchMessages();
       _startDmListener();
@@ -494,6 +497,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       print('Failed to save messages: $e');
+    }
+  }
+
+  /// Migrate old messages from npub format to hex format
+  void _migrateNpubMessages() {
+    try {
+      var migrated = false;
+      for (var i = 0; i < messages.length; i++) {
+        final msg = messages[i];
+        final from = (msg['from'] ?? '').toString();
+
+        // Convert npub 'from' to hex
+        if (from.startsWith('npub')) {
+          try {
+            final fromHex = api.npubToHex(npub: from);
+            messages[i] = {...msg, 'from': fromHex};
+            migrated = true;
+          } catch (e) {
+            debugPrint('[migrate] Failed to convert npub $from: $e');
+          }
+        }
+      }
+
+      if (migrated) {
+        debugPrint('[migrate] Converted ${messages.length} messages from npub to hex');
+        _saveMessages();
+      }
+    } catch (e) {
+      debugPrint('[migrate] Migration error: $e');
     }
   }
 
@@ -679,7 +711,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final displayContent = localMedia != null
           ? {'text': localText, 'media': localMedia}
           : {'text': text, 'media': null};
-      debugPrint('[send] Adding message: id=$localId, from=$myHexPubkey, to=$selectedContact, direction=out');
       setState(() {
         messages.add(<String, dynamic>{
           'id': localId,
@@ -694,7 +725,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pendingAttachment = null;
         lastError = null;
       });
-      debugPrint('[send] Messages count after add: ${messages.length}');
 
       // Save messages to persist them
       await _saveMessages();
@@ -1624,30 +1654,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     _persistVisibleState();
 
-    final contactShort = selectedContact != null && selectedContact!.length > 16
-        ? selectedContact!.substring(0, 16)
-        : selectedContact;
-    debugPrint('[buildHistory] Total messages: ${messages.length}, selectedContact: $contactShort');
+    // Filter messages for the selected contact, handling both npub and hex formats
     final convo = messages
         .where((m) {
           final dir = (m['direction'] ?? '').toString();
           final from = (m['from'] ?? '').toString();
           final to = (m['to'] ?? '').toString();
-          final id = (m['id'] ?? '').toString();
-          final included = (dir == 'out' && to == selectedContact) ||
-              ((dir == 'in' || dir == 'incoming') && from == selectedContact) ||
-              (from == selectedContact || to == selectedContact);
-          if (!included) {
-            final idShort = id.length > 16 ? id.substring(0, 16) : id;
-            final fromShort = from.length > 8 ? from.substring(0, 8) : from;
-            final toShort = to.length > 8 ? to.substring(0, 8) : to;
-            debugPrint('[buildHistory] FILTERED OUT: id=$idShort, dir=$dir, from=$fromShort, to=$toShort');
+
+          // For outgoing messages: check if 'to' matches selectedContact
+          if (dir == 'out') {
+            return to == selectedContact;
           }
-          return included;
+
+          // For incoming messages: check if 'from' matches selectedContact (handle both npub and hex)
+          if (dir == 'in' || dir == 'incoming') {
+            // Direct hex match
+            if (from == selectedContact) return true;
+
+            // Try converting from npub to hex if it's in npub format
+            if (from.startsWith('npub')) {
+              try {
+                final fromHex = api.npubToHex(npub: from);
+                if (fromHex == selectedContact) return true;
+              } catch (_) {}
+            }
+            return false;
+          }
+
+          // Fallback: include if either side matches (with npub conversion)
+          if (from == selectedContact || to == selectedContact) return true;
+          if (from.startsWith('npub')) {
+            try {
+              final fromHex = api.npubToHex(npub: from);
+              if (fromHex == selectedContact) return true;
+            } catch (_) {}
+          }
+          return false;
         })
         .toList()
       ..sort((a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0));
-    debugPrint('[buildHistory] Filtered conversation messages: ${convo.length}');
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
