@@ -74,9 +74,6 @@ Uint8List decryptMedia({required String descriptorJson, required String senderPu
     .api
     .crateApiDecryptMedia(descriptorJson: descriptorJson, senderPubkey: senderPubkey, myNsec: myNsec);
 
-/// Clear the cache of returned event IDs
-void clearReturnedEventsCache() => RustLib.instance.api.crateApiClearReturnedEventsCache();
-
 class MediaDescriptor {
   final String url;
   final String iv;

@@ -80,75 +80,22 @@ void foregroundStartCallback() {
   FlutterForegroundTask.setTaskHandler(_PushstrTaskHandler());
 }
 
-/// Reset the adaptive interval timer to provide responsive checking
-/// Call this when user sends or receives messages
-Future<void> _resetAdaptiveInterval() async {
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('fg_service_start_time', DateTime.now().millisecondsSinceEpoch);
-  } catch (_) {
-    // Ignore if prefs unavailable
-  }
-}
 
-/// Calculate adaptive sync interval based on elapsed time since service started
-/// Starts at 5 seconds, gradually increases to 15 minutes over 3 hours
-int _calculateAdaptiveInterval(DateTime serviceStartTime) {
-  final elapsed = DateTime.now().difference(serviceStartTime);
-  final elapsedSeconds = elapsed.inSeconds;
-
-  // Define the curve: 10s -> 15min over 3 hours (10800 seconds)
-  const minInterval = 10;          // 10 seconds (active conversation sync)
-  const maxInterval = 15 * 60;     // 15 minutes (settled background sync)
-  const rampUpDuration = 3 * 60 * 60; // 3 hours
-
-  if (elapsedSeconds <= 0) return minInterval;
-  if (elapsedSeconds >= rampUpDuration) return maxInterval;
-
-  // Use exponential curve for gradual increase
-  // Formula: min + (max - min) * (elapsed / duration)^2
-  final progress = elapsedSeconds / rampUpDuration;
-  final exponentialProgress = progress * progress; // Square for smoother curve
-  final interval = minInterval + ((maxInterval - minInterval) * exponentialProgress);
-
-  return interval.round();
-}
 
 class _PushstrTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
     DartPluginRegistrant.ensureInitialized();
-    // Record when the service started
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('fg_service_start_time', timestamp.millisecondsSinceEpoch);
-    await prefs.setInt('fg_last_sync_time', 0); // Reset last sync time
   }
 
   @override
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
     DartPluginRegistrant.ensureInitialized();
-    final prefs = await SharedPreferences.getInstance();
-
-    // Get service start time
-    final startTimeMs = prefs.getInt('fg_service_start_time') ?? timestamp.millisecondsSinceEpoch;
-    final serviceStartTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
-
-    // Get last sync time
-    final lastSyncMs = prefs.getInt('fg_last_sync_time') ?? 0;
-    final lastSyncTime = DateTime.fromMillisecondsSinceEpoch(lastSyncMs);
-
-    // Calculate how much time should pass before next sync
-    final desiredInterval = _calculateAdaptiveInterval(serviceStartTime);
-    final timeSinceLastSync = timestamp.difference(lastSyncTime).inSeconds;
-
-    // Only sync if enough time has passed
-    if (timeSinceLastSync >= desiredInterval) {
-      await SyncController.performSyncTick(
-        trigger: SyncTrigger.foregroundService,
-        budget: const Duration(seconds: 10),
-      );
-      await prefs.setInt('fg_last_sync_time', timestamp.millisecondsSinceEpoch);
-    }
+    // Simple periodic sync every 30 seconds (set by foregroundTaskOptions.interval)
+    await SyncController.performSyncTick(
+      trigger: SyncTrigger.foregroundService,
+      budget: const Duration(seconds: 10),
+    );
   }
 
   @override
@@ -413,12 +360,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
-    // Reset adaptive interval when app comes to foreground
     if (state == AppLifecycleState.resumed) {
       _appVisible = true;
       _persistVisibleState();
-      _resetAdaptiveInterval();
       _loadPendingMessagesIntoUi();
+      // Immediate sync on resume for responsive message delivery
+      SyncController.performSyncTick(
+        trigger: SyncTrigger.manual,
+        budget: const Duration(seconds: 10),
+      );
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
       _appVisible = false;
       _persistVisibleState();
@@ -752,10 +702,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _sessionMessages.remove(localId);
         }
       }));
-
-      // Reset adaptive interval when sending a message
-      // This ensures responsive checking for the reply
-      await _resetAdaptiveInterval();
     } catch (e) {
       setState(() {
         lastError = 'Send failed: $e';
@@ -965,7 +911,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         final result = await RustSyncWorker.waitForNewDms(
           nsec: nsec ?? '',
-          wait: const Duration(seconds: 2),
+          wait: const Duration(seconds: 10),
         );
         if (result != null && result.isNotEmpty && result != '[]') {
           final List<dynamic> list = jsonDecode(result);

@@ -32,11 +32,10 @@ class SyncController {
         return;
       }
       final contacts = _loadContacts(prefs, nsec);
-      final seenState = _loadSeenState(prefs, nsec);
       final appVisible = prefs.getBool('app_visible') ?? false;
       final visibleContact = prefs.getString('visible_contact') ?? '';
       var lastNotifiedTs = prefs.getInt('last_notified_ts_$nsec') ?? 0;
-      var lastSeenTs = seenState.maxTs > 0 ? seenState.maxTs : (prefs.getInt('last_seen_ts_$nsec') ?? 0);
+      var lastSeenTs = prefs.getInt('last_seen_ts_$nsec') ?? 0;
       if (lastSeenTs < lastNotifiedTs) {
         lastSeenTs = lastNotifiedTs;
       }
@@ -68,18 +67,14 @@ class SyncController {
 
       final decoded = await Isolate.run(() => jsonDecode(result) as List<dynamic>);
       final incomingAll = decoded.whereType<Map<String, dynamic>>().map(_normalizedIncoming).toList();
-      debugPrint('[sync] decoded ${incomingAll.length} messages from rust');
-      debugPrint('[sync] seenState has ${seenState.ids.length} IDs, maxTs=$lastSeenTs');
+      debugPrint('[sync] decoded ${incomingAll.length} messages from rust, lastSeenTs=$lastSeenTs');
 
+      // Simple timestamp-based filtering - Rust already filters by since timestamp
+      // This catches any stragglers at the boundary
       final newMessages = incomingAll.where((m) {
         final createdAt = _createdAtSeconds(m);
-        final id = m['id']?.toString();
-        if (id != null && seenState.ids.contains(id)) {
-          debugPrint('[sync] filtered (seen ID): ${id?.substring(0, 8)}... ts=$createdAt');
-          return false;
-        }
-        if (id == null && createdAt > 0 && createdAt <= lastSeenTs) {
-          debugPrint('[sync] filtered (old ts): no-id ts=$createdAt <= $lastSeenTs');
+        if (createdAt > 0 && createdAt <= lastSeenTs) {
+          debugPrint('[sync] filtered (old ts): ts=$createdAt <= $lastSeenTs');
           return false;
         }
         return true;
@@ -92,9 +87,6 @@ class SyncController {
       debugPrint('[sync] new incoming: ${newMessages.length} items. First ids: ${newMessages.map((m) => m['id']).take(3).toList()}');
       await _persistIncoming(nsec, newMessages);
 
-      // Reset adaptive interval timer for responsive follow-up messages
-      await _resetAdaptiveInterval(prefs);
-
       final notifiedIds = prefs.getStringList('notified_dm_ids') ?? <String>[];
       final seen = notifiedIds.toSet();
       var emitted = 0;
@@ -106,7 +98,6 @@ class SyncController {
         if (id != null && seen.contains(id)) continue;
         final createdAt = _createdAtSeconds(msg);
         if (createdAt > 0 && createdAt <= lastNotifiedTs) continue; // don't notify old items
-        if (id != null && seenState.ids.contains(id)) continue; // already displayed/stored
         if (appVisible && visibleContact.isNotEmpty) {
           final from = (msg['from'] ?? '').toString();
           final to = (msg['to'] ?? '').toString();
@@ -230,43 +221,6 @@ class SyncController {
     }
   }
 
-  static _SeenState _loadSeenState(SharedPreferences prefs, String nsec) {
-    final ids = <String>{};
-    var maxTs = 0;
-
-    void ingestList(List<dynamic>? list) {
-      if (list == null) return;
-      for (final item in list) {
-        if (item is Map) {
-          final map = Map<String, dynamic>.from(item);
-          final id = map['id']?.toString();
-          if (id != null) ids.add(id);
-          final ts = _createdAtSeconds(map);
-          if (ts > maxTs) maxTs = ts;
-        }
-      }
-    }
-
-    String? safeGet(String key) {
-      try {
-        return prefs.getString(key);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    for (final key in ['messages_$nsec', 'messages', 'pending_dms_$nsec', 'pending_dms']) {
-      final json = safeGet(key);
-      if (json == null || json.isEmpty) continue;
-      try {
-        final list = jsonDecode(json) as List<dynamic>;
-        ingestList(list);
-      } catch (_) {
-        // ignore bad json
-      }
-    }
-    return _SeenState(ids: ids, maxTs: maxTs);
-  }
 
   static int _createdAtSeconds(Map<String, dynamic> msg) {
     final raw = msg['created_at'];
@@ -296,24 +250,8 @@ class SyncController {
     copy['created_at'] = ts > 0 ? ts : nowSec;
     return copy;
   }
-
-  /// Reset the adaptive interval timer to provide responsive checking
-  /// when new messages are received
-  static Future<void> _resetAdaptiveInterval(SharedPreferences prefs) async {
-    try {
-      await prefs.setInt('fg_service_start_time', DateTime.now().millisecondsSinceEpoch);
-    } catch (_) {
-      // Ignore if unable to reset
-    }
-  }
 }
 
-class _SeenState {
-  final Set<String> ids;
-  final int maxTs;
-
-  _SeenState({required this.ids, required this.maxTs});
-}
 class _AsyncMutex {
   Completer<void>? _c;
 

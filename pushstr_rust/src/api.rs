@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use flate2::{write::GzEncoder, read::GzDecoder, Compression};
 use std::io::{Read, Write};
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use aes_gcm::{
     aead::{Aead, KeyInit, OsRng},
@@ -28,10 +27,6 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> =
 // Global state for the Nostr client
 static NOSTR_CLIENT: Mutex<Option<Arc<Client>>> = Mutex::const_new(None);
 static NOSTR_KEYS: Mutex<Option<Keys>> = Mutex::const_new(None);
-
-// Track events that have been returned to prevent duplicates
-static RETURNED_EVENT_IDS: Lazy<StdMutex<HashSet<String>>> =
-    Lazy::new(|| StdMutex::new(HashSet::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[frb(non_opaque)]
@@ -554,20 +549,11 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
         let mut notifications = client.notifications();
 
         while start_time.elapsed() < timeout {
-            let notification_timeout = tokio::time::Duration::from_secs(2);
+            let notification_timeout = tokio::time::Duration::from_secs(10);
             match tokio::time::timeout(notification_timeout, notifications.recv()).await {
                 Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
                     if event.kind == Kind::GiftWrap {
                         let event_id = event.id.to_hex();
-
-                        // Check if already returned
-                        {
-                            let mut returned = RETURNED_EVENT_IDS.lock().unwrap();
-                            if returned.contains(&event_id) {
-                                continue;
-                            }
-                            returned.insert(event_id.clone());
-                        }
 
                         if let Ok(rumor) = unwrap_gift_event(&event, &keys) {
                             // Decrypt inner content (double encryption: giftwrap + inner DM)
@@ -810,15 +796,4 @@ fn timestamp() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-/// Clear the cache of returned event IDs
-#[frb(sync)]
-pub fn clear_returned_events_cache() -> Result<()> {
-    RETURNED_EVENT_IDS
-        .lock()
-        .map(|mut set| {
-            set.clear();
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to clear cache: {}", e))
 }
