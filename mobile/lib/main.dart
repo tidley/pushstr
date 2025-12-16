@@ -670,15 +670,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localText = '(attachment)';
       }
       // Add to local messages immediately (presume success)
+      // IMPORTANT: Use HEX pubkey format to match what relay returns
+      final myHexPubkey = npub != null && npub!.startsWith('npub')
+          ? api.npubToHex(npub: npub!)
+          : (npub ?? '');
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       _sessionMessages.add(localId); // Mark as session message
       final displayContent = localMedia != null
           ? {'text': localText, 'media': localMedia}
           : {'text': text, 'media': null};
+      debugPrint('[send] Adding message: id=$localId, from=$myHexPubkey, to=$selectedContact, direction=out');
       setState(() {
         messages.add(<String, dynamic>{
           'id': localId,
-          'from': npub ?? '',
+          'from': myHexPubkey,
           'to': selectedContact!,
           'content': displayContent['text'],
           'media': displayContent['media'],
@@ -689,6 +694,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _pendingAttachment = null;
         lastError = null;
       });
+      debugPrint('[send] Messages count after add: ${messages.length}');
 
       // Save messages to persist them
       await _saveMessages();
@@ -1618,18 +1624,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     _persistVisibleState();
 
+    final contactShort = selectedContact != null && selectedContact!.length > 16
+        ? selectedContact!.substring(0, 16)
+        : selectedContact;
+    debugPrint('[buildHistory] Total messages: ${messages.length}, selectedContact: $contactShort');
     final convo = messages
         .where((m) {
           final dir = (m['direction'] ?? '').toString();
           final from = (m['from'] ?? '').toString();
           final to = (m['to'] ?? '').toString();
-          if (dir == 'out') return to == selectedContact;
-          if (dir == 'in' || dir == 'incoming') return from == selectedContact;
-          // Fallback: include if either side matches selected contact
-          return from == selectedContact || to == selectedContact;
+          final id = (m['id'] ?? '').toString();
+          final included = (dir == 'out' && to == selectedContact) ||
+              ((dir == 'in' || dir == 'incoming') && from == selectedContact) ||
+              (from == selectedContact || to == selectedContact);
+          if (!included) {
+            final idShort = id.length > 16 ? id.substring(0, 16) : id;
+            final fromShort = from.length > 8 ? from.substring(0, 8) : from;
+            final toShort = to.length > 8 ? to.substring(0, 8) : to;
+            debugPrint('[buildHistory] FILTERED OUT: id=$idShort, dir=$dir, from=$fromShort, to=$toShort');
+          }
+          return included;
         })
         .toList()
       ..sort((a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0));
+    debugPrint('[buildHistory] Filtered conversation messages: ${convo.length}');
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
