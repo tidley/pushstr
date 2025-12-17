@@ -531,6 +531,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _sendMessage() async {
     final text = messageCtrl.text.trim();
     if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
+    if (nsec == null || nsec!.isEmpty) {
+      setState(() {
+        lastError = 'Missing profile key; please re-import or pick a profile.';
+      });
+      return;
+    }
 
     try {
       final attachment = _pendingAttachment;
@@ -594,7 +600,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       unawaited(_saveMessages());
       unawaited(Future(() async {
         try {
-          api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
+          await RustSyncWorker.sendGiftDm(
+            recipient: selectedContact!,
+            content: payload,
+            nsec: nsec!,
+            useNip44: true,
+          );
         } catch (e) {
           if (!mounted) return;
           setState(() {
@@ -3688,6 +3699,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setBool('foreground_service_enabled', val);
                     if (val) {
+                      _showThemedToast('Enabling background connection...', preferTop: true);
                       final ok = await _startForegroundService();
                       if (!ok) {
                         setState(() => _foregroundEnabled = false);
@@ -3695,6 +3707,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           'foreground_service_enabled',
                           false,
                         );
+                        _showThemedToast('Foreground service blocked (notification permission?)', preferTop: true);
                         return;
                       }
                       unawaited(
@@ -3703,8 +3716,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           budget: const Duration(seconds: 10),
                         ),
                       );
+                      _showThemedToast('Foreground service running', preferTop: true);
                     } else {
                       await _stopForegroundService();
+                      _showThemedToast('Foreground service stopped', preferTop: true);
                     }
                   },
                 ),

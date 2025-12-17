@@ -76,6 +76,30 @@ class RustSyncWorker {
       api.clearReturnedEventsCache();
     } catch (_) {}
   }
+
+  /// Sends a DM on a background isolate to avoid blocking the UI.
+  static Future<void> sendGiftDm({
+    required String recipient,
+    required String content,
+    required String nsec,
+    bool useNip44 = true,
+  }) async {
+    if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return;
+    if (!await _mutex.tryAcquire()) return;
+    try {
+      await Isolate.run(() {
+        try {
+          RustLib.init();
+        } catch (_) {}
+        try {
+          api.initNostr(nsec: nsec);
+        } catch (_) {}
+        api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
+      });
+    } finally {
+      _mutex.release();
+    }
+  }
 }
 
 class _AsyncMutex {
