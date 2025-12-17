@@ -22,16 +22,12 @@ class RustSyncWorker {
       return Isolate.run(() async {
         try {
           await RustLib.init();
-        } catch (_) {
-          // Ignore double-init warnings across isolates.
-        }
-        try {
           api.initNostr(nsec: nsec);
+          return api.waitForNewDms(timeoutSecs: BigInt.from(seconds));
         } catch (_) {
-          // If init fails, surface empty result to avoid crashes.
+          // If init or wait fails, return empty to keep listener alive.
           return '';
         }
-        return api.waitForNewDms(timeoutSecs: BigInt.from(seconds));
       });
     } finally {
       _mutex.release();
@@ -50,11 +46,7 @@ class RustSyncWorker {
       return Isolate.run(() async {
         try {
           await RustLib.init();
-        } catch (_) {}
-        try {
           api.initNostr(nsec: nsec);
-        } catch (_) {}
-        try {
           return api.fetchRecentDms(
             limit: BigInt.from(limit),
             sinceTimestamp: BigInt.from(sinceTimestamp),
@@ -87,14 +79,12 @@ class RustSyncWorker {
     if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return;
     if (!await _mutex.tryAcquire()) return;
     try {
-      await Isolate.run(() {
+      await Isolate.run(() async {
         try {
-          RustLib.init();
-        } catch (_) {}
-        try {
+          await RustLib.init();
           api.initNostr(nsec: nsec);
+          api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
         } catch (_) {}
-        api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
       });
     } finally {
       _mutex.release();
