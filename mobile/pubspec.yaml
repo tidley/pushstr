@@ -60,6 +60,8 @@ dependencies:
 dependency_overrides:
   qr_code_scanner:
     path: plugins/qr_code_scanner_fixed
+  workmanager:
+    path: plugins/workmanager_fixed
 
 dev_dependencies:
   flutter_test:
