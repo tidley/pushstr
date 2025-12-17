@@ -96,14 +96,27 @@ void foregroundStartCallback() {
 }
 
 class _PushstrTaskHandler extends TaskHandler {
+  bool _bindingsReady = false;
+
+  Future<void> _ensureBindings() async {
+    if (_bindingsReady) return;
+    WidgetsFlutterBinding.ensureInitialized();
+    DartPluginRegistrant.ensureInitialized();
+    _bindingsReady = true;
+  }
+
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
-    DartPluginRegistrant.ensureInitialized();
+    await _ensureBindings();
+    await SyncController.performSyncTick(
+      trigger: SyncTrigger.foregroundService,
+      budget: const Duration(seconds: 10),
+    );
   }
 
   @override
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
-    DartPluginRegistrant.ensureInitialized();
+    await _ensureBindings();
     await SyncController.performSyncTick(
       trigger: SyncTrigger.foregroundService,
       budget: const Duration(seconds: 10),
@@ -520,16 +533,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
 
     try {
+      final attachment = _pendingAttachment;
       String payload = text;
       Map<String, dynamic>? localMedia;
       String localText = text;
 
-      if (_pendingAttachment != null) {
+      if (attachment != null) {
         final desc = api.encryptMedia(
-          bytes: _pendingAttachment!.bytes,
+          bytes: attachment.bytes,
           recipient: selectedContact!,
-          mime: _pendingAttachment!.mime,
-          filename: _pendingAttachment!.name,
+          mime: attachment.mime,
+          filename: attachment.name,
         );
         payload = jsonEncode({
           'media': {
@@ -545,17 +559,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
         // Use the original picked bytes for local preview (matches browser extension behavior).
         localMedia = {
-          'bytes': _pendingAttachment!.bytes,
-          'mime': _pendingAttachment!.mime,
-          'size': _pendingAttachment!.bytes.length,
-          'filename': _pendingAttachment!.name,
+          'bytes': attachment.bytes,
+          'mime': attachment.mime,
+          'size': attachment.bytes.length,
+          'filename': attachment.name,
         };
         localText = '(attachment)';
       }
 
-      api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
-
-      // Add to local messages immediately
+      // Add to local messages immediately before the send call to avoid UI delays.
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       _sessionMessages.add(localId); // Mark as session message
       final displayContent = localMedia != null
@@ -576,9 +588,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = null;
       });
 
-      // Save messages to persist them
-      await _saveMessages();
       _scrollToBottom();
+
+      // Persist and fire off the send in the background; we optimistically assume success.
+      unawaited(_saveMessages());
+      unawaited(Future(() async {
+        try {
+          api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            lastError = 'Send failed: $e';
+          });
+        }
+      }));
     } catch (e) {
       setState(() {
         lastError = 'Send failed: $e';
