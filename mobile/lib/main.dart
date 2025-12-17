@@ -827,60 +827,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           nsec: nsec ?? '',
           wait: const Duration(seconds: 10),
         );
-        if (result != null && result.isNotEmpty && result != '[]') {
-          final List<dynamic> list = jsonDecode(result);
-          var newMessages = list.cast<Map<String, dynamic>>();
-          newMessages = await _decodeMessages(newMessages);
-          if (newMessages.isNotEmpty && mounted) {
-            // Mark new messages as session messages
-            for (final msg in newMessages) {
-              final id = msg['id'] as String?;
-              if (id != null) _sessionMessages.add(id);
-            }
+        // If the call short-circuited (mutex busy, init failure, or no data), avoid a tight loop.
+        if (result == null || result.isEmpty || result == '[]') {
+          await Future.delayed(const Duration(milliseconds: 250));
+          continue;
+        }
+        final List<dynamic> list = jsonDecode(result);
+        var newMessages = list.cast<Map<String, dynamic>>();
+        newMessages = await _decodeMessages(newMessages);
+        if (newMessages.isNotEmpty && mounted) {
+          // Mark new messages as session messages
+          for (final msg in newMessages) {
+            final id = msg['id'] as String?;
+            if (id != null) _sessionMessages.add(id);
+          }
 
-            // Auto-add contacts from incoming messages
-            final incomingPubkeys = newMessages
-                .where((m) => m['direction'] == 'in')
-                .map((m) => m['from'] as String?)
-                .where((pk) => pk != null && pk.isNotEmpty)
-                .toSet();
+          // Auto-add contacts from incoming messages
+          final incomingPubkeys = newMessages
+              .where((m) => m['direction'] == 'in')
+              .map((m) => m['from'] as String?)
+              .where((pk) => pk != null && pk.isNotEmpty)
+              .toSet();
 
-            for (final pubkey in incomingPubkeys) {
-              if (!contacts.any((c) => c['pubkey'] == pubkey)) {
-                final newContact = {'pubkey': pubkey!, 'nickname': ''};
-                contacts.add(newContact);
-              }
+          for (final pubkey in incomingPubkeys) {
+            if (!contacts.any((c) => c['pubkey'] == pubkey)) {
+              final newContact = {'pubkey': pubkey!, 'nickname': ''};
+              contacts.add(newContact);
             }
+          }
 
-            setState(() {
-              messages = _mergeMessages([...messages, ...newMessages]);
-              lastError = null;
-              contacts = _dedupeContacts(contacts);
-              _sortContactsByActivity();
-            });
-            _ensureSelectedContact();
-            await _saveMessages();
-            await _saveContacts();
-            try {
-              if (nsec != null && nsec!.isNotEmpty) {
-                final prefs = await SharedPreferences.getInstance();
-                final maxSeen = messages.fold<int>(0, (acc, m) {
-                  final raw = m['created_at'];
-                  if (raw is int && raw > acc) return raw;
-                  if (raw is double && raw > acc) return raw.round();
-                  if (raw is String) {
-                    final parsed = int.tryParse(raw);
-                    if (parsed != null && parsed > acc) return parsed;
-                  }
-                  return acc;
-                });
-                await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
-                await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
-              }
-            } catch (_) {}
-            if (_isNearBottom()) {
-              _scrollToBottom();
+          setState(() {
+            messages = _mergeMessages([...messages, ...newMessages]);
+            lastError = null;
+            contacts = _dedupeContacts(contacts);
+            _sortContactsByActivity();
+          });
+          _ensureSelectedContact();
+          await _saveMessages();
+          await _saveContacts();
+          try {
+            if (nsec != null && nsec!.isNotEmpty) {
+              final prefs = await SharedPreferences.getInstance();
+              final maxSeen = messages.fold<int>(0, (acc, m) {
+                final raw = m['created_at'];
+                if (raw is int && raw > acc) return raw;
+                if (raw is double && raw > acc) return raw.round();
+                if (raw is String) {
+                  final parsed = int.tryParse(raw);
+                  if (parsed != null && parsed > acc) return parsed;
+                }
+                return acc;
+              });
+              await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
+              await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
             }
+          } catch (_) {}
+          if (_isNearBottom()) {
+            _scrollToBottom();
           }
         }
       } catch (e) {
