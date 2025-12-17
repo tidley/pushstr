@@ -193,6 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _listening = false;
   bool _didInitRust = false;
   bool _foregroundEnabled = false;
+  bool _startingForeground = false;
   bool _appVisible = true;
   final ImagePicker _imagePicker = ImagePicker();
   // StreamSubscription? _intentDataStreamSubscription;
@@ -346,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _fetchMessages();
       _startDmListener();
       if (_foregroundEnabled && Platform.isAndroid) {
-        await _startForegroundService();
+        unawaited(_startForegroundService());
       }
     } catch (e) {
       setState(() {
@@ -1338,8 +1339,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<bool> _startForegroundService() async {
     if (!Platform.isAndroid) return false;
+    if (_startingForeground) return true;
+    _startingForeground = true;
     final notifStatus = await Permission.notification.request();
     if (!notifStatus.isGranted) {
+      _startingForeground = false;
       _showThemedToast(
         'Notification permission is required to stay connected',
         preferTop: true,
@@ -1349,14 +1353,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _initForegroundTask();
     final running = await FlutterForegroundTask.isRunningService;
     if (running) {
+      _startingForeground = false;
       return true;
     }
-    await FlutterForegroundTask.startService(
-      notificationTitle: 'Pushstr running',
-      notificationText: 'Staying connected for incoming messages',
-      callback: foregroundStartCallback,
-    );
-    return true;
+    try {
+      final started = await FlutterForegroundTask.startService(
+        notificationTitle: 'Pushstr running',
+        notificationText: 'Staying connected for incoming messages',
+        callback: foregroundStartCallback,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+      return started;
+    } catch (_) {
+      return false;
+    } finally {
+      _startingForeground = false;
+    }
   }
 
   @override
@@ -2657,6 +2668,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Map<String, bool> _holdActive = {};
   final Map<String, int> _holdLastSecond = {};
   static const int _holdMillis = 5000;
+  bool _startingForeground = false;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
   bool _foregroundEnabled = false;
@@ -2708,21 +2720,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<bool> _startForegroundService() async {
     if (!Platform.isAndroid) return false;
+    if (_startingForeground) return true;
+    _startingForeground = true;
     final notifStatus = await Permission.notification.request();
     if (!notifStatus.isGranted) {
+      _startingForeground = false;
       return false;
     }
     _initForegroundTask();
     final running = await FlutterForegroundTask.isRunningService;
     if (running) {
+      _startingForeground = false;
       return true;
     }
-    await FlutterForegroundTask.startService(
-      notificationTitle: 'Pushstr running',
-      notificationText: 'Staying connected for incoming messages',
-      callback: foregroundStartCallback,
-    );
-    return true;
+    try {
+      final started = await FlutterForegroundTask.startService(
+        notificationTitle: 'Pushstr running',
+        notificationText: 'Staying connected for incoming messages',
+        callback: foregroundStartCallback,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+      return started;
+    } catch (_) {
+      return false;
+    } finally {
+      _startingForeground = false;
+    }
   }
 
   Future<void> _stopForegroundService() async {
