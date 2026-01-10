@@ -228,7 +228,7 @@ fn nip44_decrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, cipherte
     String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
 }
 
-fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, _use_nip44: bool) -> Result<Event> {
+fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, keys: &Keys) -> Result<Event> {
     // Build Rumor JSON from inner event (drop signature to match Amethyst).
     let mut rumor_value = serde_json::to_value(inner_event)?;
     if let serde_json::Value::Object(obj) = &mut rumor_value {
@@ -237,13 +237,6 @@ fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, _use_nip44: boo
     let rumor_json = serde_json::to_string(&rumor_value)?;
 
     // Sealed rumor (kind 13), signed by sender, encrypted to recipient.
-    let keys = {
-        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
-        guard
-            .as_ref()
-            .context("Nostr not initialized. Call init_nostr first.")?
-            .clone()
-    };
     let sealed_content = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &rumor_json)?;
     let sealed_event = EventBuilder::new(Kind::Custom(13), sealed_content)
         .custom_created_at(random_timestamp_within_two_days())
@@ -459,7 +452,7 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
             .tag(Tag::public_key(recipient_pk))
             .sign_with_keys(&keys)?;
 
-        let gift = wrap_gift_event(&inner_event, recipient_pk, use_nip44)?;
+        let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
         let event_id = gift.id.to_hex();
         eprintln!("[dm] Sending giftwrap id={}", event_id);
         match client.send_event(&gift).await {
@@ -476,7 +469,14 @@ pub fn wrap_gift(inner_json: String, recipient: String, use_nip44: bool) -> Resu
     let inner_event: Event =
         serde_json::from_str(&inner_json).context("inner_json must be a valid Nostr event JSON")?;
     let recipient_pk = parse_pubkey(&recipient)?;
-    let gift = wrap_gift_event(&inner_event, recipient_pk, use_nip44)?;
+    let keys = {
+        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        guard
+            .as_ref()
+            .context("Nostr not initialized. Call init_nostr first.")?
+            .clone()
+    };
+    let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
     Ok(serde_json::to_string(&gift)?)
 }
 
