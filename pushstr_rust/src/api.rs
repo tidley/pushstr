@@ -12,6 +12,7 @@ use flate2::{write::GzEncoder, read::GzDecoder, Compression};
 use std::io::{Read, Write};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::future::Future;
 use tokio::sync::Mutex;
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -37,6 +38,14 @@ static RETURNED_EVENT_IDS: Lazy<StdMutex<HashSet<String>>> =
 static RETURNED_EVENT_IDS_QUEUE: Lazy<StdMutex<VecDeque<String>>> =
     Lazy::new(|| StdMutex::new(VecDeque::new()));
 const RETURNED_EVENT_IDS_MAX: usize = 512;
+
+fn run_block_on<F: Future>(fut: F) -> F::Output {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fut))
+    } else {
+        RUNTIME.block_on(fut)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[frb(non_opaque)]
@@ -321,7 +330,7 @@ const DM_RELAYS: &[&str] = &[
 /// Returns npub
 #[frb(sync)]
 pub fn init_nostr(nsec: String) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let keys = if nsec.is_empty() {
             Keys::generate()
         } else {
@@ -410,7 +419,7 @@ pub fn init_nostr(nsec: String) -> Result<String> {
 /// Get the current user's npub
 #[frb(sync)]
 pub fn get_npub() -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         let keys = keys_lock
             .as_ref()
@@ -423,7 +432,7 @@ pub fn get_npub() -> Result<String> {
 /// Get the current user's nsec (for backup purposes)
 #[frb(sync)]
 pub fn get_nsec() -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         let keys = keys_lock
             .as_ref()
@@ -443,7 +452,7 @@ pub fn generate_new_key() -> Result<String> {
 /// Send a giftwrapped DM (kind 1059 wrapping kind 4) using nip44 by default
 #[frb(sync)]
 pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let (client, keys) = get_client_and_keys().await?;
         let recipient_pk = parse_pubkey(&recipient)?;
 
@@ -470,7 +479,7 @@ pub fn wrap_gift(inner_json: String, recipient: String, use_nip44: bool) -> Resu
         serde_json::from_str(&inner_json).context("inner_json must be a valid Nostr event JSON")?;
     let recipient_pk = parse_pubkey(&recipient)?;
     let keys = {
-        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
         guard
             .as_ref()
             .context("Nostr not initialized. Call init_nostr first.")?
@@ -489,7 +498,7 @@ pub fn unwrap_gift(gift_json: String, my_nsec: Option<String>) -> Result<String>
     let keys = if let Some(nsec) = my_nsec {
         Keys::parse(&nsec)?
     } else {
-        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
         if let Some(k) = guard.as_ref() {
             k.clone()
         } else {
@@ -528,7 +537,7 @@ pub fn hex_to_npub(hex: String) -> Result<String> {
 /// Returns event ID
 #[frb(sync)]
 pub fn send_dm(recipient: String, message: String) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let client_lock = NOSTR_CLIENT.lock().await;
         let client = client_lock
             .as_ref()
@@ -578,7 +587,7 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
 /// Each message contains: id, from, to, content (plaintext), created_at, direction
 #[frb(sync)]
 pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let (client, keys) = get_client_and_keys().await?;
 
         let my_pubkey = keys.public_key();
@@ -751,7 +760,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 /// Returns new messages that haven't been returned before
 #[frb(sync)]
 pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let (client, keys) = {
             let client_lock = NOSTR_CLIENT.lock().await;
             let keys_lock = NOSTR_KEYS.lock().await;
@@ -905,7 +914,7 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
     eprintln!("[encrypt_media] Parsed recipient pubkey");
 
     // Get current keys for conversation key derivation
-    let keys = RUNTIME.block_on(async {
+    let keys = run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         Ok::<Keys, anyhow::Error>(keys_lock.as_ref().context("Not initialized")?.clone())
     })?;
@@ -1025,7 +1034,7 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
     let keys = if let Some(nsec) = my_nsec {
         Keys::parse(&nsec)?
     } else {
-        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
         if let Some(k) = guard.as_ref() {
             k.clone()
         } else {
