@@ -27,6 +27,10 @@ String generateNewKey() => RustLib.instance.api.crateApiGenerateNewKey();
 String sendGiftDm({required String recipient, required String content, required bool useNip44}) =>
     RustLib.instance.api.crateApiSendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
 
+/// Send a legacy giftwrap DM compatible with the browser extension
+String sendLegacyGiftDm({required String recipient, required String content}) =>
+    RustLib.instance.api.crateApiSendLegacyGiftDm(recipient: recipient, content: content);
+
 /// Wrap a NIP-17 giftwrap from a provided inner event JSON
 String wrapGift({required String innerJson, required String recipient, required bool useNip44}) =>
     RustLib.instance.api.crateApiWrapGift(innerJson: innerJson, recipient: recipient, useNip44: useNip44);

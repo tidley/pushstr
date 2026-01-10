@@ -192,6 +192,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? selectedContact;
   List<Map<String, dynamic>> messages = [];
   final Map<String, String> _dmModes = {};
+  final Map<String, String> _dmOverrides = {};
+  final Map<String, String> _giftwrapFormats = {};
   bool isConnected = false;
   bool _listening = false;
   bool _didInitRust = false;
@@ -371,6 +373,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
   String _dmModesKeyFor(String profileNsec) => 'dm_modes_$profileNsec';
+  String _dmOverridesKeyFor(String profileNsec) => 'dm_overrides_$profileNsec';
+  String _dmGiftwrapKeyFor(String profileNsec) => 'dm_giftwrap_formats_$profileNsec';
 
   Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
     final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
@@ -486,6 +490,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _saveDmOverrides() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = nsec != null ? _dmOverridesKeyFor(nsec!) : 'dm_overrides';
+      await prefs.setString(key, jsonEncode(_dmOverrides));
+    } catch (e) {
+      print('Failed to save DM overrides: $e');
+    }
+  }
+
+  Future<void> _saveGiftwrapFormats() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = nsec != null ? _dmGiftwrapKeyFor(nsec!) : 'dm_giftwrap_formats';
+      await prefs.setString(key, jsonEncode(_giftwrapFormats));
+    } catch (e) {
+      print('Failed to save DM giftwrap formats: $e');
+    }
+  }
+
   int _messageKind(Map<String, dynamic> message) {
     final raw = message['kind'];
     if (raw is int) return raw;
@@ -496,26 +520,140 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _updateDmModesFromMessages(List<Map<String, dynamic>> incoming) {
     bool changed = false;
+    bool giftwrapChanged = false;
     for (final msg in incoming) {
       if (msg['direction'] != 'in') continue;
       final pubkey = msg['from']?.toString() ?? '';
       if (pubkey.isEmpty) continue;
+      final hasOverride = _dmOverrides.containsKey(pubkey);
+      final dmKind = msg['dm_kind']?.toString();
+      if (dmKind == 'legacy_giftwrap') {
+        _giftwrapFormats[pubkey] = 'legacy_giftwrap';
+        giftwrapChanged = true;
+        if (!hasOverride && _dmModes[pubkey] != 'legacy_giftwrap') {
+          _dmModes[pubkey] = 'legacy_giftwrap';
+          changed = true;
+          print('[dm] mode set legacy_giftwrap for ${pubkey.substring(0, 8)}');
+        }
+        continue;
+      }
+      if (dmKind == 'nip59') {
+        _giftwrapFormats[pubkey] = 'nip59';
+        giftwrapChanged = true;
+        if (!hasOverride && _dmModes[pubkey] != 'nip59') {
+          _dmModes[pubkey] = 'nip59';
+          changed = true;
+          print('[dm] mode set nip59 for ${pubkey.substring(0, 8)}');
+        }
+        continue;
+      }
       final kind = _messageKind(msg);
       if (kind == 4) {
-        if (_dmModes[pubkey] != 'nip04') {
+        if (!hasOverride && _dmModes[pubkey] != 'nip04') {
           _dmModes[pubkey] = 'nip04';
           changed = true;
           print('[dm] mode set nip04 for ${pubkey.substring(0, 8)}');
         }
       } else if (kind == 1059 && !_dmModes.containsKey(pubkey)) {
-        _dmModes[pubkey] = 'nip17';
-        changed = true;
-        print('[dm] mode set nip17 for ${pubkey.substring(0, 8)}');
+        if (!hasOverride) {
+          _dmModes[pubkey] = 'nip59';
+          changed = true;
+          print('[dm] mode set nip59 for ${pubkey.substring(0, 8)}');
+        }
+        if (!_giftwrapFormats.containsKey(pubkey)) {
+          _giftwrapFormats[pubkey] = 'nip59';
+          giftwrapChanged = true;
+        }
       }
     }
     if (changed) {
       unawaited(_saveDmModes());
     }
+    if (giftwrapChanged) {
+      unawaited(_saveGiftwrapFormats());
+    }
+  }
+
+  String _effectiveDmMode(String pubkey) {
+    final override = _dmOverrides[pubkey];
+    if (override == 'nip04') return 'nip04';
+    if (override == 'giftwrap') {
+      final observed = _dmModes[pubkey];
+      if (observed == 'legacy_giftwrap' || observed == 'nip59') {
+        return observed == 'legacy_giftwrap' ? 'legacy_giftwrap' : 'nip59';
+      }
+      return _giftwrapFormats[pubkey] ?? 'nip59';
+    }
+    final observed = _dmModes[pubkey];
+    if (observed == 'nip04') return 'nip04';
+    if (observed == 'legacy_giftwrap' || observed == 'nip59') {
+      return observed == 'legacy_giftwrap' ? 'legacy_giftwrap' : 'nip59';
+    }
+    return _giftwrapFormats[pubkey] ?? 'nip59';
+  }
+
+  Widget? _buildDmBadge(Map<String, dynamic> message) {
+    final dmKind = message['dm_kind']?.toString();
+    final kind = _messageKind(message);
+    final isNip04 = dmKind == 'nip04' || kind == 4;
+    final isGiftwrap = dmKind == 'nip59' || dmKind == 'legacy_giftwrap' || kind == 1059;
+    if (!isNip04 && !isGiftwrap) return null;
+    final color = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final label = isGiftwrap ? '17' : '04';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.visibility_off, size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 11, color: color)),
+      ],
+    );
+  }
+
+  Widget _buildDmModeToggle() {
+    final pubkey = selectedContact;
+    final target = pubkey ?? '';
+    final enabled = target.isNotEmpty;
+    final mode = enabled ? _effectiveDmMode(target) : 'nip59';
+    final isGiftwrap = mode != 'nip04';
+    final activeColor = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final color = enabled ? activeColor : Colors.grey.shade600;
+    final label = enabled ? (isGiftwrap ? '17' : '04') : '17';
+    final tooltip = enabled
+        ? (isGiftwrap ? 'Send as NIP-17 giftwrap' : 'Send as NIP-04')
+        : 'Select a contact';
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled
+            ? () {
+                setState(() {
+                  if (isGiftwrap) {
+                    _dmOverrides[target] = 'nip04';
+                  } else {
+                    _dmOverrides[target] = 'giftwrap';
+                    _giftwrapFormats.putIfAbsent(target, () => 'nip59');
+                  }
+                });
+                unawaited(_saveDmOverrides());
+                unawaited(_saveGiftwrapFormats());
+              }
+            : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.visibility_off, size: 18, color: color),
+              const SizedBox(width: 4),
+              Text(label, style: TextStyle(fontSize: 11, color: color)),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _checkPrefsBackup() async {
@@ -733,9 +871,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localText = '(attachment)';
       }
 
-      final dmMode = _dmModes[selectedContact!] ?? 'nip17';
+      final dmMode = _effectiveDmMode(selectedContact!);
       final useLegacyDm = dmMode == 'nip04';
-      print('[dm] send mode=${useLegacyDm ? 'nip04' : 'nip17'} to=${selectedContact!.substring(0, 8)} textLen=${text.length}');
+      final useLegacyGiftwrap = dmMode == 'legacy_giftwrap';
+      final modeLabel = useLegacyDm ? 'nip04' : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59');
+      print('[dm] send mode=$modeLabel to=${selectedContact!.substring(0, 8)} textLen=${text.length}');
 
       // Add to local messages immediately before the send call to avoid UI delays.
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
@@ -753,6 +893,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
           'direction': 'out',
           'kind': useLegacyDm ? 4 : 1059,
+          'dm_kind': useLegacyDm ? 'nip04' : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59'),
         });
         messageCtrl.clear();
         _pendingAttachment = null;
@@ -767,6 +908,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         try {
           if (useLegacyDm) {
             await RustSyncWorker.sendLegacyDm(
+              recipient: selectedContact!,
+              message: payload,
+              nsec: nsec!,
+            );
+          } else if (useLegacyGiftwrap) {
+            await RustSyncWorker.sendLegacyGiftDm(
               recipient: selectedContact!,
               message: payload,
               nsec: nsec!,
@@ -1143,11 +1290,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ? _pendingDmsKeyFor(profileNsec)
         : 'pending_dms';
     final dmModesKey = profileNsec != null && profileNsec.isNotEmpty ? _dmModesKeyFor(profileNsec) : 'dm_modes';
+    final dmOverridesKey =
+        profileNsec != null && profileNsec.isNotEmpty ? _dmOverridesKeyFor(profileNsec) : 'dm_overrides';
+    final dmGiftwrapKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _dmGiftwrapKeyFor(profileNsec)
+        : 'dm_giftwrap_formats';
 
     final savedContacts = prefs.getStringList(contactsKey) ?? [];
     final savedMessages = prefs.getString(messagesKey);
     final pendingMessagesJson = prefs.getString(pendingKey);
     final dmModesJson = prefs.getString(dmModesKey);
+    final dmOverridesJson = prefs.getString(dmOverridesKey);
+    final dmGiftwrapJson = prefs.getString(dmGiftwrapKey);
     List<Map<String, dynamic>> loadedMessages = [];
     List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
@@ -1178,6 +1332,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       } catch (_) {
         // ignore dm mode parse errors
+      }
+    }
+    _dmOverrides.clear();
+    if (dmOverridesJson != null && dmOverridesJson.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(dmOverridesJson);
+        if (decoded is Map) {
+          _dmOverrides.addAll(decoded.map((key, value) => MapEntry(key.toString(), value.toString())));
+        }
+      } catch (_) {
+        // ignore dm override parse errors
+      }
+    }
+    _giftwrapFormats.clear();
+    if (dmGiftwrapJson != null && dmGiftwrapJson.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(dmGiftwrapJson);
+        if (decoded is Map) {
+          _giftwrapFormats.addAll(decoded.map((key, value) => MapEntry(key.toString(), value.toString())));
+        }
+      } catch (_) {
+        // ignore giftwrap format parse errors
       }
     }
 
@@ -1681,7 +1857,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
         ),
-        title: _buildSendToDropdown(inAppBar: true),
+        title: Row(
+          children: [
+            Expanded(child: _buildSendToDropdown(inAppBar: true)),
+            const SizedBox(width: 8),
+            _buildDmModeToggle(),
+          ],
+        ),
         actions: const [],
       ),
       drawer: Drawer(
@@ -1886,24 +2068,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final isOut = m['direction'] == 'out';
         final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
         final blossomUrl = _extractBlossomUrl(m['content']);
-          final actions = !isOut
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        _copiedMessages[_messageCopyKey(m)] == true ? Icons.check_circle : Icons.copy,
-                        size: 18,
-                        color: _copiedMessages[_messageCopyKey(m)] == true ? Colors.greenAccent : null,
-                      ),
-                      tooltip: 'Copy message',
-                      onPressed: () {
-                        final text = (m['content'] ?? '').toString();
-                        Clipboard.setData(ClipboardData(text: text));
-                        _markMessageCopied(_messageCopyKey(m));
-                      },
+        final dmBadge = _buildDmBadge(m);
+        final actions = !isOut
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      _copiedMessages[_messageCopyKey(m)] == true ? Icons.check_circle : Icons.copy,
+                      size: 18,
+                      color: _copiedMessages[_messageCopyKey(m)] == true ? Colors.greenAccent : null,
                     ),
-                    if (blossomUrl != null)
+                    tooltip: 'Copy message',
+                    onPressed: () {
+                      final text = (m['content'] ?? '').toString();
+                      Clipboard.setData(ClipboardData(text: text));
+                      _markMessageCopied(_messageCopyKey(m));
+                    },
+                  ),
+                  if (blossomUrl != null)
                     IconButton(
                       icon: const Icon(Icons.download, size: 18),
                       tooltip: 'Download',
@@ -1946,12 +2129,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             Padding(
               padding: const EdgeInsets.only(left: 4, right: 4, bottom: 12),
-              child: Text(
-                _friendlyTime(m['created_at']),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade500,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _friendlyTime(m['created_at']),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade500,
+                    ),
+                  ),
+                  if (dmBadge != null) ...[
+                    const SizedBox(width: 6),
+                    dmBadge,
+                  ],
+                ],
               ),
             ),
           ],
@@ -1967,14 +2159,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           (c) {
             final nickname = c['nickname'] ?? '';
             final pubkey = c['pubkey'] ?? '';
-      final primary = _short(pubkey);
-      final label = nickname.trim().isNotEmpty
-          ? '$primary · $nickname'
-          : primary;
+            final primary = _short(pubkey);
+            final label = nickname.trim().isNotEmpty ? '$primary · $nickname' : primary;
 
             return DropdownMenuItem<String>(
               value: pubkey,
-        child: Text(label, overflow: TextOverflow.ellipsis),
+              child: Text(label, overflow: TextOverflow.ellipsis),
             );
           },
         )
@@ -2012,8 +2202,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       selectedItemBuilder: (_) => contacts
           .map((c) {
             final pubkey = c['pubkey'] ?? '';
-        final nickname = (c['nickname'] ?? '').toString().trim();
-        final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+            final nickname = (c['nickname'] ?? '').toString().trim();
+            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
             return Align(
               alignment: Alignment.centerLeft,
               child: Text(primary, overflow: TextOverflow.ellipsis),

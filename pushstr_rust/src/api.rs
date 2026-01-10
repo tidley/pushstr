@@ -102,6 +102,7 @@ struct UnwrappedGift {
     rumor: RumorData,
     sender_pubkey: String,
     created_at: u64,
+    format: String,
 }
 
 fn random_timestamp_within_two_days() -> Timestamp {
@@ -297,6 +298,7 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
             rumor,
             sender_pubkey: sealed_event.pubkey.to_hex(),
             created_at,
+            format: "nip59".to_string(),
         })
     } else {
         let mut event_value = serde_json::to_value(&sealed_event)?;
@@ -309,6 +311,7 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
             rumor,
             sender_pubkey: sealed_event.pubkey.to_hex(),
             created_at,
+            format: "legacy_giftwrap".to_string(),
         })
     }
 }
@@ -467,6 +470,48 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
         match client.send_event(&gift).await {
             Ok(_) => eprintln!("[dm] Giftwrap sent id={}", event_id),
             Err(e) => eprintln!("[dm] Giftwrap send failed id={} err={}", event_id, e),
+        }
+        Ok(event_id)
+    })
+}
+
+/// Send a legacy giftwrap DM compatible with the Pushstr browser extension.
+#[frb(sync)]
+pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String> {
+    run_block_on(async {
+        let (client, keys) = get_client_and_keys().await?;
+        let recipient_pk = parse_pubkey(&recipient)?;
+
+        // Inner DM (kind 14) with NIP-44 encrypted content
+        let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
+        let inner_event = EventBuilder::new(Kind::Custom(14), ciphertext)
+            .tag(Tag::public_key(recipient_pk))
+            .sign_with_keys(&keys)?;
+
+        // Giftwrap with random timestamp and expiration tag (matches browser extension)
+        let wrapper_keys = Keys::generate();
+        let inner_json = serde_json::to_string(&inner_event)?;
+        let sealed_content = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &inner_json)?;
+
+        let now = Timestamp::now();
+        let random_timestamp = random_timestamp_within_two_days();
+        let expiration = now.as_u64() + (24 * 60 * 60);
+        let tags = vec![
+            Tag::public_key(recipient_pk),
+            Tag::expiration(Timestamp::from(expiration)),
+        ];
+
+        let mut builder = EventBuilder::new(Kind::GiftWrap, sealed_content)
+            .custom_created_at(random_timestamp);
+        for tag in tags {
+            builder = builder.tag(tag);
+        }
+        let gift = builder.sign_with_keys(&wrapper_keys)?;
+        let event_id = gift.id.to_hex();
+        eprintln!("[dm] Sending legacy giftwrap id={}", event_id);
+        match client.send_event(&gift).await {
+            Ok(_) => eprintln!("[dm] Legacy giftwrap sent id={}", event_id),
+            Err(e) => eprintln!("[dm] Legacy giftwrap send failed id={} err={}", event_id, e),
         }
         Ok(event_id)
     })
@@ -659,7 +704,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                         "created_at": unwrapped.created_at,
                         "direction": direction,
                         "kind": 1059,
-                        "dm_kind": "nip17",
+                        "dm_kind": unwrapped.format,
                     }));
                 }
                 Err(e) => {
@@ -833,7 +878,7 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 "created_at": unwrapped.created_at,
                                 "direction": "in",
                                 "kind": 1059,
-                                "dm_kind": "nip17",
+                                "dm_kind": unwrapped.format,
                             }));
                         } else {
                             eprintln!("[dm] Giftwrap event ignored (could not unwrap) {}", event_id);

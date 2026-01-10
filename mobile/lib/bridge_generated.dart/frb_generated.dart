@@ -99,6 +99,8 @@ abstract class RustLibApi extends BaseApi {
 
   String crateApiSendGiftDm({required String recipient, required String content, required bool useNip44});
 
+  String crateApiSendLegacyGiftDm({required String recipient, required String content});
+
   String crateApiUnwrapGift({required String giftJson, String? myNsec});
 
   String crateApiWaitForNewDms({required BigInt timeoutSecs});
@@ -361,6 +363,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiSendGiftDmConstMeta =>
       const TaskConstMeta(debugName: "send_gift_dm", argNames: ["recipient", "content", "useNip44"]);
+
+  @override
+  String crateApiSendLegacyGiftDm({required String recipient, required String content}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(recipient, serializer);
+          sse_encode_String(content, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiSendLegacyGiftDmConstMeta,
+        argValues: [recipient, content],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSendLegacyGiftDmConstMeta =>
+      const TaskConstMeta(debugName: "send_legacy_gift_dm", argNames: ["recipient", "content"]);
 
   @override
   String crateApiUnwrapGift({required String giftJson, String? myNsec}) {
