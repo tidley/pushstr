@@ -177,6 +177,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const MethodChannel _shareChannel = MethodChannel('com.pushstr.share');
+  static const MethodChannel _storageChannel = MethodChannel('com.pushstr.storage');
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -292,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
+    await _sanitizeSharedPrefsIfNeeded();
     final prefs = await SharedPreferences.getInstance();
     final savedNsec = prefs.getString('nostr_nsec') ?? '';
     final profileIndex = prefs.getInt('selected_profile_index') ?? 0;
@@ -464,6 +466,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       print('Failed to save contacts: $e');
+    }
+  }
+
+  Future<void> _sanitizeSharedPrefsIfNeeded() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _storageChannel.invokeMethod<bool>('sanitizeSharedPrefs', {
+        'maxBytes': 5 * 1024 * 1024,
+        'dropPrefixes': ['messages', 'pending_dms'],
+      });
+    } catch (e) {
+      debugPrint('SharedPrefs sanitize failed: $e');
     }
   }
 
