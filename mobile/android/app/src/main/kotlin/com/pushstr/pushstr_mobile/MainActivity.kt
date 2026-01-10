@@ -19,6 +19,8 @@ class MainActivity : FlutterActivity() {
     private val channelName = "com.pushstr.share"
     private var channel: MethodChannel? = null
     private val storageChannelName = "com.pushstr.storage"
+    private val prefsMaxBytes = 5L * 1024L * 1024L
+    private val prefsDropPrefixes = listOf("messages", "pending_dms")
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -52,6 +54,11 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        try {
+            sanitizeSharedPrefs(prefsMaxBytes, prefsDropPrefixes)
+        } catch (_: Exception) {
+            // Best-effort cleanup; avoid crashing before Flutter starts.
+        }
         super.onCreate(savedInstanceState)
         sendShareToDart(intent)
     }
