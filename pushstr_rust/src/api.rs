@@ -461,7 +461,11 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
 
         let gift = wrap_gift_event(&inner_event, recipient_pk, use_nip44)?;
         let event_id = gift.id.to_hex();
-        client.send_event(&gift).await?;
+        eprintln!("[dm] Sending giftwrap id={}", event_id);
+        match client.send_event(&gift).await {
+            Ok(_) => eprintln!("[dm] Giftwrap sent id={}", event_id),
+            Err(e) => eprintln!("[dm] Giftwrap send failed id={} err={}", event_id, e),
+        }
         Ok(event_id)
     })
 }
@@ -557,10 +561,15 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
             .sign_with_keys(&keys)?;
 
         let event_id = event.id;
-        client.send_event(&event).await?;
+        let event_id_hex = event_id.to_hex();
+        eprintln!("[dm] Sending nip04 id={}", event_id_hex);
+        match client.send_event(&event).await {
+            Ok(_) => eprintln!("[dm] NIP-04 sent id={}", event_id_hex),
+            Err(e) => eprintln!("[dm] NIP-04 send failed id={} err={}", event_id_hex, e),
+        }
 
         eprintln!("✉️ Sent NIP-04 DM (kind 4): {}", event_id);
-        Ok(event_id.to_hex())
+        Ok(event_id_hex)
     })
 }
 
