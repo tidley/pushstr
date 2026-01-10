@@ -384,7 +384,6 @@ pub fn init_nostr(nsec: String) -> Result<String> {
             let list_event = builder.sign_with_keys(&keys)?;
             let _ = client.send_event(&list_event).await;
         }
-        }
 
         // Subscribe to encrypted DMs (kind 4 - NIP-04, matching browser extension default)
         let filter_dms = Filter::new()
