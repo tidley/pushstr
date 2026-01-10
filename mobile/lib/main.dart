@@ -306,37 +306,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Handle shared content from Android intents
     _initShareListener();
 
+    final savedContacts = prefs.getStringList('contacts') ?? [];
+    final savedMessages = prefs.getString('messages');
+    List<Map<String, dynamic>> loadedMessages = [];
+    if (savedMessages != null && savedMessages.isNotEmpty) {
+      try {
+        final List<dynamic> msgsList = jsonDecode(savedMessages);
+        loadedMessages = msgsList.cast<Map<String, dynamic>>();
+      } catch (e) {
+        print('Failed to load saved messages: $e');
+      }
+    }
+    if (mounted) {
+      setState(() {
+        isConnected = false;
+        messages = loadedMessages;
+        contacts = _dedupeContacts(savedContacts
+            .map((c) {
+              final parts = c.split('|');
+              return <String, dynamic>{'nickname': parts[0], 'pubkey': parts.length > 1 ? parts[1] : ''};
+            })
+            .where((c) => c['pubkey']!.isNotEmpty)
+            .toList());
+        _sortContactsByActivity();
+      });
+    }
+
     try {
       await _ensureRustInitialized();
       final initedNpub = api.initNostr(nsec: savedNsec);
-      final savedContacts = prefs.getStringList('contacts') ?? [];
       nsec = savedNsec.isNotEmpty ? savedNsec : api.getNsec();
-
-      // Load saved messages
-      final savedMessages = prefs.getString('messages');
-      List<Map<String, dynamic>> loadedMessages = [];
-      if (savedMessages != null && savedMessages.isNotEmpty) {
-        try {
-          final List<dynamic> msgsList = jsonDecode(savedMessages);
-          loadedMessages = msgsList.cast<Map<String, dynamic>>();
-        } catch (e) {
-          print('Failed to load saved messages: $e');
-        }
+      if (mounted) {
+        setState(() {
+          npub = initedNpub;
+          isConnected = true;
+        });
       }
-
-    setState(() {
-      npub = initedNpub;
-      isConnected = true;
-      messages = loadedMessages;
-      contacts = _dedupeContacts(savedContacts
-          .map((c) {
-            final parts = c.split('|');
-            return <String, dynamic>{'nickname': parts[0], 'pubkey': parts.length > 1 ? parts[1] : ''};
-          })
-          .where((c) => c['pubkey']!.isNotEmpty)
-          .toList());
-      _sortContactsByActivity();
-    });
       // Load profile-specific stored data if present (fallback to shared above)
       await _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true);
       _ensureSelectedContact();
@@ -1820,7 +1825,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          if (!isConnected)
+          if (!isConnected && messages.isEmpty)
             Container(
               color: Colors.orange.withValues(alpha: 0.2),
               padding: const EdgeInsets.all(8),
