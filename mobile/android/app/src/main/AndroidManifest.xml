@@ -14,7 +14,7 @@
 
     <application
 android:label="Pushstr"
-        android:name="${applicationName}"
+        android:name="com.pushstr.pushstr_mobile.PushstrApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
