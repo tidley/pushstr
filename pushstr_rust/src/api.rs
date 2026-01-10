@@ -588,7 +588,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     }));
                 }
                 Err(e) => {
-                    eprintln!("Failed to unwrap gift {}: {}", event.id, e);
+                    eprintln!("[dm] Failed to unwrap gift {}: {}", event.id, e);
                 }
             }
         }
@@ -622,7 +622,10 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                 continue;
             }
             let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
-                .unwrap_or_else(|_| event.content.clone());
+                .unwrap_or_else(|e| {
+                    eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
+                    event.content.clone()
+                });
             messages.push(serde_json::json!({
                 "id": event_id,
                 "from": event.pubkey.to_hex(),
@@ -645,7 +648,10 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                 None => continue,
             };
             let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
-                .unwrap_or_else(|_| event.content.clone());
+                .unwrap_or_else(|e| {
+                    eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
+                    event.content.clone()
+                });
             messages.push(serde_json::json!({
                 "id": event_id,
                 "from": my_pubkey.to_hex(),
@@ -728,7 +734,10 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                             if !content.is_empty() {
                                 if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
                                     content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
-                                        .unwrap_or(content);
+                                        .unwrap_or_else(|e| {
+                                            eprintln!("[dm] NIP-44 inner decrypt failed {}: {}", event_id, e);
+                                            content
+                                        });
                                 }
                             }
                             messages.push(serde_json::json!({
@@ -741,6 +750,8 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 "kind": 1059,
                                 "dm_kind": "nip17",
                             }));
+                        } else {
+                            eprintln!("[dm] Giftwrap event ignored (could not unwrap) {}", event_id);
                         }
                     } else if event.kind == Kind::EncryptedDirectMessage {
                         let event_id = event.id.to_hex();
@@ -771,7 +782,10 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                         }
 
                         let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
-                            .unwrap_or_else(|_| event.content.clone());
+                            .unwrap_or_else(|e| {
+                                eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
+                                event.content.clone()
+                            });
 
                         messages.push(serde_json::json!({
                             "id": event_id,

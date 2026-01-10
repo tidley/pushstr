@@ -591,6 +591,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final List<dynamic> dmsList = jsonDecode(dmsJson);
       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
       fetchedMessages = await _decodeMessages(fetchedMessages);
+      debugPrint('[dm] Fetch received ${fetchedMessages.length} messages');
       _updateDmModesFromMessages(fetchedMessages);
 
       // Merge any pending background-cached messages
@@ -997,6 +998,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final List<dynamic> list = jsonDecode(result);
         var newMessages = list.cast<Map<String, dynamic>>();
         newMessages = await _decodeMessages(newMessages);
+        debugPrint('[dm] Listener received ${newMessages.length} messages');
         _updateDmModesFromMessages(newMessages);
         if (newMessages.isNotEmpty && mounted) {
           // Mark new messages as session messages
