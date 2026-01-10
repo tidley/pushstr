@@ -13,7 +13,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -144,7 +144,7 @@ void main() async {
       'pushstr_periodic_sync',
       initialDelay: const Duration(minutes: 1),
       frequency: const Duration(minutes: 15),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       constraints: Constraints(networkType: NetworkType.connected),
     );
   }
@@ -2889,40 +2889,28 @@ class _QrScanPage extends StatefulWidget {
 }
 
 class _QrScanPageState extends State<_QrScanPage> {
-  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  QRViewController? controller;
+  final MobileScannerController _controller = MobileScannerController();
   bool _handled = false;
 
   @override
   void dispose() {
-    controller?.dispose();
+    _controller.dispose();
     super.dispose();
-  }
-
-  void _onQRViewCreated(QRViewController ctrl) {
-    controller = ctrl;
-    ctrl.scannedDataStream.listen((scanData) {
-      if (_handled) return;
-      final code = scanData.code;
-      if (code == null || code.isEmpty) return;
-      _handled = true;
-      Navigator.of(context).pop(code);
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Scan contact QR')),
-      body: QRView(
-        key: qrKey,
-        onQRViewCreated: _onQRViewCreated,
-        overlay: QrScannerOverlayShape(
-          borderColor: Theme.of(context).colorScheme.primary,
-          borderWidth: 8,
-          borderLength: 24,
-          borderRadius: 8,
-        ),
+      body: MobileScanner(
+        controller: _controller,
+        onDetect: (capture) {
+          if (_handled) return;
+          final code = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null;
+          if (code == null || code.isEmpty) return;
+          _handled = true;
+          Navigator.of(context).pop(code);
+        },
       ),
     );
   }
