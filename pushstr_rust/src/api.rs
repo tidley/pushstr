@@ -68,6 +68,17 @@ fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
         .and_then(|s| PublicKey::from_hex(s).ok())
 }
 
+fn relay_tags(event: &Event) -> Vec<String> {
+    let relay_kind = TagKind::Custom("relay".into());
+    event
+        .tags
+        .iter()
+        .filter(|t| t.kind() == relay_kind)
+        .filter_map(|t| t.content())
+        .map(|s| s.to_string())
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RumorData {
     id: Option<String>,
@@ -321,16 +332,38 @@ pub fn init_nostr(nsec: String) -> Result<String> {
 
         let client = Client::new(keys.clone());
 
-        // Add relays
+        // Add default relays
         for relay in RELAYS {
             client.add_relay(*relay).await?;
         }
 
         client.connect().await;
-        eprintln!("🔌 Client connected to relays");
+        eprintln!("🔌 Client connected to default relays");
 
         // Wait a bit for connection to establish
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        // Fetch NIP-17 relay list (kind 10050) and add any custom relays
+        let filter_nip17_relays = Filter::new()
+            .kind(Kind::Custom(10050))
+            .author(keys.public_key())
+            .limit(1);
+        let nip17_events = client
+            .fetch_events(filter_nip17_relays, std::time::Duration::from_secs(5))
+            .await?;
+        if let Some(event) = nip17_events.first() {
+            let relays = relay_tags(event);
+            if !relays.is_empty() {
+                eprintln!("[dm] NIP-17 relays detected: {:?}", relays);
+                for relay in relays {
+                    let _ = client.add_relay(relay).await;
+                }
+                client.connect().await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+        } else {
+            eprintln!("[dm] No NIP-17 relay list found");
+        }
 
         // Subscribe to encrypted DMs (kind 4 - NIP-04, matching browser extension default)
         let filter_dms = Filter::new()
