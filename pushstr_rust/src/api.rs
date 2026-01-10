@@ -535,6 +535,10 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
         let events_received = client
             .fetch_events(filter_received, std::time::Duration::from_secs(5))
             .await?;
+        eprintln!(
+            "[dm] fetch giftwraps: {} events",
+            events_received.len()
+        );
 
         let mut messages = Vec::new();
         let mut seen_ids: StdHashSet<String> = StdHashSet::new();
@@ -615,6 +619,11 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
         let events_nip04_out = client
             .fetch_events(filter_nip04_out, std::time::Duration::from_secs(5))
             .await?;
+        eprintln!(
+            "[dm] fetch nip04: in={}, out={}",
+            events_nip04_in.len(),
+            events_nip04_out.len()
+        );
 
         for event in events_nip04_in.iter() {
             let event_id = event.id.to_hex();
@@ -703,6 +712,11 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
             let notification_timeout = tokio::time::Duration::from_secs(2);
             match tokio::time::timeout(notification_timeout, notifications.recv()).await {
                 Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
+                    eprintln!(
+                        "[dm] notif event kind={} id={}",
+                        event.kind.as_u16(),
+                        event.id.to_hex()
+                    );
                     if event.kind == Kind::GiftWrap {
                         let event_id = event.id.to_hex();
 
@@ -787,16 +801,22 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 event.content.clone()
                             });
 
-                        messages.push(serde_json::json!({
-                            "id": event_id,
-                            "from": event.pubkey.to_hex(),
-                            "to": my_pubkey.to_hex(),
-                            "content": decrypted,
-                            "created_at": event.created_at.as_u64(),
-                            "direction": "in",
-                            "kind": 4,
-                            "dm_kind": "nip04",
-                        }));
+                            messages.push(serde_json::json!({
+                                "id": event_id,
+                                "from": event.pubkey.to_hex(),
+                                "to": my_pubkey.to_hex(),
+                                "content": decrypted,
+                                "created_at": event.created_at.as_u64(),
+                                "direction": "in",
+                                "kind": 4,
+                                "dm_kind": "nip04",
+                            }));
+                    } else {
+                        eprintln!(
+                            "[dm] notif ignored kind={} id={}",
+                            event.kind.as_u16(),
+                            event.id.to_hex()
+                        );
                     }
                 }
                 Ok(_) => {}
