@@ -14,7 +14,7 @@
 
     <application
 android:label="Pushstr"
-        android:name="${applicationName}"
+        android:name="com.pushstr.pushstr_mobile.PushstrApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -48,6 +48,18 @@ android:label="Pushstr"
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="image/*"/>
+            </intent-filter>
+            <!-- Share video intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="video/*"/>
+            </intent-filter>
+            <!-- Share audio intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="audio/*"/>
             </intent-filter>
         </activity>
         <service

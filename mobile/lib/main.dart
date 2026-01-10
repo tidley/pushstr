@@ -177,6 +177,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const MethodChannel _shareChannel = MethodChannel('com.pushstr.share');
+  static const MethodChannel _storageChannel = MethodChannel('com.pushstr.storage');
+  static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
@@ -291,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
+    await _checkPrefsBackup();
     final prefs = await SharedPreferences.getInstance();
     final savedNsec = prefs.getString('nostr_nsec') ?? '';
     final profileIndex = prefs.getInt('selected_profile_index') ?? 0;
@@ -386,7 +389,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = nsec != null ? _messagesKeyFor(nsec!) : 'messages';
-      await prefs.setString(key, jsonEncode(messages));
+      await prefs.setString(key, jsonEncode(_messagesForStorage(messages)));
       if (nsec != null) {
         // Clear legacy shared storage to avoid cross-profile bleed
         await prefs.remove('messages');
@@ -394,6 +397,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       print('Failed to save messages: $e');
     }
+  }
+
+  List<Map<String, dynamic>> _messagesForStorage(List<Map<String, dynamic>> source) {
+    return source.map((message) {
+      final cloned = Map<String, dynamic>.from(message);
+      final media = cloned['media'];
+      if (media is Map) {
+        final mediaCopy = Map<String, dynamic>.from(media);
+        if (mediaCopy['bytes'] != null) {
+          mediaCopy['bytes'] = null;
+          final descriptor = mediaCopy['descriptor'];
+          final encryption = descriptor is Map
+              ? descriptor['encryption']?.toString()
+              : mediaCopy['encryption']?.toString();
+          if (encryption == 'aes-gcm') {
+            mediaCopy['needsDecryption'] = true;
+            mediaCopy['senderPubkey'] ??= cloned['from']?.toString() ?? '';
+            mediaCopy['cacheKey'] ??= (descriptor is Map && descriptor['cipher_sha256'] != null)
+                ? descriptor['cipher_sha256'].toString()
+                : (descriptor is Map ? descriptor['url']?.toString() : mediaCopy['url']?.toString()) ?? '';
+          }
+          if (descriptor is Map && descriptor['url'] != null) {
+            mediaCopy['url'] ??= descriptor['url'];
+          }
+        }
+        cloned['media'] = mediaCopy;
+      }
+      return cloned;
+    }).toList();
+  }
+
+  Future<bool> _confirmLargeAttachment(int bytes) async {
+    if (bytes <= _maxAttachmentBytes) return true;
+    if (!mounted) return false;
+    final maxMb = (_maxAttachmentBytes / (1024 * 1024)).round();
+    final sizeMb = (bytes / (1024 * 1024)).toStringAsFixed(1);
+    final shouldContinue = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Large attachment'),
+        content: Text('This file is ${sizeMb}MB. Larger files may fail or be slow. Recommended max is ${maxMb}MB.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    return shouldContinue ?? false;
   }
 
   Future<void> _saveContacts() async {
@@ -409,6 +466,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       print('Failed to save contacts: $e');
+    }
+  }
+
+  Future<void> _checkPrefsBackup() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final info = await _storageChannel.invokeMethod<Map>('getPrefsBackupInfo');
+      if (info == null || info['exists'] != true || !mounted) return;
+      final size = (info['size'] as int?) ?? 0;
+      final sizeMb = (size / (1024 * 1024)).toStringAsFixed(1);
+      final shouldExport = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Preferences backup created'),
+          content: Text(
+            'Your preferences file was too large (${sizeMb}MB), so it was reset to prevent a crash. '
+            'A backup was saved and you can export it now.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Later'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Export backup'),
+            ),
+          ],
+        ),
+      );
+      if (shouldExport == true) {
+        final uri = await _storageChannel.invokeMethod<String>('exportPrefsBackup', {
+          'name': 'pushstr_prefs_backup.xml',
+        });
+        if (uri != null) {
+          _showThemedToast('Backup exported', preferTop: true);
+        } else {
+          _showThemedToast('Backup export failed', preferTop: true);
+        }
+      }
+      await _storageChannel.invokeMethod<bool>('clearPrefsBackup');
+    } catch (e) {
+      debugPrint('Prefs backup check failed: $e');
     }
   }
 
@@ -552,17 +653,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mime: attachment.mime,
           filename: attachment.name,
         );
+        final descriptor = {
+          'url': desc.url,
+          'iv': desc.iv,
+          'sha256': desc.sha256,
+          'cipher_sha256': desc.cipherSha256,
+          'mime': desc.mime,
+          'size': desc.size.toInt(),
+          'encryption': desc.encryption,
+          'filename': desc.filename,
+        };
         payload = jsonEncode({
-          'media': {
-            'url': desc.url,
-            'iv': desc.iv,
-            'sha256': desc.sha256,
-            'cipher_sha256': desc.cipherSha256,
-            'mime': desc.mime,
-            'size': desc.size.toInt(),
-            'encryption': desc.encryption,
-            'filename': desc.filename,
-          }
+          'media': descriptor
         });
         // Use the original picked bytes for local preview (matches browser extension behavior).
         localMedia = {
@@ -570,6 +672,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'mime': attachment.mime,
           'size': attachment.bytes.length,
           'filename': attachment.name,
+          'descriptor': descriptor,
+          'senderPubkey': npub ?? '',
+          'cacheKey': desc.cipherSha256.isNotEmpty ? desc.cipherSha256 : desc.url,
+          'url': desc.url,
         };
         localText = '(attachment)';
       }
@@ -1206,21 +1312,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
       if (result == null || result.files.isEmpty) return;
       final file = result.files.first;
+      if (!await _confirmLargeAttachment(file.size)) return;
       final bytes = file.bytes;
       if (bytes == null) return;
       final name = file.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
-      setState(() {
-        _pendingAttachment = _PendingAttachment(
-          bytes: bytes,
-          mime: mime,
-          name: name,
-        );
-      });
-      _scrollToBottom();
+      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
+  }
+
+  Future<void> _setPendingAttachment({
+    required Uint8List bytes,
+    required String name,
+    required String mime,
+    bool confirm = true,
+  }) async {
+    if (confirm && !await _confirmLargeAttachment(bytes.length)) return;
+    setState(() {
+      _pendingAttachment = _PendingAttachment(
+        bytes: bytes,
+        mime: mime,
+        name: name,
+      );
+    });
+    _scrollToBottom();
   }
 
   Future<void> _attachImage() async {
@@ -1236,17 +1353,79 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         imageQuality: 88,
       );
       if (picked == null) return;
+      final size = await picked.length();
+      if (!await _confirmLargeAttachment(size)) return;
       final bytes = await picked.readAsBytes();
       final name = picked.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
-      setState(() {
-        _pendingAttachment = _PendingAttachment(
-          bytes: bytes,
-          mime: mime,
-          name: name,
-        );
-      });
-      _scrollToBottom();
+      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _attachImageFromCamera() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 88,
+      );
+      if (picked == null) return;
+      final size = await picked.length();
+      if (!await _confirmLargeAttachment(size)) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
+      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _attachVideo(ImageSource source) async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final picked = await _imagePicker.pickVideo(source: source);
+      if (picked == null) return;
+      final size = await picked.length();
+      if (!await _confirmLargeAttachment(size)) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'video/*';
+      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _attachAudio() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        withData: true,
+        type: FileType.audio,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      if (!await _confirmLargeAttachment(file.size)) return;
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      final name = file.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'audio/*';
+      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1268,11 +1447,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.image),
-              title: const Text('Image'),
+              leading: const Icon(Icons.photo_camera),
+              title: const Text('Take photo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachImageFromCamera();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Pick image'),
               onTap: () {
                 Navigator.pop(ctx);
                 _attachImage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam),
+              title: const Text('Record video'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachVideo(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library),
+              title: const Text('Pick video'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachVideo(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.audiotrack),
+              title: const Text('Pick audio'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachAudio();
               },
             ),
             ListTile(
@@ -2309,12 +2520,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       // Handle initial share when app is launched from share sheet
       final initial = await _shareChannel.invokeMethod<dynamic>('getInitialShare');
-      _handleSharedPayload(initial);
+      await _handleSharedPayload(initial);
 
       // Listen for subsequent shares while app is alive
       _shareChannel.setMethodCallHandler((call) async {
         if (call.method == 'onShare') {
-          _handleSharedPayload(call.arguments);
+          await _handleSharedPayload(call.arguments);
         }
       });
     } catch (e) {
@@ -2323,7 +2534,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _handleSharedPayload(dynamic payload) {
+  Future<void> _handleSharedPayload(dynamic payload) async {
     if (payload is! Map) return;
     final text = payload['text']?.toString() ?? '';
     final bytes = _asUint8List(payload['bytes']);
@@ -2331,6 +2542,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final name = payload['name']?.toString();
 
     if (bytes != null && bytes.isNotEmpty) {
+      if (!await _confirmLargeAttachment(bytes.length)) return;
       final resolvedMime = mime.isNotEmpty ? mime : (lookupMimeType(name ?? '', headerBytes: bytes) ?? 'application/octet-stream');
       final filename = (name != null && name.isNotEmpty) ? name : 'shared.${extensionFromMime(resolvedMime)}';
       setState(() {
@@ -2563,7 +2775,13 @@ class _PendingPreview extends StatelessWidget {
         children: [
           const Icon(Icons.insert_drive_file),
           const SizedBox(width: 8),
-          Text(attachment.name),
+          Flexible(
+            child: Text(
+              attachment.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       );
     }
@@ -2577,8 +2795,8 @@ class _PendingPreview extends StatelessWidget {
       ),
       child: Row(
         children: [
-          preview,
-          const Spacer(),
+          Flexible(fit: FlexFit.loose, child: preview),
+          const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: onRemove,
