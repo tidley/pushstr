@@ -131,6 +131,12 @@ class MainActivity : FlutterActivity() {
         val prefsFile = File(applicationInfo.dataDir, "shared_prefs/FlutterSharedPreferences.xml")
         if (!prefsFile.exists()) return false
         if (maxBytes > 0 && prefsFile.length() <= maxBytes) return false
+        // If the file is already too large, delete it outright to avoid OOM while parsing.
+        if (maxBytes > 0 && prefsFile.length() > maxBytes) {
+            val deleted = prefsFile.delete()
+            File(prefsFile.parentFile, "FlutterSharedPreferences.xml.bak").delete()
+            return deleted
+        }
         val tmpFile = File(prefsFile.parentFile, "FlutterSharedPreferences.tmp")
         try {
             FileInputStream(prefsFile).use { input ->
