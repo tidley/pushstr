@@ -68,6 +68,31 @@ fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
         .and_then(|s| PublicKey::from_hex(s).ok())
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct RumorData {
+    id: Option<String>,
+    pubkey: Option<String>,
+    created_at: Option<u64>,
+    kind: Option<u64>,
+    tags: Option<Vec<Vec<String>>>,
+    content: Option<String>,
+}
+
+struct UnwrappedGift {
+    rumor: RumorData,
+    sender_pubkey: String,
+    created_at: u64,
+}
+
+fn random_timestamp_within_two_days() -> Timestamp {
+    let now = Timestamp::now();
+    let two_days_secs = 2 * 24 * 60 * 60;
+    let earliest = now.as_u64().saturating_sub(two_days_secs);
+    let span = now.as_u64().saturating_sub(earliest).max(1);
+    let random_offset = rand::random::<u64>() % span;
+    Timestamp::from(earliest + random_offset)
+}
+
 async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
     let client_lock = NOSTR_CLIENT.lock().await;
     let keys_lock = NOSTR_KEYS.lock().await;
@@ -193,36 +218,38 @@ fn nip44_decrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, cipherte
 }
 
 fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, _use_nip44: bool) -> Result<Event> {
-    let wrapper_keys = Keys::generate();
-    let rumor_json = serde_json::to_string(inner_event)?;
-
-    // Use custom NIP-44 for giftwrap outer encryption (matches WASM exactly)
-    let ciphertext = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &rumor_json)?;
-
-    // NIP-17: Random timestamp between now and 2 days ago
-    let now = Timestamp::now();
-    let two_days_ago = now.as_u64() - (2 * 24 * 60 * 60);
-    let random_offset = rand::random::<u64>() % (now.as_u64() - two_days_ago);
-    let random_timestamp = Timestamp::from(two_days_ago + random_offset);
-
-    // NIP-17: Expiration 24 hours after actual creation
-    let expiration = now.as_u64() + (24 * 60 * 60);
-
-    let tags = vec![
-        Tag::public_key(recipient_pk),
-        Tag::expiration(Timestamp::from(expiration)), // NIP-17: expiration tag
-    ];
-
-    let mut builder = EventBuilder::new(Kind::GiftWrap, ciphertext)
-        .custom_created_at(random_timestamp); // NIP-17: randomized timestamp
-    for tag in tags {
-        builder = builder.tag(tag);
+    // Build Rumor JSON from inner event (drop signature to match Amethyst).
+    let mut rumor_value = serde_json::to_value(inner_event)?;
+    if let serde_json::Value::Object(obj) = &mut rumor_value {
+        obj.remove("sig");
     }
+    let rumor_json = serde_json::to_string(&rumor_value)?;
+
+    // Sealed rumor (kind 13), signed by sender, encrypted to recipient.
+    let keys = {
+        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        guard
+            .as_ref()
+            .context("Nostr not initialized. Call init_nostr first.")?
+            .clone()
+    };
+    let sealed_content = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &rumor_json)?;
+    let sealed_event = EventBuilder::new(Kind::Custom(13), sealed_content)
+        .custom_created_at(random_timestamp_within_two_days())
+        .sign_with_keys(&keys)?;
+
+    // Giftwrap (kind 1059), random key, encrypted to recipient.
+    let wrapper_keys = Keys::generate();
+    let sealed_json = serde_json::to_string(&sealed_event)?;
+    let gift_ciphertext = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &sealed_json)?;
+    let mut builder = EventBuilder::new(Kind::GiftWrap, gift_ciphertext)
+        .custom_created_at(random_timestamp_within_two_days())
+        .tag(Tag::public_key(recipient_pk));
     let gift = builder.sign_with_keys(&wrapper_keys)?;
     Ok(gift)
 }
 
-fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<Event> {
+fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
     if gift_event.kind != Kind::GiftWrap {
         anyhow::bail!("Event is not kind 1059");
     }
@@ -237,14 +264,40 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<Event> {
 
     // Try custom NIP-44 first (matches WASM exactly)
     // Fall back to NIP-04 for old messages
-    let rumor_json = nip44_decrypt_custom(keys.secret_key(), &gift_event.pubkey, &gift_event.content)
+    let decrypted = nip44_decrypt_custom(keys.secret_key(), &gift_event.pubkey, &gift_event.content)
         .or_else(|e| {
             eprintln!("[mobile] NIP-44 giftwrap decrypt failed: {}", e);
             nip04::decrypt(keys.secret_key(), &gift_event.pubkey, gift_event.content.clone())
         })?;
+    let sealed_event: Event = serde_json::from_str(&decrypted)?;
 
-    let rumor_event: Event = serde_json::from_str(&rumor_json)?;
-    Ok(rumor_event)
+    // NIP-59 sealed rumor path (kind 13). Otherwise fall back to legacy inner event.
+    if sealed_event.kind == Kind::Custom(13) {
+        let rumor_json = nip44_decrypt_custom(keys.secret_key(), &sealed_event.pubkey, &sealed_event.content)
+            .or_else(|e| {
+                eprintln!("[mobile] NIP-44 sealed decrypt failed: {}", e);
+                nip04::decrypt(keys.secret_key(), &sealed_event.pubkey, sealed_event.content.clone())
+            })?;
+        let rumor: RumorData = serde_json::from_str(&rumor_json)?;
+        let created_at = rumor.created_at.unwrap_or_else(|| sealed_event.created_at.as_u64());
+        Ok(UnwrappedGift {
+            rumor,
+            sender_pubkey: sealed_event.pubkey.to_hex(),
+            created_at,
+        })
+    } else {
+        let mut event_value = serde_json::to_value(&sealed_event)?;
+        if let serde_json::Value::Object(obj) = &mut event_value {
+            obj.remove("sig");
+        }
+        let rumor: RumorData = serde_json::from_value(event_value)?;
+        let created_at = rumor.created_at.unwrap_or_else(|| sealed_event.created_at.as_u64());
+        Ok(UnwrappedGift {
+            rumor,
+            sender_pubkey: sealed_event.pubkey.to_hex(),
+            created_at,
+        })
+    }
 }
 
 // Default relay configuration
@@ -348,11 +401,8 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
         let (client, keys) = get_client_and_keys().await?;
         let recipient_pk = parse_pubkey(&recipient)?;
 
-        // Encrypt inner content with custom NIP-44 (matches WASM exactly)
-        let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
-
-        // NIP-17: Inner DM with encrypted content, signed by user - kind 14
-        let inner_event = EventBuilder::new(Kind::Custom(14), ciphertext)
+        // NIP-17: Inner DM with plaintext content, signed by user - kind 14
+        let inner_event = EventBuilder::new(Kind::Custom(14), content)
             .tag(Tag::public_key(recipient_pk))
             .sign_with_keys(&keys)?;
 
@@ -390,11 +440,12 @@ pub fn unwrap_gift(gift_json: String, my_nsec: Option<String>) -> Result<String>
         }
     };
 
-    let rumor_event = unwrap_gift_event(&gift_event, &keys)?;
+    let unwrapped = unwrap_gift_event(&gift_event, &keys)?;
+    let sender_pk = PublicKey::from_hex(&unwrapped.sender_pubkey)?;
     let output = serde_json::json!({
-        "event": rumor_event,
-        "sender_npub": gift_event.pubkey.to_bech32()?,
-        "sender_hex": gift_event.pubkey.to_hex(),
+        "event": unwrapped.rumor,
+        "sender_hex": unwrapped.sender_pubkey,
+        "sender_npub": sender_pk.to_bech32()?,
         "recipient_npub": keys.public_key().to_bech32()?,
         "recipient_hex": keys.public_key().to_hex(),
     });
@@ -490,43 +541,47 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 
         for event in events_received.iter() {
             match unwrap_gift_event(event, &keys) {
-                Ok(rumor) => {
+                Ok(unwrapped) => {
                     let event_id = event.id.to_hex();
                     if !seen_ids.insert(event_id.clone()) {
                         continue;
                     }
-                    let direction = if rumor.pubkey == my_pubkey { "out" } else { "in" };
+                    let sender_hex = unwrapped
+                        .rumor
+                        .pubkey
+                        .clone()
+                        .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+                    let direction = if sender_hex == my_pubkey.to_hex() { "out" } else { "in" };
+                    let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
                     let other = if direction == "out" {
-                        // recipient from p tag on rumor or gift
-                        rumor
-                            .tags
+                        tags
                             .iter()
-                            .find(|t| t.kind() == TagKind::p())
-                            .and_then(|t| t.content())
-                            .map(|s| s.to_string())
+                            .find(|t| t.first().map(|v| v == "p").unwrap_or(false))
+                            .and_then(|t| t.get(1))
+                            .cloned()
                             .unwrap_or_default()
                     } else {
-                        rumor.pubkey.to_hex()
+                        sender_hex.clone()
                     };
-
-                    // Decrypt inner content (double encryption: giftwrap + inner DM)
-                    let decrypted_content = if direction == "out" {
-                        // Outgoing: decrypt with recipient's pubkey
-                        let recipient_pk = PublicKey::from_hex(&other)?;
-                        nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &rumor.content)
-                            .unwrap_or_else(|_| rumor.content.clone())
-                    } else {
-                        // Incoming: decrypt with sender's pubkey
-                        nip44_decrypt_custom(keys.secret_key(), &rumor.pubkey, &rumor.content)
-                            .unwrap_or_else(|_| rumor.content.clone())
-                    };
+                    let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
+                    if direction == "in" && !content.is_empty() {
+                        if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
+                            content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
+                                .unwrap_or(content);
+                        }
+                    } else if direction == "out" && !content.is_empty() {
+                        if let Ok(recipient_pk) = PublicKey::from_hex(&other) {
+                            content = nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &content)
+                                .unwrap_or(content);
+                        }
+                    }
 
                     messages.push(serde_json::json!({
-                        "id": event.id.to_hex(),
-                        "from": if direction == "out" { my_pubkey.to_hex() } else { rumor.pubkey.to_hex() },
+                        "id": event_id,
+                        "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
                         "to": if direction == "out" { other } else { my_pubkey.to_hex() },
-                        "content": decrypted_content,
-                        "created_at": rumor.created_at.as_u64(),
+                        "content": content,
+                        "created_at": unwrapped.created_at,
                         "direction": direction,
                         "kind": 1059,
                         "dm_kind": "nip17",
@@ -663,17 +718,25 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                             }
                         }
 
-                        if let Ok(rumor) = unwrap_gift_event(&event, &keys) {
-                            // Decrypt inner content (double encryption: giftwrap + inner DM)
-                            let decrypted_content = nip44_decrypt_custom(keys.secret_key(), &rumor.pubkey, &rumor.content)
-                                .unwrap_or_else(|_| rumor.content.clone());
-
+                        if let Ok(unwrapped) = unwrap_gift_event(&event, &keys) {
+                            let sender_hex = unwrapped
+                                .rumor
+                                .pubkey
+                                .clone()
+                                .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+                            let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
+                            if !content.is_empty() {
+                                if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
+                                    content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
+                                        .unwrap_or(content);
+                                }
+                            }
                             messages.push(serde_json::json!({
                                 "id": event_id,
-                                "from": rumor.pubkey.to_hex(),
+                                "from": sender_hex,
                                 "to": my_pubkey.to_hex(),
-                                "content": decrypted_content,
-                                "created_at": rumor.created_at.as_u64(),
+                                "content": content,
+                                "created_at": unwrapped.created_at,
                                 "direction": "in",
                                 "kind": 1059,
                                 "dm_kind": "nip17",
