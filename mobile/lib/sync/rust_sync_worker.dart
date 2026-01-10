@@ -90,6 +90,27 @@ class RustSyncWorker {
       _mutex.release();
     }
   }
+
+  /// Sends a legacy NIP-04 DM (kind 4).
+  static Future<void> sendLegacyDm({
+    required String recipient,
+    required String message,
+    required String nsec,
+  }) async {
+    if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return;
+    if (!await _mutex.tryAcquire()) return;
+    try {
+      await Isolate.run(() async {
+        try {
+          await RustLib.init();
+          api.initNostr(nsec: nsec);
+          api.sendDm(recipient: recipient, message: message);
+        } catch (_) {}
+      });
+    } finally {
+      _mutex.release();
+    }
+  }
 }
 
 class _AsyncMutex {

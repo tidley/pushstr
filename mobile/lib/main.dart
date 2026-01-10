@@ -191,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> contacts = [];
   String? selectedContact;
   List<Map<String, dynamic>> messages = [];
+  final Map<String, String> _dmModes = {};
   bool isConnected = false;
   bool _listening = false;
   bool _didInitRust = false;
@@ -364,6 +365,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
   String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
+  String _dmModesKeyFor(String profileNsec) => 'dm_modes_$profileNsec';
 
   Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
     final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
@@ -469,6 +471,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _saveDmModes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = nsec != null ? _dmModesKeyFor(nsec!) : 'dm_modes';
+      await prefs.setString(key, jsonEncode(_dmModes));
+    } catch (e) {
+      print('Failed to save DM modes: $e');
+    }
+  }
+
+  int _messageKind(Map<String, dynamic> message) {
+    final raw = message['kind'];
+    if (raw is int) return raw;
+    if (raw is double) return raw.round();
+    if (raw is String) return int.tryParse(raw) ?? 0;
+    return 0;
+  }
+
+  void _updateDmModesFromMessages(List<Map<String, dynamic>> incoming) {
+    bool changed = false;
+    for (final msg in incoming) {
+      if (msg['direction'] != 'in') continue;
+      final pubkey = msg['from']?.toString() ?? '';
+      if (pubkey.isEmpty) continue;
+      final kind = _messageKind(msg);
+      if (kind == 4) {
+        if (_dmModes[pubkey] != 'nip04') {
+          _dmModes[pubkey] = 'nip04';
+          changed = true;
+        }
+      } else if (kind == 1059 && !_dmModes.containsKey(pubkey)) {
+        _dmModes[pubkey] = 'nip17';
+        changed = true;
+      }
+    }
+    if (changed) {
+      unawaited(_saveDmModes());
+    }
+  }
+
   Future<void> _checkPrefsBackup() async {
     if (!Platform.isAndroid) return;
     try {
@@ -549,6 +591,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final List<dynamic> dmsList = jsonDecode(dmsJson);
       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
       fetchedMessages = await _decodeMessages(fetchedMessages);
+      _updateDmModesFromMessages(fetchedMessages);
 
       // Merge any pending background-cached messages
       try {
@@ -562,6 +605,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               .map(_normalizeIncomingMessage)
               .toList();
           final decodedPending = await _decodeMessages(pendingList);
+          _updateDmModesFromMessages(decodedPending);
           fetchedMessages = _mergeMessages([
             ...fetchedMessages,
             ...decodedPending,
@@ -680,6 +724,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localText = '(attachment)';
       }
 
+      final dmMode = _dmModes[selectedContact!] ?? 'nip17';
+      final useLegacyDm = dmMode == 'nip04';
+
       // Add to local messages immediately before the send call to avoid UI delays.
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       _sessionMessages.add(localId); // Mark as session message
@@ -695,6 +742,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'media': displayContent['media'],
           'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
           'direction': 'out',
+          'kind': useLegacyDm ? 4 : 1059,
         });
         messageCtrl.clear();
         _pendingAttachment = null;
@@ -707,12 +755,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       unawaited(_saveMessages());
       unawaited(Future(() async {
         try {
-          await RustSyncWorker.sendGiftDm(
-            recipient: selectedContact!,
-            content: payload,
-            nsec: nsec!,
-            useNip44: true,
-          );
+          if (useLegacyDm) {
+            await RustSyncWorker.sendLegacyDm(
+              recipient: selectedContact!,
+              message: payload,
+              nsec: nsec!,
+            );
+          } else {
+            await RustSyncWorker.sendGiftDm(
+              recipient: selectedContact!,
+              content: payload,
+              nsec: nsec!,
+              useNip44: true,
+            );
+          }
         } catch (e) {
           if (!mounted) return;
           setState(() {
@@ -941,6 +997,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final List<dynamic> list = jsonDecode(result);
         var newMessages = list.cast<Map<String, dynamic>>();
         newMessages = await _decodeMessages(newMessages);
+        _updateDmModesFromMessages(newMessages);
         if (newMessages.isNotEmpty && mounted) {
           // Mark new messages as session messages
           for (final msg in newMessages) {
@@ -1074,10 +1131,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final pendingKey = profileNsec != null && profileNsec.isNotEmpty
         ? _pendingDmsKeyFor(profileNsec)
         : 'pending_dms';
+    final dmModesKey = profileNsec != null && profileNsec.isNotEmpty ? _dmModesKeyFor(profileNsec) : 'dm_modes';
 
     final savedContacts = prefs.getStringList(contactsKey) ?? [];
     final savedMessages = prefs.getString(messagesKey);
     final pendingMessagesJson = prefs.getString(pendingKey);
+    final dmModesJson = prefs.getString(dmModesKey);
     List<Map<String, dynamic>> loadedMessages = [];
     List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
@@ -1099,6 +1158,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // ignore pending parse errors
       }
     }
+    _dmModes.clear();
+    if (dmModesJson != null && dmModesJson.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(dmModesJson);
+        if (decoded is Map) {
+          _dmModes.addAll(decoded.map((key, value) => MapEntry(key.toString(), value.toString())));
+        }
+      } catch (_) {
+        // ignore dm mode parse errors
+      }
+    }
 
     final loadedContacts = savedContacts
         .map((c) {
@@ -1118,6 +1188,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       _sortContactsByActivity();
     });
+    _updateDmModesFromMessages(messages);
     _ensureSelectedContact();
     await prefs.remove(pendingKey);
   }

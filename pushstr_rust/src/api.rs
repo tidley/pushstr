@@ -21,6 +21,7 @@ use rand::RngCore;
 use secp256k1::{PublicKey as Secp256k1PublicKey, SecretKey as Secp256k1SecretKey, XOnlyPublicKey as Secp256k1XOnlyPublicKey, Secp256k1 as Secp256k1Context};
 use ::hkdf::Hkdf;
 use getrandom;
+use std::collections::HashSet as StdHashSet;
 
 // Global tokio runtime for all FFI calls
 static RUNTIME: Lazy<tokio::runtime::Runtime> =
@@ -56,6 +57,15 @@ const BLOSSOM_UPLOAD_PATH: &str = "upload";
 
 fn parse_pubkey(input: &str) -> Result<PublicKey> {
     PublicKey::from_bech32(input).or_else(|_| PublicKey::from_hex(input)).context("Invalid pubkey")
+}
+
+fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
+    event
+        .tags
+        .iter()
+        .find(|t| t.kind() == TagKind::p())
+        .and_then(|t| t.content())
+        .and_then(|s| PublicKey::from_hex(s).ok())
 }
 
 async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
@@ -476,10 +486,15 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
             .await?;
 
         let mut messages = Vec::new();
+        let mut seen_ids: StdHashSet<String> = StdHashSet::new();
 
         for event in events_received.iter() {
             match unwrap_gift_event(event, &keys) {
                 Ok(rumor) => {
+                    let event_id = event.id.to_hex();
+                    if !seen_ids.insert(event_id.clone()) {
+                        continue;
+                    }
                     let direction = if rumor.pubkey == my_pubkey { "out" } else { "in" };
                     let other = if direction == "out" {
                         // recipient from p tag on rumor or gift
@@ -513,12 +528,79 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                         "content": decrypted_content,
                         "created_at": rumor.created_at.as_u64(),
                         "direction": direction,
+                        "kind": 1059,
+                        "dm_kind": "nip17",
                     }));
                 }
                 Err(e) => {
                     eprintln!("Failed to unwrap gift {}: {}", event.id, e);
                 }
             }
+        }
+
+        // Fetch NIP-04 encrypted DMs (kind 4)
+        let mut filter_nip04_in = Filter::new()
+            .kind(Kind::EncryptedDirectMessage)
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), my_pubkey.to_hex())
+            .limit(limit as usize);
+        let mut filter_nip04_out = Filter::new()
+            .kind(Kind::EncryptedDirectMessage)
+            .author(my_pubkey)
+            .limit(limit as usize);
+
+        if since_timestamp > 0 {
+            let since = Timestamp::from(since_timestamp);
+            filter_nip04_in = filter_nip04_in.since(since);
+            filter_nip04_out = filter_nip04_out.since(since);
+        }
+
+        let events_nip04_in = client
+            .fetch_events(filter_nip04_in, std::time::Duration::from_secs(5))
+            .await?;
+        let events_nip04_out = client
+            .fetch_events(filter_nip04_out, std::time::Duration::from_secs(5))
+            .await?;
+
+        for event in events_nip04_in.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id.clone()) {
+                continue;
+            }
+            let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
+                .unwrap_or_else(|_| event.content.clone());
+            messages.push(serde_json::json!({
+                "id": event_id,
+                "from": event.pubkey.to_hex(),
+                "to": my_pubkey.to_hex(),
+                "content": decrypted,
+                "created_at": event.created_at.as_u64(),
+                "direction": "in",
+                "kind": 4,
+                "dm_kind": "nip04",
+            }));
+        }
+
+        for event in events_nip04_out.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id.clone()) {
+                continue;
+            }
+            let recipient_pk = match event_p_tag_pubkey(event) {
+                Some(pk) => pk,
+                None => continue,
+            };
+            let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
+                .unwrap_or_else(|_| event.content.clone());
+            messages.push(serde_json::json!({
+                "id": event_id,
+                "from": my_pubkey.to_hex(),
+                "to": recipient_pk.to_hex(),
+                "content": decrypted,
+                "created_at": event.created_at.as_u64(),
+                "direction": "out",
+                "kind": 4,
+                "dm_kind": "nip04",
+            }));
         }
 
         // Sort by timestamp
@@ -593,8 +675,51 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 "content": decrypted_content,
                                 "created_at": rumor.created_at.as_u64(),
                                 "direction": "in",
+                                "kind": 1059,
+                                "dm_kind": "nip17",
                             }));
                         }
+                    } else if event.kind == Kind::EncryptedDirectMessage {
+                        let event_id = event.id.to_hex();
+
+                        // Check if already returned
+                        {
+                            let mut returned = RETURNED_EVENT_IDS.lock().unwrap();
+                            if returned.contains(&event_id) {
+                                continue;
+                            }
+                            returned.insert(event_id.clone());
+
+                            let mut queue = RETURNED_EVENT_IDS_QUEUE.lock().unwrap();
+                            queue.push_back(event_id.clone());
+                            while queue.len() > RETURNED_EVENT_IDS_MAX {
+                                if let Some(oldest) = queue.pop_front() {
+                                    returned.remove(&oldest);
+                                }
+                            }
+                        }
+
+                        let recipient_pk = match event_p_tag_pubkey(&event) {
+                            Some(pk) => pk,
+                            None => continue,
+                        };
+                        if recipient_pk != my_pubkey {
+                            continue;
+                        }
+
+                        let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
+                            .unwrap_or_else(|_| event.content.clone());
+
+                        messages.push(serde_json::json!({
+                            "id": event_id,
+                            "from": event.pubkey.to_hex(),
+                            "to": my_pubkey.to_hex(),
+                            "content": decrypted,
+                            "created_at": event.created_at.as_u64(),
+                            "direction": "in",
+                            "kind": 4,
+                            "dm_kind": "nip04",
+                        }));
                     }
                 }
                 Ok(_) => {}
