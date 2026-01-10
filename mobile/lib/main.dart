@@ -1223,6 +1223,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _setPendingAttachment({
+    required Uint8List bytes,
+    required String name,
+    required String mime,
+  }) {
+    setState(() {
+      _pendingAttachment = _PendingAttachment(
+        bytes: bytes,
+        mime: mime,
+        name: name,
+      );
+    });
+    _scrollToBottom();
+  }
+
   Future<void> _attachImage() async {
     if (selectedContact == null) {
       _showThemedToast('Select a contact first', preferTop: true);
@@ -1239,14 +1254,69 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final bytes = await picked.readAsBytes();
       final name = picked.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
-      setState(() {
-        _pendingAttachment = _PendingAttachment(
-          bytes: bytes,
-          mime: mime,
-          name: name,
-        );
-      });
-      _scrollToBottom();
+      _setPendingAttachment(bytes: bytes, name: name, mime: mime);
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _attachImageFromCamera() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 88,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
+      _setPendingAttachment(bytes: bytes, name: name, mime: mime);
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _attachVideo(ImageSource source) async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final picked = await _imagePicker.pickVideo(source: source);
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final name = picked.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'video/*';
+      _setPendingAttachment(bytes: bytes, name: name, mime: mime);
+    } catch (e) {
+      _showThemedToast('Attach failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _attachAudio() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        withData: true,
+        type: FileType.audio,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      final name = file.name;
+      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'audio/*';
+      _setPendingAttachment(bytes: bytes, name: name, mime: mime);
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1268,11 +1338,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.image),
-              title: const Text('Image'),
+              leading: const Icon(Icons.photo_camera),
+              title: const Text('Take photo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachImageFromCamera();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Pick image'),
               onTap: () {
                 Navigator.pop(ctx);
                 _attachImage();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam),
+              title: const Text('Record video'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachVideo(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library),
+              title: const Text('Pick video'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachVideo(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.audiotrack),
+              title: const Text('Pick audio'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _attachAudio();
               },
             ),
             ListTile(
