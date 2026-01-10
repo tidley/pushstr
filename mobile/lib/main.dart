@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
-    await _sanitizeSharedPrefsIfNeeded();
+    await _checkPrefsBackup();
     final prefs = await SharedPreferences.getInstance();
     final savedNsec = prefs.getString('nostr_nsec') ?? '';
     final profileIndex = prefs.getInt('selected_profile_index') ?? 0;
@@ -469,15 +469,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _sanitizeSharedPrefsIfNeeded() async {
+  Future<void> _checkPrefsBackup() async {
     if (!Platform.isAndroid) return;
     try {
-      await _storageChannel.invokeMethod<bool>('sanitizeSharedPrefs', {
-        'maxBytes': 5 * 1024 * 1024,
-        'dropPrefixes': ['messages', 'pending_dms'],
-      });
+      final info = await _storageChannel.invokeMethod<Map>('getPrefsBackupInfo');
+      if (info == null || info['exists'] != true || !mounted) return;
+      final size = (info['size'] as int?) ?? 0;
+      final sizeMb = (size / (1024 * 1024)).toStringAsFixed(1);
+      final shouldExport = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Preferences backup created'),
+          content: Text(
+            'Your preferences file was too large (${sizeMb}MB), so it was reset to prevent a crash. '
+            'A backup was saved and you can export it now.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Later'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Export backup'),
+            ),
+          ],
+        ),
+      );
+      if (shouldExport == true) {
+        final uri = await _storageChannel.invokeMethod<String>('exportPrefsBackup', {
+          'name': 'pushstr_prefs_backup.xml',
+        });
+        if (uri != null) {
+          _showThemedToast('Backup exported', preferTop: true);
+        } else {
+          _showThemedToast('Backup export failed', preferTop: true);
+        }
+      }
+      await _storageChannel.invokeMethod<bool>('clearPrefsBackup');
     } catch (e) {
-      debugPrint('SharedPrefs sanitize failed: $e');
+      debugPrint('Prefs backup check failed: $e');
     }
   }
 

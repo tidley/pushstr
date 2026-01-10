@@ -11,16 +11,16 @@ import java.io.FileOutputStream
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import android.util.Xml
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlSerializer
+import android.content.ContentValues
+import android.provider.MediaStore
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.pushstr.share"
     private var channel: MethodChannel? = null
     private val storageChannelName = "com.pushstr.storage"
     private val prefsMaxBytes = 5L * 1024L * 1024L
-    private val prefsDropPrefixes = listOf("messages", "pending_dms")
+    private val prefsBackupName = "FlutterSharedPreferences.backup.xml"
+    private val prefsBackupMarker = "prefs_backup_pending.txt"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -37,11 +37,12 @@ class MainActivity : FlutterActivity() {
         val storageChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, storageChannelName)
         storageChannel.setMethodCallHandler { call, result ->
             when (call.method) {
-                "sanitizeSharedPrefs" -> {
-                    val maxBytes = (call.argument<Number>("maxBytes")?.toLong() ?: 0L)
-                    val dropPrefixes = call.argument<List<String>>("dropPrefixes") ?: emptyList()
-                    result.success(sanitizeSharedPrefs(maxBytes, dropPrefixes))
+                "getPrefsBackupInfo" -> result.success(getPrefsBackupInfo())
+                "exportPrefsBackup" -> {
+                    val name = call.argument<String>("name") ?: "pushstr_prefs_backup.xml"
+                    result.success(exportPrefsBackup(name))
                 }
+                "clearPrefsBackup" -> result.success(clearPrefsBackup())
                 else -> result.notImplemented()
             }
         }
@@ -54,11 +55,6 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        try {
-            sanitizeSharedPrefs(prefsMaxBytes, prefsDropPrefixes)
-        } catch (_: Exception) {
-            // Best-effort cleanup; avoid crashing before Flutter starts.
-        }
         super.onCreate(savedInstanceState)
         sendShareToDart(intent)
     }
@@ -127,112 +123,40 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun sanitizeSharedPrefs(maxBytes: Long, dropPrefixes: List<String>): Boolean {
-        val prefsFile = File(applicationInfo.dataDir, "shared_prefs/FlutterSharedPreferences.xml")
-        if (!prefsFile.exists()) return false
-        if (maxBytes > 0 && prefsFile.length() <= maxBytes) return false
-        // If the file is already too large, delete it outright to avoid OOM while parsing.
-        if (maxBytes > 0 && prefsFile.length() > maxBytes) {
-            val deleted = prefsFile.delete()
-            File(prefsFile.parentFile, "FlutterSharedPreferences.xml.bak").delete()
-            return deleted
-        }
-        val tmpFile = File(prefsFile.parentFile, "FlutterSharedPreferences.tmp")
-        try {
-            FileInputStream(prefsFile).use { input ->
-                FileOutputStream(tmpFile).use { output ->
-                    val parser = Xml.newPullParser()
-                    parser.setInput(input, "utf-8")
-                    val serializer = Xml.newSerializer()
-                    serializer.setOutput(output, "utf-8")
-                    serializer.startDocument("utf-8", true)
-                    serializer.startTag(null, "map")
-                    var eventType = parser.eventType
-                    while (eventType != XmlPullParser.END_DOCUMENT) {
-                        if (eventType == XmlPullParser.START_TAG) {
-                            val tag = parser.name
-                            if (tag == "map") {
-                                // No-op, we already wrote the root map tag.
-                            } else {
-                                val name = parser.getAttributeValue(null, "name") ?: ""
-                                if (shouldDropKey(name, dropPrefixes)) {
-                                    skipTag(parser)
-                                } else {
-                                    when (tag) {
-                                        "string" -> {
-                                            serializer.startTag(null, "string")
-                                            serializer.attribute(null, "name", name)
-                                            val text = parser.nextText()
-                                            serializer.text(text)
-                                            serializer.endTag(null, "string")
-                                        }
-                                        "int", "long", "float", "boolean" -> {
-                                            serializer.startTag(null, tag)
-                                            serializer.attribute(null, "name", name)
-                                            val value = parser.getAttributeValue(null, "value")
-                                            if (value != null) {
-                                                serializer.attribute(null, "value", value)
-                                            }
-                                            serializer.endTag(null, tag)
-                                            consumeToEndTag(parser, tag)
-                                        }
-                                        "set" -> {
-                                            serializer.startTag(null, "set")
-                                            serializer.attribute(null, "name", name)
-                                            var innerEvent = parser.next()
-                                            while (!(innerEvent == XmlPullParser.END_TAG && parser.name == "set")) {
-                                                if (innerEvent == XmlPullParser.START_TAG && parser.name == "string") {
-                                                    serializer.startTag(null, "string")
-                                                    val text = parser.nextText()
-                                                    serializer.text(text)
-                                                    serializer.endTag(null, "string")
-                                                }
-                                                innerEvent = parser.next()
-                                            }
-                                            serializer.endTag(null, "set")
-                                        }
-                                        else -> skipTag(parser)
-                                    }
-                                }
-                            }
-                        }
-                        eventType = parser.next()
-                    }
-                    serializer.endTag(null, "map")
-                    serializer.endDocument()
-                }
-            }
-            if (!prefsFile.delete()) return false
-            if (!tmpFile.renameTo(prefsFile)) return false
-            File(prefsFile.parentFile, "FlutterSharedPreferences.xml.bak").delete()
-            return true
-        } catch (e: Exception) {
-            tmpFile.delete()
-            return false
-        }
+    private fun getPrefsBackupInfo(): Map<String, Any?> {
+        val backup = File(filesDir, prefsBackupName)
+        val marker = File(filesDir, prefsBackupMarker)
+        return mapOf(
+            "exists" to backup.exists(),
+            "size" to if (backup.exists()) backup.length() else 0L,
+            "lastModified" to if (backup.exists()) backup.lastModified() else 0L,
+            "pending" to marker.exists()
+        )
     }
 
-    private fun shouldDropKey(name: String, dropPrefixes: List<String>): Boolean {
-        for (prefix in dropPrefixes) {
-            if (name.startsWith(prefix)) return true
+    private fun exportPrefsBackup(name: String): String? {
+        val backup = File(filesDir, prefsBackupName)
+        if (!backup.exists()) return null
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, "text/xml")
+            put(MediaStore.Downloads.RELATIVE_PATH, "Download/Pushstr")
         }
-        return false
-    }
-
-    private fun skipTag(parser: XmlPullParser) {
-        var depth = 1
-        while (depth > 0) {
-            when (parser.next()) {
-                XmlPullParser.START_TAG -> depth++
-                XmlPullParser.END_TAG -> depth--
+        val resolver = contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        resolver.openOutputStream(uri)?.use { output ->
+            FileInputStream(backup).use { input ->
+                input.copyTo(output)
             }
         }
+        return uri.toString()
     }
 
-    private fun consumeToEndTag(parser: XmlPullParser, tagName: String) {
-        var eventType = parser.eventType
-        while (!(eventType == XmlPullParser.END_TAG && parser.name == tagName)) {
-            eventType = parser.next()
-        }
+    private fun clearPrefsBackup(): Boolean {
+        val backup = File(filesDir, prefsBackupName)
+        val marker = File(filesDir, prefsBackupMarker)
+        if (backup.exists()) backup.delete()
+        if (marker.exists()) marker.delete()
+        return true
     }
 }
