@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:isolate';
 
+import 'package:flutter/foundation.dart';
+
 import '../bridge_generated.dart/api.dart' as api;
 import '../bridge_generated.dart/frb_generated.dart';
 
@@ -79,12 +81,15 @@ class RustSyncWorker {
     if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return;
     if (!await _mutex.tryAcquire()) return;
     try {
+      debugPrint('[dm] sendGiftDm start recipient=${recipient.substring(0, 8)}');
       await Isolate.run(() async {
         try {
           await RustLib.init();
           api.initNostr(nsec: nsec);
           api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[dm] sendGiftDm isolate error: $e');
+        }
       });
     } finally {
       _mutex.release();
@@ -100,12 +105,15 @@ class RustSyncWorker {
     if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return;
     if (!await _mutex.tryAcquire()) return;
     try {
+      debugPrint('[dm] sendLegacyDm start recipient=${recipient.substring(0, 8)}');
       await Isolate.run(() async {
         try {
           await RustLib.init();
           api.initNostr(nsec: nsec);
           api.sendDm(recipient: recipient, message: message);
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[dm] sendLegacyDm isolate error: $e');
+        }
       });
     } finally {
       _mutex.release();

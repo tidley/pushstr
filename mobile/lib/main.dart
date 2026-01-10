@@ -727,6 +727,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       final dmMode = _dmModes[selectedContact!] ?? 'nip17';
       final useLegacyDm = dmMode == 'nip04';
+      debugPrint('[dm] send mode=${useLegacyDm ? 'nip04' : 'nip17'} to=${selectedContact!.substring(0, 8)} textLen=${text.length}');
 
       // Add to local messages immediately before the send call to avoid UI delays.
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
