@@ -68,7 +68,7 @@ fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
         .and_then(|s| PublicKey::from_hex(s).ok())
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct RumorData {
     id: Option<String>,
     pubkey: Option<String>,
@@ -242,7 +242,7 @@ fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, _use_nip44: boo
     let wrapper_keys = Keys::generate();
     let sealed_json = serde_json::to_string(&sealed_event)?;
     let gift_ciphertext = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &sealed_json)?;
-    let mut builder = EventBuilder::new(Kind::GiftWrap, gift_ciphertext)
+    let builder = EventBuilder::new(Kind::GiftWrap, gift_ciphertext)
         .custom_created_at(random_timestamp_within_two_days())
         .tag(Tag::public_key(recipient_pk));
     let gift = builder.sign_with_keys(&wrapper_keys)?;
