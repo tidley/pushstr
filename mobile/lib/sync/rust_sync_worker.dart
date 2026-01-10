@@ -82,15 +82,19 @@ class RustSyncWorker {
     if (!await _mutex.tryAcquire()) return;
     try {
       print('[dm] sendGiftDm start recipient=${recipient.substring(0, 8)}');
-      await Isolate.run(() async {
+      final eventId = await Isolate.run(() async {
         try {
           await RustLib.init();
           api.initNostr(nsec: nsec);
-          api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
+          return api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
         } catch (e) {
           print('[dm] sendGiftDm isolate error: $e');
+          return null;
         }
       });
+      if (eventId != null) {
+        print('[dm] sendGiftDm ok id=$eventId');
+      }
     } finally {
       _mutex.release();
     }
@@ -106,15 +110,19 @@ class RustSyncWorker {
     if (!await _mutex.tryAcquire()) return;
     try {
       print('[dm] sendLegacyDm start recipient=${recipient.substring(0, 8)}');
-      await Isolate.run(() async {
+      final eventId = await Isolate.run(() async {
         try {
           await RustLib.init();
           api.initNostr(nsec: nsec);
-          api.sendDm(recipient: recipient, message: message);
+          return api.sendDm(recipient: recipient, message: message);
         } catch (e) {
           print('[dm] sendLegacyDm isolate error: $e');
+          return null;
         }
       });
+      if (eventId != null) {
+        print('[dm] sendLegacyDm ok id=$eventId');
+      }
     } finally {
       _mutex.release();
     }

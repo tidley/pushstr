@@ -505,10 +505,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (_dmModes[pubkey] != 'nip04') {
           _dmModes[pubkey] = 'nip04';
           changed = true;
+          print('[dm] mode set nip04 for ${pubkey.substring(0, 8)}');
         }
       } else if (kind == 1059 && !_dmModes.containsKey(pubkey)) {
         _dmModes[pubkey] = 'nip17';
         changed = true;
+        print('[dm] mode set nip17 for ${pubkey.substring(0, 8)}');
       }
     }
     if (changed) {
@@ -995,7 +997,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         final result = await RustSyncWorker.waitForNewDms(
           nsec: nsec ?? '',
-          wait: const Duration(seconds: 10),
+          wait: const Duration(seconds: 3),
         );
         // If the call short-circuited (mutex busy, init failure, or no data), avoid a tight loop.
         if (result == null || result.isEmpty || result == '[]') {
