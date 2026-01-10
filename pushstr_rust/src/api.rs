@@ -317,6 +317,11 @@ const RELAYS: &[&str] = &[
     "wss://relay.snort.social",
     "wss://offchain.pub",
 ];
+const DM_RELAYS: &[&str] = &[
+    "wss://nos.lol",
+    "wss://auth.nostr1.com",
+    "wss://relay.0xchat.com",
+];
 
 /// Initialize the Nostr service with a secret key (nsec)
 /// If nsec is empty, generates a new key
@@ -335,6 +340,10 @@ pub fn init_nostr(nsec: String) -> Result<String> {
         // Add default relays
         for relay in RELAYS {
             client.add_relay(*relay).await?;
+        }
+        // Add default DM relays (popular inbox relays)
+        for relay in DM_RELAYS {
+            let _ = client.add_relay(*relay).await;
         }
 
         client.connect().await;
@@ -363,6 +372,18 @@ pub fn init_nostr(nsec: String) -> Result<String> {
             }
         } else {
             eprintln!("[dm] No NIP-17 relay list found");
+            // Publish a default NIP-17 relay list so other clients can DM us.
+            let mut builder = EventBuilder::new(Kind::Custom(10050), "");
+            for relay in DM_RELAYS {
+                builder = builder.tag(Tag::custom(TagKind::Custom("relay".into()), vec![relay.to_string()]));
+            }
+            builder = builder.tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Relay list to receive private messages".to_string()],
+            ));
+            let list_event = builder.sign_with_keys(&keys)?;
+            let _ = client.send_event(&list_event).await;
+        }
         }
 
         // Subscribe to encrypted DMs (kind 4 - NIP-04, matching browser extension default)
