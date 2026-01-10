@@ -1,24 +1,25 @@
+#![allow(unexpected_cfgs)]
+
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use flutter_rust_bridge::frb;
-use nostr_sdk::nips::{nip04, nip44};
+use nostr_sdk::nips::nip04;
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use flate2::{write::GzEncoder, read::GzDecoder, Compression};
 use std::io::{Read, Write};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use rand::RngCore;
 use secp256k1::{PublicKey as Secp256k1PublicKey, SecretKey as Secp256k1SecretKey, XOnlyPublicKey as Secp256k1XOnlyPublicKey, Secp256k1 as Secp256k1Context};
 use ::hkdf::Hkdf;
-use chacha20poly1305::{ChaCha20Poly1305, aead::AeadInPlace, KeyInit as ChaChaKeyInit};
 use getrandom;
 
 // Global tokio runtime for all FFI calls
@@ -32,6 +33,9 @@ static NOSTR_KEYS: Mutex<Option<Keys>> = Mutex::const_new(None);
 // Track events that have been returned to prevent duplicates
 static RETURNED_EVENT_IDS: Lazy<StdMutex<HashSet<String>>> =
     Lazy::new(|| StdMutex::new(HashSet::new()));
+static RETURNED_EVENT_IDS_QUEUE: Lazy<StdMutex<VecDeque<String>>> =
+    Lazy::new(|| StdMutex::new(VecDeque::new()));
+const RETURNED_EVENT_IDS_MAX: usize = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[frb(non_opaque)]
@@ -98,7 +102,6 @@ fn get_nip44_conversation_key(secret_key: &SecretKey, public_key: &PublicKey) ->
 // Custom NIP-44 v2 encrypt that matches WASM implementation exactly
 fn nip44_encrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, plaintext: &str) -> Result<String> {
     use chacha20poly1305::{ChaCha20Poly1305 as ChaCha, KeyInit as ChaChaKeyInit, AeadInPlace};
-    use chacha20poly1305::aead::Aead;
 
     // Get conversation key
     let conv_key_hex = get_nip44_conversation_key(secret_key, public_key)?;
@@ -195,7 +198,7 @@ fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, _use_nip44: boo
     // NIP-17: Expiration 24 hours after actual creation
     let expiration = now.as_u64() + (24 * 60 * 60);
 
-    let mut tags = vec![
+    let tags = vec![
         Tag::public_key(recipient_pk),
         Tag::expiration(Timestamp::from(expiration)), // NIP-17: expiration tag
     ];
@@ -451,17 +454,22 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
 /// Fetches kind 1059 addressed to us, unwraps inner event
 /// Each message contains: id, from, to, content (plaintext), created_at, direction
 #[frb(sync)]
-pub fn fetch_recent_dms(limit: u64) -> Result<String> {
+pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
     RUNTIME.block_on(async {
         let (client, keys) = get_client_and_keys().await?;
 
         let my_pubkey = keys.public_key();
 
         // Fetch giftwraps addressed to me
-        let filter_received = Filter::new()
+        let mut filter_received = Filter::new()
             .kind(Kind::GiftWrap)
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), my_pubkey.to_hex())
             .limit(limit as usize);
+
+        // Use optional watermark to bound history
+        if since_timestamp > 0 {
+            filter_received = filter_received.since(Timestamp::from(since_timestamp));
+        }
 
         let events_received = client
             .fetch_events(filter_received, std::time::Duration::from_secs(5))
@@ -562,6 +570,15 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 continue;
                             }
                             returned.insert(event_id.clone());
+
+                            // Maintain bounded dedupe queue to avoid unbounded growth
+                            let mut queue = RETURNED_EVENT_IDS_QUEUE.lock().unwrap();
+                            queue.push_back(event_id.clone());
+                            while queue.len() > RETURNED_EVENT_IDS_MAX {
+                                if let Some(oldest) = queue.pop_front() {
+                                    returned.remove(&oldest);
+                                }
+                            }
                         }
 
                         if let Ok(rumor) = unwrap_gift_event(&event, &keys) {
@@ -810,10 +827,15 @@ fn timestamp() -> u64 {
 /// Clear the cache of returned event IDs
 #[frb(sync)]
 pub fn clear_returned_events_cache() -> Result<()> {
-    RETURNED_EVENT_IDS
-        .lock()
-        .map(|mut set| {
+    let set_res = RETURNED_EVENT_IDS.lock();
+    let queue_res = RETURNED_EVENT_IDS_QUEUE.lock();
+    match (set_res, queue_res) {
+        (Ok(mut set), Ok(mut queue)) => {
             set.clear();
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to clear cache: {}", e))
+            queue.clear();
+            Ok(())
+        }
+        (Err(e), _) => Err(anyhow::anyhow!("Failed to clear cache set: {}", e)),
+        (_, Err(e)) => Err(anyhow::anyhow!("Failed to clear cache queue: {}", e)),
+    }
 }

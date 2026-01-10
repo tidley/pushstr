@@ -50,7 +50,8 @@ String sendDm({required String recipient, required String message}) =>
 /// Fetch recent giftwrap DMs and return as JSON array
 /// Fetches kind 1059 addressed to us, unwraps inner event
 /// Each message contains: id, from, to, content (plaintext), created_at, direction
-String fetchRecentDms({required BigInt limit}) => RustLib.instance.api.crateApiFetchRecentDms(limit: limit);
+String fetchRecentDms({required BigInt limit, required BigInt sinceTimestamp}) =>
+    RustLib.instance.api.crateApiFetchRecentDms(limit: limit, sinceTimestamp: sinceTimestamp);
 
 /// Listen for new DMs and return them as JSON
 /// This is a blocking call that waits for timeout_secs

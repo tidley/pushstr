@@ -2,23 +2,28 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
+import 'dart:ui';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:workmanager/workmanager.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
+import 'notifications.dart';
+import 'sync/rust_sync_worker.dart';
+import 'sync/sync_controller.dart';
 
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
@@ -65,6 +70,63 @@ class _HoldDeleteIcon extends StatelessWidget {
   }
 }
 
+@pragma('vm:entry-point')
+void workmanagerCallbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    WidgetsFlutterBinding.ensureInitialized();
+    DartPluginRegistrant.ensureInitialized();
+    try {
+      await RustLib.init();
+    } catch (_) {}
+    try {
+      await SyncController.performSyncTick(
+        trigger: SyncTrigger.background,
+        budget: const Duration(seconds: 10),
+      );
+    } catch (e, st) {
+      debugPrint('Workmanager task error: $e\n$st');
+    }
+    return true;
+  });
+}
+
+@pragma('vm:entry-point')
+void foregroundStartCallback() {
+  FlutterForegroundTask.setTaskHandler(_PushstrTaskHandler());
+}
+
+class _PushstrTaskHandler extends TaskHandler {
+  bool _bindingsReady = false;
+
+  Future<void> _ensureBindings() async {
+    if (_bindingsReady) return;
+    WidgetsFlutterBinding.ensureInitialized();
+    DartPluginRegistrant.ensureInitialized();
+    _bindingsReady = true;
+  }
+
+  @override
+  Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+    await _ensureBindings();
+    await SyncController.performSyncTick(
+      trigger: SyncTrigger.foregroundService,
+      budget: const Duration(seconds: 10),
+    );
+  }
+
+  @override
+  Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
+    await _ensureBindings();
+    await SyncController.performSyncTick(
+      trigger: SyncTrigger.foregroundService,
+      budget: const Duration(seconds: 10),
+    );
+  }
+
+  @override
+  Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {}
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ExternalLibrary? externalLibrary;
@@ -75,7 +137,18 @@ void main() async {
     );
   }
   await RustLib.init(externalLibrary: externalLibrary);
-  runApp(const PushstrApp());
+  if (Platform.isAndroid) {
+    await Workmanager().initialize(workmanagerCallbackDispatcher);
+    await Workmanager().registerPeriodicTask(
+      'pushstr_periodic_sync',
+      'pushstr_periodic_sync',
+      initialDelay: const Duration(minutes: 1),
+      frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingWorkPolicy.keep,
+      constraints: Constraints(networkType: NetworkType.connected),
+    );
+  }
+  runApp(const WithForegroundTask(child: PushstrApp()));
 }
 
 class PushstrApp extends StatelessWidget {
@@ -119,6 +192,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool isConnected = false;
   bool _listening = false;
   bool _didInitRust = false;
+  bool _foregroundEnabled = false;
+  bool _startingForeground = false;
+  bool _appVisible = true;
   final ImagePicker _imagePicker = ImagePicker();
   // StreamSubscription? _intentDataStreamSubscription;
   final Map<String, bool> _copiedMessages = {};
@@ -194,10 +270,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.didChangeMetrics();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _appVisible = true;
+      _persistVisibleState();
+      unawaited(
+        SyncController.performSyncTick(
+          trigger: SyncTrigger.manual,
+          budget: const Duration(seconds: 10),
+        ),
+      );
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _appVisible = false;
+      _persistVisibleState();
+    }
+  }
+
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
     final savedNsec = prefs.getString('nostr_nsec') ?? '';
     final profileIndex = prefs.getInt('selected_profile_index') ?? 0;
+    _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
+    _appVisible = true;
+    await _persistVisibleState();
+    await initLocalNotifications();
 
     // Handle shared content from Android intents
     _initShareListener();
@@ -236,6 +336,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Load profile-specific stored data if present (fallback to shared above)
       await _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true);
       _ensureSelectedContact();
+      await _persistVisibleState();
 
       // Save nsec if it was generated
       if (savedNsec.isEmpty) {
@@ -245,6 +346,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Fetch recent messages
       _fetchMessages();
       _startDmListener();
+      if (_foregroundEnabled && Platform.isAndroid) {
+        unawaited(_startForegroundService());
+      }
     } catch (e) {
       setState(() {
         lastError = 'Init failed: $e';
@@ -255,6 +359,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+  String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
+  String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
+
+  Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
+    final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
+    if (dir == 'incoming') {
+      msg['direction'] = 'in';
+    }
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    int ts = 0;
+    final raw = msg['created_at'];
+    if (raw is int)
+      ts = raw;
+    else if (raw is double)
+      ts = raw.round();
+    else if (raw is String)
+      ts = int.tryParse(raw) ?? 0;
+    if (ts <= 0) ts = nowSec;
+    if (ts > nowSec + 300) ts = nowSec; // clamp future to avoid ordering issues
+    msg['created_at'] = ts;
+    return msg;
+  }
 
   Future<void> _saveMessages() async {
     try {
@@ -311,10 +437,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await _ensureRustInitialized();
       final existingLen = messages.length;
-      final dmsJson = api.fetchRecentDms(limit: BigInt.from(100));
+      final prefs = await SharedPreferences.getInstance();
+      final lastSeen = (nsec != null && nsec!.isNotEmpty)
+          ? (prefs.getInt(_lastSeenKeyFor(nsec!)) ?? 0)
+          : 0;
+      final dmsJson = api.fetchRecentDms(
+        limit: BigInt.from(100),
+        sinceTimestamp: BigInt.from(lastSeen),
+      );
       final List<dynamic> dmsList = jsonDecode(dmsJson);
       var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
       fetchedMessages = await _decodeMessages(fetchedMessages);
+
+      // Merge any pending background-cached messages
+      try {
+        final pendingKey = nsec != null
+            ? _pendingDmsKeyFor(nsec!)
+            : 'pending_dms';
+        final pendingJson = prefs.getString(pendingKey);
+        if (pendingJson != null && pendingJson.isNotEmpty) {
+          final pendingList = (jsonDecode(pendingJson) as List<dynamic>)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .map(_normalizeIncomingMessage)
+              .toList();
+          final decodedPending = await _decodeMessages(pendingList);
+          fetchedMessages = _mergeMessages([
+            ...fetchedMessages,
+            ...decodedPending,
+          ]);
+          await prefs.remove(pendingKey);
+        }
+      } catch (_) {
+        // ignore pending errors
+      }
 
       // Auto-add contacts from incoming messages
       final incomingPubkeys = fetchedMessages
@@ -350,6 +505,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Save messages to persist them
       await _saveMessages();
       await _saveContacts();
+      if (nsec != null && nsec!.isNotEmpty) {
+        final maxSeen = messages.fold<int>(0, (acc, m) {
+          final raw = m['created_at'];
+          if (raw is int && raw > acc) return raw;
+          if (raw is double && raw > acc) return raw.round();
+          if (raw is String) {
+            final parsed = int.tryParse(raw);
+            if (parsed != null && parsed > acc) return parsed;
+          }
+          return acc;
+        });
+        await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
+        await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
+      }
       if (added && _isNearBottom()) {
         _scrollToBottom();
       }
@@ -363,18 +532,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _sendMessage() async {
     final text = messageCtrl.text.trim();
     if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
+    if (nsec == null || nsec!.isEmpty) {
+      setState(() {
+        lastError = 'Missing profile key; please re-import or pick a profile.';
+      });
+      return;
+    }
 
     try {
+      final attachment = _pendingAttachment;
       String payload = text;
       Map<String, dynamic>? localMedia;
       String localText = text;
 
-      if (_pendingAttachment != null) {
+      if (attachment != null) {
         final desc = api.encryptMedia(
-          bytes: _pendingAttachment!.bytes,
+          bytes: attachment.bytes,
           recipient: selectedContact!,
-          mime: _pendingAttachment!.mime,
-          filename: _pendingAttachment!.name,
+          mime: attachment.mime,
+          filename: attachment.name,
         );
         payload = jsonEncode({
           'media': {
@@ -390,17 +566,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
         // Use the original picked bytes for local preview (matches browser extension behavior).
         localMedia = {
-          'bytes': _pendingAttachment!.bytes,
-          'mime': _pendingAttachment!.mime,
-          'size': _pendingAttachment!.bytes.length,
-          'filename': _pendingAttachment!.name,
+          'bytes': attachment.bytes,
+          'mime': attachment.mime,
+          'size': attachment.bytes.length,
+          'filename': attachment.name,
         };
         localText = '(attachment)';
       }
 
-      api.sendGiftDm(recipient: selectedContact!, content: payload, useNip44: true);
-
-      // Add to local messages immediately
+      // Add to local messages immediately before the send call to avoid UI delays.
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       _sessionMessages.add(localId); // Mark as session message
       final displayContent = localMedia != null
@@ -421,9 +595,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = null;
       });
 
-      // Save messages to persist them
-      await _saveMessages();
       _scrollToBottom();
+
+      // Persist and fire off the send in the background; we optimistically assume success.
+      unawaited(_saveMessages());
+      unawaited(Future(() async {
+        try {
+          await RustSyncWorker.sendGiftDm(
+            recipient: selectedContact!,
+            content: payload,
+            nsec: nsec!,
+            useNip44: true,
+          );
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            lastError = 'Send failed: $e';
+          });
+        }
+      }));
     } catch (e) {
       setState(() {
         lastError = 'Send failed: $e';
@@ -494,6 +684,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _sortContactsByActivity();
                 selectedContact = pubkey;
               });
+              _persistVisibleState();
 
               await _saveContacts();
               Navigator.pop(context);
@@ -604,6 +795,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _sortContactsByActivity();
       selectedContact = input;
     });
+    _persistVisibleState();
     await _saveContacts();
     if (mounted) {
       _showThemedToast('Contact added', preferTop: true);
@@ -631,51 +823,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _listening = true;
     while (mounted) {
       try {
-        final result = await Isolate.run(() async {
-          try {
-            await RustLib.init();
-          } catch (_) {
-            // Ignore double-init warning in isolate.
+        final result = await RustSyncWorker.waitForNewDms(
+          nsec: nsec ?? '',
+          wait: const Duration(seconds: 10),
+        );
+        // If the call short-circuited (mutex busy, init failure, or no data), avoid a tight loop.
+        if (result == null || result.isEmpty || result == '[]') {
+          await Future.delayed(const Duration(milliseconds: 250));
+          continue;
+        }
+        final List<dynamic> list = jsonDecode(result);
+        var newMessages = list.cast<Map<String, dynamic>>();
+        newMessages = await _decodeMessages(newMessages);
+        if (newMessages.isNotEmpty && mounted) {
+          // Mark new messages as session messages
+          for (final msg in newMessages) {
+            final id = msg['id'] as String?;
+            if (id != null) _sessionMessages.add(id);
           }
-          return api.waitForNewDms(timeoutSecs: BigInt.from(30));
-        });
-        if (result.isNotEmpty && result != '[]') {
-          final List<dynamic> list = jsonDecode(result);
-          var newMessages = list.cast<Map<String, dynamic>>();
-          newMessages = await _decodeMessages(newMessages);
-          if (newMessages.isNotEmpty && mounted) {
-            // Mark new messages as session messages
-            for (final msg in newMessages) {
-              final id = msg['id'] as String?;
-              if (id != null) _sessionMessages.add(id);
-            }
 
-            // Auto-add contacts from incoming messages
-            final incomingPubkeys = newMessages
-                .where((m) => m['direction'] == 'in')
-                .map((m) => m['from'] as String?)
-                .where((pk) => pk != null && pk.isNotEmpty)
-                .toSet();
+          // Auto-add contacts from incoming messages
+          final incomingPubkeys = newMessages
+              .where((m) => m['direction'] == 'in')
+              .map((m) => m['from'] as String?)
+              .where((pk) => pk != null && pk.isNotEmpty)
+              .toSet();
 
-            for (final pubkey in incomingPubkeys) {
-              if (!contacts.any((c) => c['pubkey'] == pubkey)) {
-                final newContact = {'pubkey': pubkey!, 'nickname': ''};
-                contacts.add(newContact);
-              }
+          for (final pubkey in incomingPubkeys) {
+            if (!contacts.any((c) => c['pubkey'] == pubkey)) {
+              final newContact = {'pubkey': pubkey!, 'nickname': ''};
+              contacts.add(newContact);
             }
+          }
 
-            setState(() {
-              messages = _mergeMessages([...messages, ...newMessages]);
-              lastError = null;
-              contacts = _dedupeContacts(contacts);
-              _sortContactsByActivity();
-            });
-            _ensureSelectedContact();
-            await _saveMessages();
-            await _saveContacts();
-            if (_isNearBottom()) {
-              _scrollToBottom();
+          setState(() {
+            messages = _mergeMessages([...messages, ...newMessages]);
+            lastError = null;
+            contacts = _dedupeContacts(contacts);
+            _sortContactsByActivity();
+          });
+          _ensureSelectedContact();
+          await _saveMessages();
+          await _saveContacts();
+          try {
+            if (nsec != null && nsec!.isNotEmpty) {
+              final prefs = await SharedPreferences.getInstance();
+              final maxSeen = messages.fold<int>(0, (acc, m) {
+                final raw = m['created_at'];
+                if (raw is int && raw > acc) return raw;
+                if (raw is double && raw > acc) return raw.round();
+                if (raw is String) {
+                  final parsed = int.tryParse(raw);
+                  if (parsed != null && parsed > acc) return parsed;
+                }
+                return acc;
+              });
+              await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
+              await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
             }
+          } catch (_) {}
+          if (_isNearBottom()) {
+            _scrollToBottom();
           }
         }
       } catch (e) {
@@ -708,6 +916,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         selectedContact = best;
       });
+      _persistVisibleState();
     }
   }
 
@@ -756,16 +965,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     final contactsKey = profileNsec != null && profileNsec.isNotEmpty ? _contactsKeyFor(profileNsec) : 'contacts';
     final messagesKey = profileNsec != null && profileNsec.isNotEmpty ? _messagesKeyFor(profileNsec) : 'messages';
+    final pendingKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _pendingDmsKeyFor(profileNsec)
+        : 'pending_dms';
 
     final savedContacts = prefs.getStringList(contactsKey) ?? [];
     final savedMessages = prefs.getString(messagesKey);
+    final pendingMessagesJson = prefs.getString(pendingKey);
     List<Map<String, dynamic>> loadedMessages = [];
+    List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
       try {
         final List<dynamic> msgsList = jsonDecode(savedMessages);
         loadedMessages = msgsList.cast<Map<String, dynamic>>();
       } catch (e) {
         print('Failed to load saved messages for profile: $e');
+      }
+    }
+    if (pendingMessagesJson != null && pendingMessagesJson.isNotEmpty) {
+      try {
+        final List<dynamic> msgsList = jsonDecode(pendingMessagesJson);
+        pendingMessages = msgsList
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .map(_normalizeIncomingMessage)
+            .toList();
+      } catch (_) {
+        // ignore pending parse errors
       }
     }
 
@@ -783,11 +1008,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         contacts = _dedupeContacts(loadedContacts);
       }
       if (overrideLoaded || messages.isEmpty) {
-        messages = loadedMessages;
+        messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
       }
       _sortContactsByActivity();
     });
     _ensureSelectedContact();
+    await prefs.remove(pendingKey);
   }
 
   List<Map<String, dynamic>> _mergeMessages(List<Map<String, dynamic>> incoming) {
@@ -1064,6 +1290,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _persistVisibleState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('app_visible', _appVisible);
+      if (selectedContact != null && selectedContact!.isNotEmpty) {
+        await prefs.setString('visible_contact', selectedContact!);
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
   Future<void> _ensureRustInitialized() async {
     if (_didInitRust) return;
     try {
@@ -1075,6 +1313,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         rethrow;
       }
       _didInitRust = true;
+    }
+  }
+
+  void _initForegroundTask() {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'pushstr_fg',
+        channelName: 'Pushstr background',
+        channelDescription: 'Keeps Pushstr connected for catch-up sync',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+        iconData: const NotificationIconData(
+          resType: ResourceType.mipmap,
+          resPrefix: ResourcePrefix.ic,
+          name: 'launcher',
+        ),
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(),
+      foregroundTaskOptions: const ForegroundTaskOptions(
+        interval: 60 * 1000,
+        isOnceEvent: false,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+  }
+
+  Future<bool> _startForegroundService() async {
+    if (!Platform.isAndroid) return false;
+    if (_startingForeground) return true;
+    _startingForeground = true;
+    final notifStatus = await Permission.notification.request();
+    if (!notifStatus.isGranted) {
+      _startingForeground = false;
+      _showThemedToast(
+        'Notification permission is required to stay connected',
+        preferTop: true,
+      );
+      return false;
+    }
+    _initForegroundTask();
+    final running = await FlutterForegroundTask.isRunningService;
+    if (running) {
+      _startingForeground = false;
+      return true;
+    }
+    try {
+      final started = await FlutterForegroundTask.startService(
+        notificationTitle: 'Pushstr running',
+        notificationText: 'Staying connected for incoming messages',
+        callback: foregroundStartCallback,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+      return started;
+    } catch (_) {
+      return false;
+    } finally {
+      _startingForeground = false;
     }
   }
 
@@ -1157,6 +1452,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
                     }
                   });
+                  _persistVisibleState();
                   await _saveContacts();
                 },
                 child: ListTile(
@@ -1170,6 +1466,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   selected: selectedContact == contact['pubkey'],
                   onTap: () {
                     setState(() => selectedContact = contact['pubkey']);
+                    _persistVisibleState();
                     Navigator.pop(context);
                   },
                   trailing: Row(
@@ -1194,6 +1491,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
                               }
                             });
+                              _persistVisibleState();
                             await _saveContacts();
                             _cancelHoldActionHome('delete_contact_${contact['pubkey']}');
                             },
@@ -1436,6 +1734,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           : (value) {
               if (value == null) return;
               setState(() => selectedContact = value);
+              _persistVisibleState();
               _scrollToBottom();
             },
     );
@@ -1662,12 +1961,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // fall back to raw text if conversion fails
       }
     }
-    if (value.length <= 12) return value;
-    return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
-  }
-
-  String _shortHex(String text) {
-    final value = text.trim();
     if (value.length <= 12) return value;
     return '${value.substring(0, 8)}...${value.substring(value.length - 4)}';
   }
@@ -1949,12 +2242,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _saveMedia(Uint8List bytes, String mime) async {
     try {
-      final dir = await getTemporaryDirectory();
+      final selectedDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose where to save');
+      if (selectedDir == null) {
+        if (mounted) _showThemedToast('Save cancelled', preferTop: true, duration: const Duration(milliseconds: 800));
+        return;
+      }
       final ext = extensionFromMime(mime);
-      final file = File('${dir.path}/pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext');
+      final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final file = File('$selectedDir/$filename');
       await file.writeAsBytes(bytes);
       if (!mounted) return;
-      _showThemedToast('Saved to ${file.path}', preferTop: true);
+      _showThemedToast('Saved to $selectedDir', preferTop: true);
     } catch (e) {
       if (!mounted) return;
       _showThemedToast('Save failed: $e', preferTop: true);
@@ -2373,8 +2671,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final Map<String, bool> _holdActive = {};
   final Map<String, int> _holdLastSecond = {};
   static const int _holdMillis = 5000;
+  bool _startingForeground = false;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
+  bool _foregroundEnabled = false;
 
   @override
   void initState() {
@@ -2395,6 +2695,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toastTimer?.cancel();
     _toastEntry?.remove();
     super.dispose();
+  }
+
+  void _initForegroundTask() {
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: 'pushstr_fg',
+        channelName: 'Pushstr background',
+        channelDescription: 'Keeps Pushstr connected for catch-up sync',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+        iconData: const NotificationIconData(
+          resType: ResourceType.mipmap,
+          resPrefix: ResourcePrefix.ic,
+          name: 'launcher',
+        ),
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(),
+      foregroundTaskOptions: const ForegroundTaskOptions(
+        interval: 60 * 1000,
+        isOnceEvent: false,
+        allowWakeLock: true,
+        allowWifiLock: true,
+      ),
+    );
+  }
+
+  Future<bool> _startForegroundService() async {
+    if (!Platform.isAndroid) return false;
+    if (_startingForeground) return true;
+    _startingForeground = true;
+    final notifStatus = await Permission.notification.request();
+    if (!notifStatus.isGranted) {
+      _startingForeground = false;
+      return false;
+    }
+    _initForegroundTask();
+    final running = await FlutterForegroundTask.isRunningService;
+    if (running) {
+      _startingForeground = false;
+      return true;
+    }
+    try {
+      final started = await FlutterForegroundTask.startService(
+        notificationTitle: 'Pushstr running',
+        notificationText: 'Staying connected for incoming messages',
+        callback: foregroundStartCallback,
+      ).timeout(const Duration(seconds: 5), onTimeout: () => false);
+      return started;
+    } catch (_) {
+      return false;
+    } finally {
+      _startingForeground = false;
+    }
+  }
+
+  Future<void> _stopForegroundService() async {
+    if (!Platform.isAndroid) return;
+    final running = await FlutterForegroundTask.isRunningService;
+    if (!running) {
+      return;
+    }
+    await FlutterForegroundTask.stopService();
   }
 
   Future<void> _loadSettings() async {
@@ -2438,6 +2800,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       npub = '';
     }
+    _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
 
     // Load cached npubs to avoid recomputing on every load
     final cachedNpubs = prefs.getStringList('profile_npubs_cache') ?? [];
@@ -2452,6 +2815,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       profileNpubs = cachedNpubs.length == loadedProfiles.length
           ? cachedNpubs
           : [];
+      _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
     });
 
     // Only refresh npubs if cache is missing or invalid
@@ -2525,6 +2889,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       await prefs.setStringList('relays', relays);
+      await prefs.setBool('foreground_service_enabled', _foregroundEnabled);
 
       // No need to refresh npubs on every save - they're cached
       if (!mounted) return;
@@ -3344,8 +3709,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: _showNpubQr,
                       icon: const Icon(Icons.qr_code_2, size: 20),
                       label: const Text('Show QR'),
-                    ),
+                  ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('Stay connected (foreground)'),
+                  subtitle: const Text(
+                    'Runs an opt-in foreground service for quicker catch-up',
+                  ),
+                  value: _foregroundEnabled,
+                  onChanged: (val) async {
+                    setState(() => _foregroundEnabled = val);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool('foreground_service_enabled', val);
+                    if (val) {
+                      _showThemedToast('Enabling background connection...', preferTop: true);
+                      final ok = await _startForegroundService();
+                      if (!ok) {
+                        setState(() => _foregroundEnabled = false);
+                        await prefs.setBool(
+                          'foreground_service_enabled',
+                          false,
+                        );
+                        _showThemedToast('Foreground service blocked (notification permission?)', preferTop: true);
+                        return;
+                      }
+                      unawaited(
+                        SyncController.performSyncTick(
+                          trigger: SyncTrigger.foregroundService,
+                          budget: const Duration(seconds: 10),
+                        ),
+                      );
+                      _showThemedToast('Foreground service running', preferTop: true);
+                    } else {
+                      await _stopForegroundService();
+                      _showThemedToast('Foreground service stopped', preferTop: true);
+                    }
+                  },
                 ),
               ],
             ),

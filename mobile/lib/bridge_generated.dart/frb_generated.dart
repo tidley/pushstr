@@ -81,7 +81,7 @@ abstract class RustLibApi extends BaseApi {
     String? filename,
   });
 
-  String crateApiFetchRecentDms({required BigInt limit});
+  String crateApiFetchRecentDms({required BigInt limit, required BigInt sinceTimestamp});
 
   String crateApiGenerateNewKey();
 
@@ -187,24 +187,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "encrypt_media", argNames: ["bytes", "recipient", "mime", "filename"]);
 
   @override
-  String crateApiFetchRecentDms({required BigInt limit}) {
+  String crateApiFetchRecentDms({required BigInt limit, required BigInt sinceTimestamp}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_u_64(limit, serializer);
+          sse_encode_u_64(sinceTimestamp, serializer);
           return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiFetchRecentDmsConstMeta,
-        argValues: [limit],
+        argValues: [limit, sinceTimestamp],
         apiImpl: this,
       ),
     );
   }
 
   TaskConstMeta get kCrateApiFetchRecentDmsConstMeta =>
-      const TaskConstMeta(debugName: "fetch_recent_dms", argNames: ["limit"]);
+      const TaskConstMeta(debugName: "fetch_recent_dms", argNames: ["limit", "sinceTimestamp"]);
 
   @override
   String crateApiGenerateNewKey() {

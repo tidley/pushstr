@@ -176,10 +176,11 @@ fn wire__crate__api__fetch_recent_dms_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_limit = <u64>::sse_decode(&mut deserializer);
+            let api_since_timestamp = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                 (move || {
-                    let output_ok = crate::api::fetch_recent_dms(api_limit)?;
+                    let output_ok = crate::api::fetch_recent_dms(api_limit, api_since_timestamp)?;
                     Ok(output_ok)
                 })(),
             )
