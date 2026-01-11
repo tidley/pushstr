@@ -2058,6 +2058,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('app_visible', _appVisible);
+      await prefs.setInt(
+        'app_visible_ts',
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
       if (selectedContact != null && selectedContact!.isNotEmpty) {
         await prefs.setString('visible_contact', selectedContact!);
       }
