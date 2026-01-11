@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1702068842;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 532811799;
 
 // Section: executor
 
@@ -716,10 +716,10 @@ fn pde_ffi_dispatcher_sync_impl(
         10 => wire__crate__api__npub_to_hex_impl(ptr, rust_vec_len, data_len),
         11 => wire__crate__api__send_dm_impl(ptr, rust_vec_len, data_len),
         12 => wire__crate__api__send_gift_dm_impl(ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__unwrap_gift_impl(ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__wait_for_new_dms_impl(ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__wrap_gift_impl(ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__send_legacy_gift_dm_impl(ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__send_legacy_gift_dm_impl(ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__unwrap_gift_impl(ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__wait_for_new_dms_impl(ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__wrap_gift_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

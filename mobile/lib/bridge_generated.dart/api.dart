@@ -6,8 +6,9 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `get_client_and_keys`, `get_nip44_conversation_key`, `gunzip_bytes`, `gzip_bytes`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `parse_pubkey`, `sha256_hex`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `gunzip_bytes`, `gzip_bytes`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `parse_pubkey`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `sha256_hex`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `RumorData`, `UnwrappedGift`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
 /// Initialize the Nostr service with a secret key (nsec)
 /// If nsec is empty, generates a new key
@@ -27,7 +28,7 @@ String generateNewKey() => RustLib.instance.api.crateApiGenerateNewKey();
 String sendGiftDm({required String recipient, required String content, required bool useNip44}) =>
     RustLib.instance.api.crateApiSendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
 
-/// Send a legacy giftwrap DM compatible with the browser extension
+/// Send a legacy giftwrap DM compatible with the Pushstr browser extension.
 String sendLegacyGiftDm({required String recipient, required String content}) =>
     RustLib.instance.api.crateApiSendLegacyGiftDm(recipient: recipient, content: content);
 
