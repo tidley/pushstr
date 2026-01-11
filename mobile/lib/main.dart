@@ -1096,9 +1096,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ? raw.substring(startContent)
         : raw.substring(startContent, end);
     final before = raw.substring(0, start);
-    final after = end == -1
-        ? ''
-        : raw.substring(end + _pushstrMediaEnd.length);
+    final after = end == -1 ? '' : raw.substring(end + _pushstrMediaEnd.length);
     final cleaned = (before + after).trim();
     final mediaJson = mediaBlock.trim();
     return {'text': cleaned, 'media': mediaJson.isEmpty ? null : mediaJson};
@@ -1649,7 +1647,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final extracted = _extractPushstrMedia(raw);
     final cleanedText = (extracted['text'] ?? '').trim();
     final mediaJson = extracted['media'];
-    final candidateJson = mediaJson ?? (raw.trim().startsWith('{') ? raw : null);
+    final candidateJson =
+        mediaJson ?? (raw.trim().startsWith('{') ? raw : null);
     if (candidateJson == null) {
       // Plain text message, not a media descriptor
       return {'text': cleanedText.isEmpty ? raw : cleanedText, 'media': null};
@@ -2445,9 +2444,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Container(
                     margin: const EdgeInsets.only(bottom: 4),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isOut ? 14 : 16,
-                      vertical: isOut ? 10 : 12,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
                     ),
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.7,
@@ -2457,7 +2456,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       borderRadius: BorderRadius.circular(12),
                       border: isOut
                           ? null
-                          : Border.all(color: Colors.black.withValues(alpha: 0.25)),
+                          : Border.all(
+                              color: Colors.black.withValues(alpha: 0.25),
+                            ),
                       boxShadow: isOut
                           ? null
                           : [
@@ -2469,7 +2470,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ],
                     ),
                     child: DefaultTextStyle.merge(
-                      style: TextStyle(color: textColor, fontWeight: fontWeight),
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: fontWeight,
+                      ),
                       child: _buildMessageContent(m, isOut: isOut),
                     ),
                   ),
@@ -2486,9 +2490,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     _friendlyTime(m['created_at']),
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                   ),
-                if (dmBadge != null) ...[const SizedBox(width: 6), dmBadge],
-                if (attachmentBadge != null)
-                  ...[const SizedBox(width: 6), attachmentBadge],
+                  if (dmBadge != null) ...[const SizedBox(width: 6), dmBadge],
+                  if (attachmentBadge != null) ...[
+                    const SizedBox(width: 6),
+                    attachmentBadge,
+                  ],
                 ],
               ),
             ),
@@ -2541,7 +2547,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget? _buildAttachmentBadge(Map<String, dynamic> message) {
     final media = message['media'];
     if (media is! Map) return null;
-    final nonEncrypted = media['nonEncrypted'] == true ||
+    final nonEncrypted =
+        media['nonEncrypted'] == true ||
         (media['encryption']?.toString() == 'none');
     if (!nonEncrypted) return null;
     return Tooltip(
@@ -3086,16 +3093,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ).hasMatch(url);
       final isVideo =
           mime.startsWith('video/') ||
-          RegExp(
-            r'\.(mp4|mov|webm|mkv)$',
-            caseSensitive: false,
-          ).hasMatch(url);
+          RegExp(r'\.(mp4|mov|webm|mkv)$', caseSensitive: false).hasMatch(url);
       final isAudio =
           mime.startsWith('audio/') ||
-          RegExp(
-            r'\.(mp3|m4a|wav|ogg)$',
-            caseSensitive: false,
-          ).hasMatch(url);
+          RegExp(r'\.(mp3|m4a|wav|ogg)$', caseSensitive: false).hasMatch(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3131,9 +3132,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      isVideo
-                          ? Icons.play_circle_outline
-                          : Icons.volume_up,
+                      isVideo ? Icons.play_circle_outline : Icons.volume_up,
                       size: 20,
                       color: Colors.white70,
                     ),
@@ -3355,11 +3354,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => _VideoPlayerPage(
-          url: url,
-          filePath: filePath,
-          title: title,
-        ),
+        builder: (_) =>
+            _VideoPlayerPage(url: url, filePath: filePath, title: title),
       ),
     );
   }
@@ -3379,11 +3375,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => _AudioPlayerPage(
-          url: url,
-          filePath: filePath,
-          title: title,
-        ),
+        builder: (_) =>
+            _AudioPlayerPage(url: url, filePath: filePath, title: title),
       ),
     );
   }
@@ -3859,11 +3852,7 @@ class _ImageViewerPage extends StatelessWidget {
         title: Text(title ?? 'Image'),
         backgroundColor: Colors.black,
       ),
-      body: Center(
-        child: InteractiveViewer(
-          child: image,
-        ),
-      ),
+      body: Center(child: InteractiveViewer(child: image)),
     );
   }
 }
@@ -3889,7 +3878,9 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
     if (widget.filePath != null) {
       _controller = VideoPlayerController.file(File(widget.filePath!));
     } else {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url ?? ''));
+      _controller = VideoPlayerController.networkUrl(
+        Uri.parse(widget.url ?? ''),
+      );
     }
     _initFuture = _controller!.initialize();
     _controller!.setLooping(true);
@@ -4004,11 +3995,7 @@ class _AudioPlayerPageState extends State<_AudioPlayerPage> {
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.audiotrack,
-                  size: 64,
-                  color: Colors.white70,
-                ),
+                Icon(Icons.audiotrack, size: 64, color: Colors.white70),
                 const SizedBox(height: 12),
                 Text(
                   '${_formatDuration(position)} / ${_formatDuration(max)}',
@@ -4017,16 +4004,12 @@ class _AudioPlayerPageState extends State<_AudioPlayerPage> {
                 Slider(
                   value: max.inMilliseconds == 0
                       ? 0
-                      : position.inMilliseconds.clamp(
-                            0,
+                      : position.inMilliseconds.clamp(0, max.inMilliseconds) /
                             max.inMilliseconds,
-                          ) /
-                          max.inMilliseconds,
                   onChanged: max.inMilliseconds == 0
                       ? null
                       : (value) async {
-                          final targetMs =
-                              (value * max.inMilliseconds).round();
+                          final targetMs = (value * max.inMilliseconds).round();
                           await _player.seek(Duration(milliseconds: targetMs));
                         },
                 ),
@@ -4218,8 +4201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Load relays
     final storedRelays = prefs.getStringList('relays');
     final loadedRelays = _mergeDefaultRelays(storedRelays);
-    if (storedRelays == null ||
-        storedRelays.length < _defaultRelays.length) {
+    if (storedRelays == null || storedRelays.length < _defaultRelays.length) {
       await prefs.setStringList('relays', loadedRelays);
     }
 

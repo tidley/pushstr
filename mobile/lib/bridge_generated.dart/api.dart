@@ -6,8 +6,8 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `gunzip_bytes`, `gzip_bytes`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `parse_pubkey`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `sha256_hex`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `RumorData`, `UnwrappedGift`
+// These functions are ignored because they are not marked as `pub`: `ensure_recipient_dm_relays`, `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `parse_pubkey`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `sha256_hex`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Nip44MessageKeys`, `RumorData`, `UnwrappedGift`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
 /// Initialize the Nostr service with a secret key (nsec)
@@ -72,12 +72,9 @@ MediaDescriptor encryptMedia({
   String? filename,
 }) => RustLib.instance.api.crateApiEncryptMedia(bytes: bytes, recipient: recipient, mime: mime, filename: filename);
 
-/// Upload unencrypted media and return a descriptor
-MediaDescriptor uploadMediaUnencrypted({
-  required List<int> bytes,
-  required String mime,
-  String? filename,
-}) => RustLib.instance.api.crateApiUploadMediaUnencrypted(bytes: bytes, mime: mime, filename: filename);
+/// Upload unencrypted media to Blossom and return a descriptor.
+MediaDescriptor uploadMediaUnencrypted({required List<int> bytes, required String mime, String? filename}) =>
+    RustLib.instance.api.crateApiUploadMediaUnencrypted(bytes: bytes, mime: mime, filename: filename);
 
 /// Decrypt media descriptor to raw bytes using provided or current key
 /// sender_pubkey: hex or npub of the message sender (for deriving shared secret)
