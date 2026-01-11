@@ -2249,12 +2249,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
           );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      }
-    });
-
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(12),

@@ -127,6 +127,30 @@ async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
     ))
 }
 
+async fn ensure_recipient_dm_relays(client: &Client, recipient_pk: &PublicKey) -> Result<()> {
+    let filter = Filter::new()
+        .kind(Kind::Custom(10050))
+        .author(recipient_pk.clone())
+        .limit(1);
+    let events = client
+        .fetch_events(filter, std::time::Duration::from_secs(5))
+        .await?;
+    if let Some(event) = events.first() {
+        let relays = relay_tags(event);
+        if !relays.is_empty() {
+            eprintln!("[dm] recipient relay list detected: {:?}", relays);
+            for relay in relays {
+                let _ = client.add_relay(relay).await;
+            }
+            client.connect().await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    } else {
+        eprintln!("[dm] no recipient relay list found");
+    }
+    Ok(())
+}
+
 // Helper function to derive NIP-44 conversation key
 type HmacSha256 = Hmac<Sha256>;
 
@@ -557,6 +581,7 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
     run_block_on(async {
         let (client, keys) = get_client_and_keys().await?;
         let recipient_pk = parse_pubkey(&recipient)?;
+        let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
 
         // NIP-17: Inner DM with plaintext content, signed by user - kind 14
         let inner_event = EventBuilder::new(Kind::Custom(14), content)
@@ -584,6 +609,7 @@ pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String>
     run_block_on(async {
         let (client, keys) = get_client_and_keys().await?;
         let recipient_pk = parse_pubkey(&recipient)?;
+        let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
 
         // Inner DM (kind 14) with NIP-44 encrypted content
         let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
