@@ -52,6 +52,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Support legacy giftwrap DMs for older clients.
 - Tag messages with their DM type (04/17) in history and UI.
 - Allow per-contact DM mode override (NIP-04 vs giftwrap) with a quick toggle in the composer.
+- Browser extension provides a NIP-04/NIP-17 toggle in the composer and displays DM mode badges per message.
 - Tap media in the message history to open full-screen image/video or in-app audio playback.
 - Display an unlocked padlock badge on messages containing unencrypted attachments.
 - Persist message history locally.
@@ -70,6 +71,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Allow download of attachments from the message list.
 - Warn users about large files (default recommended max 20MB).
 - Present attachment options in a grid picker with concise labels (e.g., Camera, Gallery, Video).
+- Browser extension renders inline audio/video players for attachments.
 
 ### 6.5 Relay Handling
 - Connect to default public relays for general messaging.
@@ -97,6 +99,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Copy message contents to clipboard.
 - Manage relay preferences in settings (editable list stored locally).
 - Display status/errors in-app.
+- Display app/extension version numbers at the bottom of settings.
 
 ### 6.9 Logging & Diagnostics
 - Log DM send/receive state transitions.
@@ -200,6 +203,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Giftwrap uses NIP-44 v2 with legacy giftwrap support for older clients.
 - Relay defaults are aligned with Amethyst’s bootstrap inbox set; users can add/remove relays in settings.
 - Chat history now preserves scroll position and exposes a scroll-to-bottom indicator when new messages arrive.
+- Mobile video viewer uses centered playback controls with 10s skip buttons and a timeline scrubber.
 
 ## 13. Out of Scope (Current)
 - Group chats or public channels.

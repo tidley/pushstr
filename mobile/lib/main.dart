@@ -4103,31 +4103,115 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
             return const Center(child: CircularProgressIndicator());
           }
           final controller = _controller!;
-          return Center(
-            child: AspectRatio(
-              aspectRatio: controller.value.aspectRatio,
-              child: VideoPlayer(controller),
-            ),
+          return AnimatedBuilder(
+            animation: controller,
+            builder: (context, child) {
+              final position = controller.value.position;
+              final duration = controller.value.duration;
+              final progress = duration.inMilliseconds == 0
+                  ? 0.0
+                  : (position.inMilliseconds / duration.inMilliseconds)
+                      .clamp(0.0, 1.0);
+              return Center(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: controller.value.aspectRatio,
+                      child: VideoPlayer(controller),
+                    ),
+                    Positioned.fill(
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.replay_10, color: Colors.white),
+                                    onPressed: () {
+                                      final newPos = position - const Duration(seconds: 10);
+                                      controller.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: Icon(
+                                      controller.value.isPlaying
+                                          ? Icons.pause_circle
+                                          : Icons.play_circle,
+                                      color: Colors.white,
+                                      size: 48,
+                                    ),
+                                    onPressed: () {
+                                      if (controller.value.isPlaying) {
+                                        controller.pause();
+                                      } else {
+                                        controller.play();
+                                      }
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: const Icon(Icons.forward_10, color: Colors.white),
+                                    onPressed: () {
+                                      final newPos = position + const Duration(seconds: 10);
+                                      controller.seekTo(
+                                        newPos > duration ? duration : newPos,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Text(
+                                  _formatDuration(position),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                                Expanded(
+                                  child: Slider(
+                                    value: progress,
+                                    onChanged: (value) {
+                                      if (duration.inMilliseconds == 0) return;
+                                      final target = Duration(
+                                        milliseconds:
+                                            (duration.inMilliseconds * value).round(),
+                                      );
+                                      controller.seekTo(target);
+                                    },
+                                  ),
+                                ),
+                                Text(
+                                  _formatDuration(duration),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),
-      floatingActionButton: _controller == null
-          ? null
-          : FloatingActionButton(
-              onPressed: () {
-                setState(() {
-                  if (_controller!.value.isPlaying) {
-                    _controller!.pause();
-                  } else {
-                    _controller!.play();
-                  }
-                });
-              },
-              child: Icon(
-                _controller!.value.isPlaying ? Icons.pause : Icons.play_arrow,
-              ),
-            ),
     );
+  }
+
+  String _formatDuration(Duration duration) {
+    final totalSeconds = duration.inSeconds;
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }
 
@@ -4247,6 +4331,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  static const String _appVersion = '0.0.3';
   static const List<String> _defaultRelays = [
     'wss://relay.damus.io',
     'wss://relay.primal.net',
@@ -5501,6 +5586,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 8),
                 ...relays.map(relayRow),
               ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: Text(
+              'Version $_appVersion',
+              style: const TextStyle(fontSize: 12, color: Colors.white54),
             ),
           ),
         ],

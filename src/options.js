@@ -64,6 +64,7 @@ const relayList = document.getElementById("relayList");
 const contactPub = document.getElementById("contactPub");
 const contactNick = document.getElementById("contactNick");
 const contactError = document.getElementById("contactError");
+const settingsVersion = document.getElementById("settingsVersion");
 const editTimers = new WeakMap();
 const relayStatusCache = new Map();
 
@@ -167,6 +168,14 @@ async function init() {
     }
   }
   pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
+  if (settingsVersion) {
+    try {
+      const manifest = browser.runtime.getManifest();
+      settingsVersion.textContent = `Version ${manifest?.version || "0.0.0"}`;
+    } catch (_) {
+      settingsVersion.textContent = "Version unknown";
+    }
+  }
 }
 
 async function loadStateFallback() {

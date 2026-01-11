@@ -63,6 +63,8 @@ const previewContentEl = document.getElementById("previewContent");
 const clearPreviewBtn = document.getElementById("clearPreview");
 const warningEl = document.getElementById("upload-warning");
 const showQrBtn = document.getElementById("show-qr");
+const settingsBtn = document.getElementById("open-settings");
+const dmToggleBtn = document.getElementById("dm-toggle");
 
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
@@ -104,6 +106,8 @@ if (isPopout) {
 }
 clearPreviewBtn.addEventListener("click", clearPreview);
 showQrBtn?.addEventListener("click", showQrDialog);
+settingsBtn?.addEventListener("click", openSettings);
+dmToggleBtn?.addEventListener("click", toggleDmMode);
 document.getElementById("dismiss-warning")?.addEventListener("click", () => {
   warningEl.classList.add("hidden");
   localStorage.setItem("pushstr_upload_warn_dismissed", "1");
@@ -167,6 +171,7 @@ async function init() {
 function render() {
   renderContacts();
   renderHistory();
+  updateDmToggle();
   requestAnimationFrame(() => {
     historyEl.scrollTop = historyEl.scrollHeight;
   });
@@ -241,13 +246,20 @@ function renderHistory() {
     const bubble = document.createElement("div");
     bubble.className = "bubble " + (m.direction === "out" ? "out" : "in");
     const senderPubkey = m.direction === "out" ? (m.to || selectedContact || state.lastRecipient) : (m.from || state.pubkey);
-    const actions = renderBubbleContent(bubble, m.content, senderPubkey, m.direction === "out", m.id);
+    const renderResult = renderBubbleContent(bubble, m.content, senderPubkey, m.direction === "out", m.id);
+    const actions = renderResult?.actions;
     const metaRow = document.createElement("div");
     metaRow.className = "meta-row";
     const meta = document.createElement("div");
     meta.className = "meta external";
     meta.textContent = friendlyTime(m.created_at);
     metaRow.appendChild(meta);
+    const dmKind = normalizeDmKind(m);
+    const dmBadge = buildDmBadge(dmKind);
+    if (dmBadge) metaRow.appendChild(dmBadge);
+    if (renderResult?.hasMedia) {
+      metaRow.appendChild(buildLockBadge(renderResult.mediaEncrypted !== false));
+    }
     if (m.direction !== "out") {
       const copyBtn = document.createElement("button");
       copyBtn.className = "copy-btn";
@@ -369,6 +381,14 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
       img.style.maxHeight = "180px";
       img.style.display = "block";
       container.appendChild(img);
+    } else if (mime.startsWith("video")) {
+      container.appendChild(buildVideoPlayer(cached));
+    } else if (mime.startsWith("audio")) {
+      const audio = document.createElement("audio");
+      audio.src = cached;
+      audio.controls = true;
+      audio.className = "audio-player";
+      container.appendChild(audio);
     } else {
       const info = document.createElement("div");
       info.textContent = media.filename || "Attachment";
@@ -455,6 +475,70 @@ function renderContainerMessage(container, message, color = "#9ca3af") {
   container.appendChild(msgEl);
 }
 
+function buildVideoPlayer(url) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "media-video";
+  const video = document.createElement("video");
+  video.src = url;
+  video.playsInline = true;
+  video.preload = "metadata";
+  const overlay = document.createElement("div");
+  overlay.className = "video-overlay";
+  const controls = document.createElement("div");
+  controls.className = "video-controls";
+  const backBtn = document.createElement("button");
+  backBtn.textContent = "⟲";
+  backBtn.title = "Back 10s";
+  const playBtn = document.createElement("button");
+  playBtn.textContent = "▶";
+  const forwardBtn = document.createElement("button");
+  forwardBtn.textContent = "⟳";
+  forwardBtn.title = "Forward 10s";
+  const scrubRow = document.createElement("div");
+  scrubRow.className = "video-scrub";
+  const scrubber = document.createElement("input");
+  scrubber.type = "range";
+  scrubber.min = "0";
+  scrubber.max = "1";
+  scrubber.step = "0.01";
+  scrubber.value = "0";
+
+  const syncScrub = () => {
+    if (!video.duration) return;
+    scrubber.value = String(video.currentTime / video.duration);
+    playBtn.textContent = video.paused ? "▶" : "❚❚";
+  };
+
+  backBtn.addEventListener("click", () => {
+    video.currentTime = Math.max(0, (video.currentTime || 0) - 10);
+  });
+  forwardBtn.addEventListener("click", () => {
+    if (!video.duration) return;
+    video.currentTime = Math.min(video.duration, (video.currentTime || 0) + 10);
+  });
+  playBtn.addEventListener("click", () => {
+    if (video.paused) video.play();
+    else video.pause();
+  });
+  scrubber.addEventListener("input", () => {
+    if (!video.duration) return;
+    video.currentTime = Number(scrubber.value) * video.duration;
+  });
+  video.addEventListener("timeupdate", syncScrub);
+  video.addEventListener("play", syncScrub);
+  video.addEventListener("pause", syncScrub);
+
+  controls.appendChild(backBtn);
+  controls.appendChild(playBtn);
+  controls.appendChild(forwardBtn);
+  overlay.appendChild(controls);
+  scrubRow.appendChild(scrubber);
+  wrapper.appendChild(video);
+  wrapper.appendChild(overlay);
+  wrapper.appendChild(scrubRow);
+  return wrapper;
+}
+
 function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadCtrl) {
   container.replaceChildren();
   const mime = cachedData.mime || media.mime || fragMeta.mime;
@@ -465,6 +549,14 @@ function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadC
     img.style.maxHeight = "180px";
     img.style.display = "block";
     container.appendChild(img);
+  } else if (mime && mime.startsWith("video")) {
+    container.appendChild(buildVideoPlayer(cachedData.blobUrl));
+  } else if (mime && mime.startsWith("audio")) {
+    const audio = document.createElement("audio");
+    audio.src = cachedData.blobUrl;
+    audio.controls = true;
+    audio.className = "audio-player";
+    container.appendChild(audio);
   } else {
     const info = document.createElement("div");
     info.textContent = cachedData.filename || media.filename || "Attachment";
@@ -931,6 +1023,11 @@ function popout() {
   window.popoutWindow = window.open(url, "pushstr-popout", "noopener,noreferrer,width=800,height=640");
 }
 
+function openSettings() {
+  const url = browser.runtime.getURL("options.html");
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function flashCopyButton(btn) {
   if (!btn) return;
   const original = btn.textContent;
@@ -943,6 +1040,7 @@ function flashCopyButton(btn) {
 }
 
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
+  const result = { actions: null, hasMedia: false, mediaEncrypted: null };
   const baseCleaned = stripNip18(content);
   const extracted = extractPushstrMedia(baseCleaned);
   const cleaned = extracted.text;
@@ -994,17 +1092,28 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
     actionHolder.appendChild(downloadCtrl.btn);
     // Check if media is encrypted (has encryption marker and IV)
     const isEncrypted = (media.encryption === "aes-gcm" || media.cipher_sha256) && media.iv;
+    result.hasMedia = true;
+    result.mediaEncrypted = isEncrypted;
     if (isEncrypted) {
       renderEncryptedMedia(container, media, senderPubkey, fullUrl, fragMeta, downloadCtrl, isOut, messageId);
     } else {
       // Preview inside bubble (unencrypted)
-      if ((media.mime || "").startsWith("image")) {
+      const mime = media.mime || "";
+      if (mime.startsWith("image")) {
         const img = document.createElement("img");
         img.src = fullUrl;
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
         container.appendChild(img);
+      } else if (mime.startsWith("video")) {
+        container.appendChild(buildVideoPlayer(fullUrl));
+      } else if (mime.startsWith("audio")) {
+        const audio = document.createElement("audio");
+        audio.src = fullUrl;
+        audio.controls = true;
+        audio.className = "audio-player";
+        container.appendChild(audio);
       } else {
         const info = document.createElement("div");
         info.textContent = media.filename || "Attachment";
@@ -1013,7 +1122,8 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       }
       downloadCtrl.setTarget(fullUrl, media.filename);
     }
-    return actionHolder;
+    result.actions = actionHolder;
+    return result;
   }
   if (parsed && parsed.url) {
     const fullUrl = fragPart ? `${parsed.url}#${fragPart}` : parsed.url;
@@ -1039,7 +1149,8 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         container.appendChild(img);
       }
       renderTextIfAny(fullUrl);
-      return actionHolder;
+      result.actions = actionHolder;
+      return result;
     }
     renderLink(container, fullUrl);
     renderTextIfAny(fullUrl);
@@ -1062,7 +1173,8 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         container.appendChild(img);
       }
       renderTextIfAny(meta.url);
-      return actionHolder;
+      result.actions = actionHolder;
+      return result;
     }
     renderLink(container, meta.url);
     renderTextIfAny(meta.url);
@@ -1086,7 +1198,8 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         container.appendChild(img);
       }
       renderTextIfAny(metaFromUrl.url);
-      return actionHolder;
+      result.actions = actionHolder;
+      return result;
     }
     renderLink(container, urlMatch[0]);
     renderTextIfAny(urlMatch[0]);
@@ -1106,6 +1219,57 @@ function updateComposerMode() {
     attachBtn.classList.remove("hidden");
     sendBtn.classList.add("hidden");
   }
+  updateDmToggle();
+}
+
+function getDmModeForContact(contact) {
+  if (!contact) return "nip17";
+  const modes = state.dmModes || {};
+  return modes[contact] || "nip17";
+}
+
+async function toggleDmMode() {
+  if (!selectedContact) return;
+  const current = getDmModeForContact(selectedContact);
+  const next = current === "nip17" ? "nip04" : "nip17";
+  state.dmModes = { ...(state.dmModes || {}), [selectedContact]: next };
+  updateDmToggle();
+  try {
+    await safeSend({ type: "set-dm-mode", recipient: selectedContact, mode: next });
+  } catch (err) {
+    console.error("[pushstr][popup] set-dm-mode failed", err);
+  }
+}
+
+function updateDmToggle() {
+  if (!dmToggleBtn) return;
+  const mode = getDmModeForContact(selectedContact);
+  dmToggleBtn.classList.toggle("active", mode === "nip17");
+  dmToggleBtn.dataset.mode = mode;
+  dmToggleBtn.title = mode === "nip17" ? "NIP-17 (giftwrap)" : "NIP-04 (legacy)";
+}
+
+function normalizeDmKind(message) {
+  if (!message) return null;
+  if (message.dm_kind === "nip04" || message.dm_kind === "nip17") return message.dm_kind;
+  if (message.outerKind === 4) return "nip04";
+  if (message.outerKind === 1059 || message.outerKind === 14) return "nip17";
+  return null;
+}
+
+function buildDmBadge(kind) {
+  if (!kind) return null;
+  const badge = document.createElement("span");
+  badge.className = `badge dm ${kind}`;
+  badge.textContent = kind === "nip04" ? "04" : "17";
+  return badge;
+}
+
+function buildLockBadge(encrypted) {
+  const badge = document.createElement("span");
+  badge.className = `badge lock ${encrypted ? "encrypted" : "unencrypted"}`;
+  badge.textContent = encrypted ? "🔒" : "🔓";
+  return badge;
 }
 
 function attachFile() {

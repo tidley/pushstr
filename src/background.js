@@ -119,6 +119,7 @@ async function handleMessage(msg) {
       relays: settings.relays,
       recipients: getRecipientsForCurrent(),
       messages,
+      dmModes: getDmModesForCurrent(),
       useGiftwrap: true,
       useNip44: true,
       lastRecipient: settings.lastRecipient,
@@ -150,6 +151,15 @@ async function handleMessage(msg) {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
     return { ok: true };
+  }
+
+  if (msg.type === "set-dm-mode") {
+    const recipient = normalizePubkey(msg.recipient);
+    const mode = msg.mode === "nip04" ? "nip04" : "nip17";
+    if (!recipient) return { error: "missing recipient" };
+    setDmModeForCurrent(recipient, mode);
+    await persistSettings();
+    return { ok: true, mode };
   }
 
   if (msg.type === "upload-blossom") {
@@ -373,6 +383,7 @@ async function handleGiftEvent(event) {
     if (!targetEvent.tags.some((t) => t[0] === "p" && t[1] === currentPubkey())) return;
     const sender = targetEvent.pubkey || "unknown";
     const message = await decryptDmContent(priv, sender, targetEvent.content);
+    const dmKind = event.kind === 1059 ? "nip17" : (targetEvent.kind === 4 ? "nip04" : "nip17");
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
     await ensureContact(sender);
     await recordMessage({
@@ -383,6 +394,7 @@ async function handleGiftEvent(event) {
       content: message,
       created_at: targetEvent.created_at || Math.floor(Date.now() / 1000),
       outerKind: event.kind,
+      dm_kind: dmKind,
       relayFrom: settings.relays
     });
     if (message && !suppressNotifications) {
@@ -400,24 +412,22 @@ async function sendGift(recipient, content) {
   const chosen = recipient || settings.lastRecipient || (settings.recipients[0] && settings.recipients[0].pubkey);
   if (!chosen) throw new Error("No recipient set");
   const recipientHex = normalizePubkey(chosen);
+  const dmMode = getDmModeForRecipient(recipientHex);
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1000);
 
-  const cipherText = await encryptDmContent(priv, recipientHex, content);
-
-  if (!settings.useGiftwrap) {
-    // Note: NIP-17 requires giftwrap, but this is a fallback for legacy/testing
-    // Use kind 14 (private direct message) for consistency
+  if (dmMode === "nip04") {
+    const cipherText = await nt.nip04.encrypt(priv, recipientHex, content);
     const dm = {
-      kind: 14,
+      kind: 4,
       created_at,
       tags: [["p", recipientHex]],
       content: cipherText
     };
     const signedDm = finalizeEvent(dm, priv);
     await pool.publish(settings.relays, signedDm);
-    console.info("[pushstr] sent DM kind 14 (no giftwrap)", { to: recipientHex, relays: settings.relays });
+    console.info("[pushstr] sent DM kind 4 (nip04)", { to: recipientHex, relays: settings.relays });
     await recordMessage({
       id: signedDm.id,
       direction: "out",
@@ -425,13 +435,15 @@ async function sendGift(recipient, content) {
       to: recipientHex,
       content,
       created_at,
-      outerKind: 14,
+      outerKind: 4,
+      dm_kind: "nip04",
       relays: settings.relays
     });
     return { ok: true, id: signedDm.id };
   }
 
   // NIP-17 Giftwrap: inner DM (kind 14) signed by sender, wrapped in kind:1059 sealed with ephemeral key.
+  const cipherText = await encryptDmContent(priv, recipientHex, content);
   const senderPubkey = nt.getPublicKey(priv);
   const inner = {
     kind: 14, // NIP-17: kind 14 for private direct message
@@ -473,6 +485,7 @@ async function sendGift(recipient, content) {
     content,
     created_at,
     outerKind: 1059,
+    dm_kind: "nip17",
     relays: settings.relays
   });
   return { ok: true, id: signedGift.id };
@@ -882,6 +895,30 @@ function getRecipientsForCurrent() {
   settings.recipientsByKey = settings.recipientsByKey || {};
   if (pk) return settings.recipientsByKey[pk] || [];
   return settings.recipients || [];
+}
+
+function getDmModesForCurrent() {
+  const pk = currentPubkey();
+  settings.dmModesByKey = settings.dmModesByKey || {};
+  if (pk) return settings.dmModesByKey[pk] || {};
+  return settings.dmModes || {};
+}
+
+function setDmModeForCurrent(recipient, mode) {
+  const pk = currentPubkey();
+  settings.dmModesByKey = settings.dmModesByKey || {};
+  if (pk) {
+    const existing = settings.dmModesByKey[pk] || {};
+    settings.dmModesByKey[pk] = { ...existing, [recipient]: mode };
+  } else {
+    settings.dmModes = settings.dmModes || {};
+    settings.dmModes[recipient] = mode;
+  }
+}
+
+function getDmModeForRecipient(recipient) {
+  const modes = getDmModesForCurrent();
+  return modes[recipient] || "nip17";
 }
 
 function setRecipientsForCurrent(list) {
