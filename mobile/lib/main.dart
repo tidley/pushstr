@@ -215,6 +215,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 4000;
+  static const String _pushstrMediaStart = '[pushstr:media]';
+  static const String _pushstrMediaEnd = '[/pushstr:media]';
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
@@ -930,7 +932,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'encryption': desc.encryption,
           'filename': desc.filename,
         };
-        payload = jsonEncode({'media': descriptor});
+        final descriptorJson = jsonEncode({'media': descriptor});
+        final url = descriptor['url']?.toString() ?? '';
+        final filename = descriptor['filename']?.toString() ?? 'attachment';
+        final sizeLabel = descriptor['size'] is int
+            ? _formatBytes(descriptor['size'] as int)
+            : null;
+        final attachmentLine = sizeLabel != null
+            ? 'Attachment: $filename ($sizeLabel)'
+            : 'Attachment: $filename';
+        final lines = <String>[
+          if (text.isNotEmpty) text,
+          attachmentLine,
+          if (url.isNotEmpty) url,
+          '',
+          _pushstrMediaStart,
+          descriptorJson,
+          _pushstrMediaEnd,
+        ];
+        payload = lines.join('\n');
         // Use the original picked bytes for local preview (matches browser extension behavior).
         localMedia = {
           'bytes': attachment.bytes,
@@ -944,7 +964,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               : desc.url,
           'url': desc.url,
         };
-        localText = '(attachment)';
+        localText = text.isNotEmpty ? text : '(attachment)';
       }
 
       final dmMode = _effectiveDmMode(selectedContact!);
@@ -1042,6 +1062,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return trimmed.toLowerCase();
     }
     throw const FormatException('Enter a valid npub, nprofile, or hex pubkey');
+  }
+
+  String _formatBytes(int bytes) {
+    const kb = 1024;
+    const mb = 1024 * kb;
+    if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
+    if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(1)} KB';
+    return '$bytes B';
+  }
+
+  Map<String, String?> _extractPushstrMedia(String raw) {
+    final start = raw.indexOf(_pushstrMediaStart);
+    if (start == -1) {
+      return {'text': raw, 'media': null};
+    }
+    final startContent = start + _pushstrMediaStart.length;
+    final end = raw.indexOf(_pushstrMediaEnd, startContent);
+    final mediaBlock = (end == -1)
+        ? raw.substring(startContent)
+        : raw.substring(startContent, end);
+    final before = raw.substring(0, start);
+    final after = end == -1
+        ? ''
+        : raw.substring(end + _pushstrMediaEnd.length);
+    final cleaned = (before + after).trim();
+    final mediaJson = mediaBlock.trim();
+    return {'text': cleaned, 'media': mediaJson.isEmpty ? null : mediaJson};
   }
 
   Future<void> _addContact(BuildContext context) async {
@@ -1586,14 +1633,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String senderPubkey,
     String? messageId,
   ) async {
-    // Check if content is valid JSON before trying to parse it
-    if (!raw.trim().startsWith('{')) {
+    final extracted = _extractPushstrMedia(raw);
+    final cleanedText = (extracted['text'] ?? '').trim();
+    final mediaJson = extracted['media'];
+    final candidateJson = mediaJson ?? (raw.trim().startsWith('{') ? raw : null);
+    if (candidateJson == null) {
       // Plain text message, not a media descriptor
-      return {'text': raw, 'media': null};
+      return {'text': cleanedText.isEmpty ? raw : cleanedText, 'media': null};
     }
+    final textForAttachment = cleanedText.isNotEmpty
+        ? cleanedText
+        : '(attachment)';
 
     try {
-      final parsed = jsonDecode(raw);
+      final parsed = jsonDecode(candidateJson);
       if (parsed is Map && parsed['media'] != null) {
         final media = Map<String, dynamic>.from(parsed['media'] as Map);
         final cacheKey =
@@ -1611,7 +1664,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final filename = (media['filename'] as String?) ?? 'attachment';
           final url = (media['url'] as String?) ?? '';
           return {
-            'text': '(attachment)',
+            'text': textForAttachment,
             'media': {
               'bytes': null,
               'mime': mime,
@@ -1630,7 +1683,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final mime = (media['mime'] as String?) ?? 'application/octet-stream';
           final filename = (media['filename'] as String?) ?? 'attachment';
           return {
-            'text': '(attachment)',
+            'text': textForAttachment,
             'media': {
               'bytes': cachedBytes,
               'mime': mime,
@@ -1651,7 +1704,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final mime = (media['mime'] as String?) ?? 'application/octet-stream';
           final filename = (media['filename'] as String?) ?? 'attachment';
           return {
-            'text': '(attachment)',
+            'text': textForAttachment,
             'media': {
               'bytes': null, // null indicates needs decryption
               'mime': mime,
@@ -1682,7 +1735,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final mime = (media['mime'] as String?) ?? 'application/octet-stream';
         final filename = (media['filename'] as String?) ?? 'attachment';
         return {
-          'text': '(attachment)',
+          'text': textForAttachment,
           'media': {
             'bytes': bytes,
             'mime': mime,
@@ -1696,7 +1749,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       print('Failed to decode media: $e');
       // Not a media descriptor or decryption failed, fall back to raw.
     }
-    return {'text': raw, 'media': null};
+    return {'text': cleanedText.isEmpty ? raw : cleanedText, 'media': null};
   }
 
   void _scrollToBottom({bool force = false}) {

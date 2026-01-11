@@ -58,6 +58,9 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Encrypt files for the recipient before upload.
 - Upload encrypted content to Blossom-compatible server.
 - Transmit encrypted media descriptors in DMs.
+- For cross-client readability, include a plain URL line plus a Pushstr-only metadata block:
+  - Human section: `Attachment: <filename> (<size>)` + direct URL.
+  - Pushstr section: `[pushstr:media]` JSON descriptor `[/pushstr:media]` (filtered by Pushstr apps).
 - Render local previews for newly sent/received media.
 - Allow download of attachments from the message list.
 - Warn users about large files (default recommended max 20MB).

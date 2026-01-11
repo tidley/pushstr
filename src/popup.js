@@ -610,7 +610,7 @@ async function send() {
           // ignore storage errors
         }
       }
-      const payload = JSON.stringify({ media: res });
+      const payload = buildPushstrAttachmentPayload(content, res);
       await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content: payload });
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
@@ -725,6 +725,23 @@ function stripNostrPrefix(value) {
   if (value.startsWith("nostr://")) return value.slice(8);
   if (value.startsWith("nostr:")) return value.slice(6);
   return value;
+}
+
+const PUSHSTR_MEDIA_START = "[pushstr:media]";
+const PUSHSTR_MEDIA_END = "[/pushstr:media]";
+
+function extractPushstrMedia(raw) {
+  const startIdx = raw.indexOf(PUSHSTR_MEDIA_START);
+  if (startIdx === -1) {
+    return { text: raw, mediaJson: null };
+  }
+  const contentStart = startIdx + PUSHSTR_MEDIA_START.length;
+  const endIdx = raw.indexOf(PUSHSTR_MEDIA_END, contentStart);
+  const mediaJson = (endIdx === -1 ? raw.slice(contentStart) : raw.slice(contentStart, endIdx)).trim();
+  const before = raw.slice(0, startIdx);
+  const after = endIdx === -1 ? "" : raw.slice(endIdx + PUSHSTR_MEDIA_END.length);
+  const cleaned = (before + after).trim();
+  return { text: cleaned, mediaJson: mediaJson || null };
 }
 
 function short(pk) {
@@ -848,7 +865,10 @@ function flashCopyButton(btn) {
 }
 
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
-  const cleaned = stripNip18(content);
+  const baseCleaned = stripNip18(content);
+  const extracted = extractPushstrMedia(baseCleaned);
+  const cleaned = extracted.text;
+  const mediaJson = extracted.mediaJson;
   const renderTextIfAny = (urlToStrip = null) => {
     let txt = cleaned;
     if (urlToStrip) {
@@ -860,7 +880,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       if (target !== container) container.appendChild(target);
     }
   };
-  let jsonPart = cleaned;
+  let jsonPart = mediaJson || cleaned;
   let fragPart = "";
   if (cleaned.includes("#")) {
     const idx = cleaned.indexOf("#");
@@ -1053,6 +1073,20 @@ async function handleFileAttachment(file) {
     status(`Attachment failed: ${err.message}`);
     clearPreview();
   }
+}
+
+function buildPushstrAttachmentPayload(text, media) {
+  const filename = media.filename || "attachment";
+  const sizeLabel = typeof media.size === "number" ? formatSize(media.size) : null;
+  const attachmentLine = sizeLabel ? `Attachment: ${filename} (${sizeLabel})` : `Attachment: ${filename}`;
+  const url = media.url || "";
+  const descriptorJson = JSON.stringify({ media });
+  const lines = [];
+  if (text) lines.push(text);
+  lines.push(attachmentLine);
+  if (url) lines.push(url);
+  lines.push("", PUSHSTR_MEDIA_START, descriptorJson, PUSHSTR_MEDIA_END);
+  return lines.join("\n");
 }
 
 
