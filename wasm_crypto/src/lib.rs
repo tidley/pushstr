@@ -52,7 +52,7 @@ pub fn sha256_bytes(data: &[u8]) -> Box<[u8]> {
 type HmacSha256 = Hmac<Sha256>;
 
 fn hmac_sha256(key: &[u8; 32], parts: &[&[u8]]) -> Result<[u8; 32], JsValue> {
-    let mut mac = HmacSha256::new_from_slice(key)
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
         .map_err(|e| JsValue::from_str(&format!("HMAC init failed: {e}")))?;
     for part in parts {
         mac.update(part);
