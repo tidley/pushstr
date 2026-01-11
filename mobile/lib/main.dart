@@ -2556,12 +2556,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Tooltip(
       message: 'Unencrypted attachment',
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: Colors.orange.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
-        ),
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        // decoration: BoxDecoration(
+        //   color: Colors.orange.withValues(alpha: 0.2),
+        //   borderRadius: BorderRadius.circular(10),
+        //   border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
+        // ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: const [
