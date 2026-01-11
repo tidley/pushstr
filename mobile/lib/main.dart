@@ -169,6 +169,7 @@ class PushstrApp extends StatelessWidget {
       title: 'Pushstr Mobile',
       theme: ThemeData.dark(useMaterial3: true).copyWith(
         colorScheme: const ColorScheme.dark(primary: Color(0xFF22C55E)),
+        scaffoldBackgroundColor: const Color(0xFF0E0E10),
       ),
       home: const HomeScreen(),
     );
@@ -2390,7 +2391,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? Alignment.centerRight
             : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
-        final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
+        final bubbleColor = isOut
+            ? const Color(0xFF223E63)
+            : const Color(0xFFE8FFF3);
+        final textColor = isOut ? Colors.white : const Color(0xFF0E0E0E);
+        final fontWeight = isOut ? FontWeight.w400 : FontWeight.w500;
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);
@@ -2440,18 +2445,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Container(
                     margin: const EdgeInsets.only(bottom: 4),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isOut ? 14 : 16,
+                      vertical: isOut ? 10 : 12,
                     ),
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.7,
                     ),
                     decoration: BoxDecoration(
-                      color: color,
+                      color: bubbleColor,
                       borderRadius: BorderRadius.circular(12),
+                      border: isOut
+                          ? null
+                          : Border.all(color: Colors.black.withValues(alpha: 0.25)),
+                      boxShadow: isOut
+                          ? null
+                          : [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.22),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                     ),
-                    child: _buildMessageContent(m, isOut: isOut),
+                    child: DefaultTextStyle.merge(
+                      style: TextStyle(color: textColor, fontWeight: fontWeight),
+                      child: _buildMessageContent(m, isOut: isOut),
+                    ),
                   ),
                   if (actions != null) ...[const SizedBox(width: 6), actions],
                 ],
