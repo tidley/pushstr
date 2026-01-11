@@ -21,6 +21,7 @@ use rand::RngCore;
 use secp256k1::{PublicKey as Secp256k1PublicKey, SecretKey as Secp256k1SecretKey, XOnlyPublicKey as Secp256k1XOnlyPublicKey, Secp256k1 as Secp256k1Context};
 use getrandom;
 use hmac::{Hmac, Mac};
+use hkdf::Hkdf;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use std::collections::HashSet as StdHashSet;
 
@@ -317,8 +318,10 @@ fn get_nip44_conversation_key(secret_key: &SecretKey, public_key: &PublicKey) ->
     let shared_bytes = shared_point.serialize_uncompressed();
     let shared_x = &shared_bytes[1..33];
 
-    let salt = b"nip44-v2";
-    hmac_sha256(salt, &[shared_x])
+    let (prk, _) = Hkdf::<Sha256>::extract(Some(b"nip44-v2"), shared_x);
+    let mut conversation_key = [0u8; 32];
+    conversation_key.copy_from_slice(&prk[..]);
+    Ok(conversation_key)
 }
 
 // NIP-44 v2 encrypt compatible with Amethyst/NIP-59

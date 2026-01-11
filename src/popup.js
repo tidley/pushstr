@@ -1,4 +1,5 @@
 import { nip19, getPublicKey } from "nostr-tools";
+import QRCode from "qrcode";
 
 function makeBrowser() {
   if (globalThis.browser) return globalThis.browser;
@@ -61,6 +62,7 @@ const previewEl = document.getElementById("preview");
 const previewContentEl = document.getElementById("previewContent");
 const clearPreviewBtn = document.getElementById("clearPreview");
 const warningEl = document.getElementById("upload-warning");
+const showQrBtn = document.getElementById("show-qr");
 
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
@@ -101,6 +103,7 @@ if (isPopout) {
   popoutBtn.addEventListener("click", popout);
 }
 clearPreviewBtn.addEventListener("click", clearPreview);
+showQrBtn?.addEventListener("click", showQrDialog);
 document.getElementById("dismiss-warning")?.addEventListener("click", () => {
   warningEl.classList.add("hidden");
   localStorage.setItem("pushstr_upload_warn_dismissed", "1");
@@ -806,6 +809,81 @@ function showModal(title, contentNode) {
     document.body.appendChild(overlay);
     ok.focus();
   });
+}
+
+function showInfoModal(title, contentNode) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const dialog = document.createElement("div");
+  dialog.className = "modal-dialog";
+  const header = document.createElement("div");
+  header.className = "modal-header";
+  header.textContent = title;
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  body.appendChild(contentNode);
+  const footer = document.createElement("div");
+  footer.className = "modal-footer";
+  const close = document.createElement("button");
+  close.textContent = "Close";
+  const closeModal = () => overlay.remove();
+  close.addEventListener("click", closeModal);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeModal();
+  });
+  footer.appendChild(close);
+  dialog.appendChild(header);
+  dialog.appendChild(body);
+  dialog.appendChild(footer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  close.focus();
+}
+
+async function showQrDialog() {
+  const pubkey = state?.pubkey;
+  if (!pubkey) {
+    status("No pubkey available");
+    return;
+  }
+  const npub = toNpub(pubkey);
+  const uri = `nostr:${npub}`;
+  const wrapper = document.createElement("div");
+  wrapper.className = "qr-wrapper";
+  const canvas = document.createElement("canvas");
+  try {
+    await QRCode.toCanvas(canvas, uri, {
+      width: 200,
+      margin: 1,
+      color: { dark: "#0f172a", light: "#ffffff" }
+    });
+  } catch (err) {
+    console.error("[pushstr][popup] QR render failed", err);
+    status("QR render failed");
+    return;
+  }
+  const label = document.createElement("div");
+  label.className = "qr-label";
+  label.textContent = "Scan to add";
+  const text = document.createElement("div");
+  text.className = "qr-text";
+  text.textContent = npub;
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "qr-copy";
+  copyBtn.textContent = "Copy";
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(uri);
+      flashCopyButton(copyBtn);
+    } catch (err) {
+      prompt("nostr:", uri);
+    }
+  });
+  wrapper.appendChild(canvas);
+  wrapper.appendChild(label);
+  wrapper.appendChild(text);
+  wrapper.appendChild(copyBtn);
+  showInfoModal("Your QR", wrapper);
 }
 async function showAddContactDialog() {
   const wrapper = document.createElement("div");

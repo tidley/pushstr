@@ -44,6 +44,7 @@ main {
   padding: 10px 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+  gap: 8px;
 }
 
 .topbar h1 {
@@ -169,6 +170,14 @@ button:hover {
 .brand-cog {
   font-size: 18px;
   font-weight: 900;
+}
+
+.topbar-qr {
+  width: 40px;
+  height: 38px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 6px 0;
 }
 
 main {
@@ -652,6 +661,42 @@ main {
 }
 
 .modal-footer .modal-primary {
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.qr-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.qr-wrapper canvas {
+  background: #ffffff;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+}
+
+.qr-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qr-text {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  word-break: break-all;
+}
+
+.qr-copy {
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.qr-copy.copied {
   border-color: #22c55e;
   color: #22c55e;
 }
