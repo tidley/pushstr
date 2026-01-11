@@ -700,23 +700,31 @@ async function copyContact() {
 
 function toNpub(pk) {
   if (!pk) return "";
-  if (pk.startsWith("npub")) return pk;
+  const cleaned = stripNostrPrefix(pk);
+  if (cleaned.startsWith("npub")) return cleaned;
   try {
-    const decoded = nip19.decode(pk);
+    const decoded = nip19.decode(cleaned);
     if (decoded.type === "nprofile" && decoded.data?.pubkey) {
       return nip19.npubEncode(decoded.data.pubkey);
     }
     if (decoded.type === "npub" && typeof decoded.data === "string") {
-      return pk;
+      return cleaned;
     }
   } catch (_) {
     // fall through to encode attempt
   }
   try {
-    return nip19.npubEncode(pk);
+    return nip19.npubEncode(cleaned);
   } catch (_) {
     return pk;
   }
+}
+
+function stripNostrPrefix(value) {
+  if (!value) return value;
+  if (value.startsWith("nostr://")) return value.slice(8);
+  if (value.startsWith("nostr:")) return value.slice(6);
+  return value;
 }
 
 function short(pk) {
@@ -728,7 +736,7 @@ function short(pk) {
 
 function normalizePubkeyInput(input) {
   if (!input) throw new Error("Missing pubkey");
-  const trimmed = input.trim();
+  const trimmed = stripNostrPrefix(input.trim());
   try {
     const decoded = nip19.decode(trimmed);
     if (decoded.type === "npub" && typeof decoded.data === "string") return decoded.data;
@@ -737,7 +745,7 @@ function normalizePubkeyInput(input) {
     // fall through to hex handling
   }
   if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return trimmed.toLowerCase();
-  throw new Error("Enter a valid npub or hex pubkey");
+  throw new Error("Enter a valid npub, nprofile, or hex pubkey");
 }
 
 function status(msg) {
@@ -788,7 +796,7 @@ async function showAddContactDialog() {
     <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
       <label style="font-size:12px;color:#9ca3af;">Nickname (optional)</label>
       <input type="text" id="ac_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
-      <label style="font-size:12px;color:#9ca3af;">npub or hex pubkey</label>
+      <label style="font-size:12px;color:#9ca3af;">npub, nprofile, or hex pubkey</label>
       <input type="text" id="ac_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
     </div>
   `;

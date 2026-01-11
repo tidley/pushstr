@@ -38,6 +38,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 
 ### 6.2 Contacts
 - Add a contact using npub or hex pubkey.
+- Accept nprofile inputs and `nostr:`-prefixed QR codes when adding contacts.
 - Optionally store a nickname.
 - Edit or delete contacts.
 - Select an active contact for messaging.
@@ -70,6 +71,8 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Default public relays: wss://relay.damus.io, wss://relay.primal.net, wss://nos.lol, wss://nostr.mom, wss://relay.nostr.band.
 
 ### 6.6 Sync & Background Processing (Mobile)
+- Load cached messages immediately at startup.
+- Connect to relays and fetch updates in the background without blocking the UI.
 - Fetch recent messages at startup and on manual refresh.
 - Poll for new messages while app is active.
 - Optional foreground service for Android to keep connections alive.

@@ -1000,6 +1000,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  String _normalizeContactInput(String input) {
+    var trimmed = input.trim();
+    if (trimmed.isEmpty) {
+      throw const FormatException('Missing pubkey');
+    }
+    if (trimmed.startsWith('nostr://')) {
+      trimmed = trimmed.substring(8);
+    } else if (trimmed.startsWith('nostr:')) {
+      trimmed = trimmed.substring(6);
+    }
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('npub') || lower.startsWith('nprofile')) {
+      return api.npubToHex(npub: trimmed);
+    }
+    if (RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(trimmed)) {
+      return trimmed.toLowerCase();
+    }
+    throw const FormatException('Enter a valid npub, nprofile, or hex pubkey');
+  }
+
   Future<void> _addContact(BuildContext context) async {
     final nicknameCtrl = TextEditingController();
     final pubkeyCtrl = TextEditingController();
@@ -1019,7 +1039,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             TextField(
               controller: pubkeyCtrl,
               decoration: const InputDecoration(
-                labelText: 'npub or hex pubkey',
+                labelText: 'npub, nprofile, or hex pubkey',
               ),
             ),
           ],
@@ -1040,23 +1060,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           TextButton(
             onPressed: () async {
-              var pubkey = pubkeyCtrl.text.trim();
+              final pubkeyRaw = pubkeyCtrl.text.trim();
               final nickname = nicknameCtrl.text.trim();
 
-              if (pubkey.isEmpty) {
+              if (pubkeyRaw.isEmpty) {
                 Navigator.pop(context);
                 return;
               }
 
-              // Convert npub to hex if needed
-              if (pubkey.toLowerCase().startsWith('npub')) {
-                try {
-                  pubkey = api.npubToHex(npub: pubkey);
-                } catch (e) {
-                  setState(() => lastError = 'Invalid npub: $e');
-                  Navigator.pop(context);
-                  return;
-                }
+              String pubkey;
+              try {
+                pubkey = _normalizeContactInput(pubkeyRaw);
+              } catch (e) {
+                setState(() => lastError = 'Invalid pubkey: $e');
+                Navigator.pop(context);
+                return;
               }
 
               setState(() {
@@ -1125,12 +1143,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _scanContactQr() async {
     final scanned = await _scanQrRaw();
     if (scanned == null || scanned.trim().isEmpty) return;
-    var input = scanned.trim();
+    final inputRaw = scanned.trim();
+    String input;
     String? displayNpub;
     try {
-      if (input.startsWith('npub')) {
-        input = api.npubToHex(npub: input);
-      }
+      input = _normalizeContactInput(inputRaw);
       displayNpub = api.hexToNpub(hex: input);
     } catch (e) {
       if (mounted) {
@@ -2232,21 +2249,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          if (!isConnected && messages.isEmpty)
-            Container(
-              color: Colors.orange.withValues(alpha: 0.2),
-              padding: const EdgeInsets.all(8),
-              child: const Row(
-                children: [
-                  Icon(Icons.warning, size: 16),
-                  SizedBox(width: 8),
-                  Text(
-                    'Connecting to relays...',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
           if (lastError != null)
             Container(
               color: Colors.red.withValues(alpha: 0.2),

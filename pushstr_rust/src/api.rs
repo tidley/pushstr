@@ -4,12 +4,11 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use flutter_rust_bridge::frb;
 use nostr_sdk::nips::nip04;
+use nostr_sdk::nips::nip19::{FromBech32, Nip19};
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use flate2::{write::GzEncoder, read::GzDecoder, Compression};
-use std::io::{Read, Write};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::future::Future;
@@ -66,7 +65,21 @@ const BLOSSOM_SERVER: &str = "https://blossom.primal.net";
 const BLOSSOM_UPLOAD_PATH: &str = "upload";
 
 fn parse_pubkey(input: &str) -> Result<PublicKey> {
-    PublicKey::from_bech32(input).or_else(|_| PublicKey::from_hex(input)).context("Invalid pubkey")
+    let trimmed = input.trim();
+    let normalized = trimmed
+        .strip_prefix("nostr://")
+        .or_else(|| trimmed.strip_prefix("nostr:"))
+        .unwrap_or(trimmed);
+    if normalized.starts_with("npub") || normalized.starts_with("nprofile") {
+        let nip19 = Nip19::from_bech32(normalized)?;
+        match nip19 {
+            Nip19::Pubkey(pubkey) => Ok(pubkey),
+            Nip19::Profile(profile) => Ok(profile.public_key),
+            _ => anyhow::bail!("Unsupported NIP-19 pubkey"),
+        }
+    } else {
+        PublicKey::from_hex(normalized).context("Invalid pubkey")
+    }
 }
 
 fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
@@ -701,7 +714,7 @@ pub fn unwrap_gift(gift_json: String, my_nsec: Option<String>) -> Result<String>
 /// Convert npub to hex pubkey
 #[frb(sync)]
 pub fn npub_to_hex(npub: String) -> Result<String> {
-    let pubkey = PublicKey::from_bech32(&npub)?;
+    let pubkey = parse_pubkey(&npub)?;
     Ok(pubkey.to_hex())
 }
 
@@ -1255,24 +1268,6 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
     }
 
     Ok(plaintext)
-}
-
-fn gzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(data)?;
-    let compressed = encoder.finish()?;
-    Ok(compressed)
-}
-
-fn gunzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
-    if data.len() > 2 && data[0] == 0x1f && data[1] == 0x8b {
-        let mut decoder = GzDecoder::new(data);
-        let mut out = Vec::new();
-        decoder.read_to_end(&mut out)?;
-        return Ok(out);
-    } else {
-        return Ok(data.to_vec());
-    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> Result<String> {

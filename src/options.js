@@ -343,7 +343,7 @@ function addContactFromForm() {
   }
   const normalized = normalizePubkeyInput(pubkey);
   if (!normalized) {
-    contactError.textContent = "Enter a valid npub or hex pubkey";
+    contactError.textContent = "Enter a valid npub, nprofile, or hex pubkey";
     return;
   }
   const exists = Array.from(contactsBody.querySelectorAll('input[type="hidden"]')).find((el) => el.value === normalized);
@@ -506,23 +506,31 @@ async function switchKey() {
 
 function toNpub(pk) {
   if (!pk) return "";
-  if (pk.startsWith("npub")) return pk;
+  const cleaned = stripNostrPrefix(pk);
+  if (cleaned.startsWith("npub")) return cleaned;
   try {
-    const decoded = nip19.decode(pk);
+    const decoded = nip19.decode(cleaned);
     if (decoded.type === "nprofile" && decoded.data?.pubkey) {
       return nip19.npubEncode(decoded.data.pubkey);
     }
     if (decoded.type === "npub" && typeof decoded.data === "string") {
-      return pk;
+      return cleaned;
     }
   } catch (_) {
     // fall through to encode attempt
   }
   try {
-    return nip19.npubEncode(pk);
+    return nip19.npubEncode(cleaned);
   } catch (_) {
     return pk;
   }
+}
+
+function stripNostrPrefix(value) {
+  if (!value) return value;
+  if (value.startsWith("nostr://")) return value.slice(8);
+  if (value.startsWith("nostr:")) return value.slice(6);
+  return value;
 }
 
 function shortKey(pk) {
@@ -674,9 +682,9 @@ function applyRelayStatus(dot, state) {
 }
 
 function normalizePubkeyInput(input) {
-  const trimmed = input.trim();
+  const trimmed = stripNostrPrefix(input.trim());
   if (!trimmed) return null;
-  if (/^npub/i.test(trimmed)) return toNpub(trimmed);
+  if (/^npub/i.test(trimmed) || /^nprofile/i.test(trimmed)) return toNpub(trimmed);
   if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return trimmed.toLowerCase();
   return null;
 }

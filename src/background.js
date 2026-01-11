@@ -55,12 +55,15 @@ const browser = makeBrowser();
 let pool;
 let sub;
 let CryptoWasm = WasmCrypto; // WASM crypto module
+const DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://relay.primal.net",
+  "wss://nos.lol",
+  "wss://nostr.mom",
+  "wss://relay.nostr.band"
+];
 let settings = {
-  relays: [
-    "wss://relay.damus.io",
-    "wss://relay.snort.social",
-    "wss://offchain.pub"
-  ],
+  relays: [...DEFAULT_RELAYS],
   recipients: [],
   recipientsByKey: {},
   messagesByKey: {},
@@ -238,9 +241,11 @@ async function handleMessage(msg) {
 async function loadSettings() {
   const stored = await browser.storage.local.get();
   const prevKeys = (settings.keys || []).length;
+  const prevRelays = Array.isArray(settings.relays) ? settings.relays : [];
   settings = { ...settings, ...stored };
   settings.useGiftwrap = true;
   settings.useNip44 = true;
+  settings.relays = mergeDefaultRelays(settings.relays);
   settings.recipientsByKey = settings.recipientsByKey || {};
   settings.messagesByKey = settings.messagesByKey || {};
   settings.recipients = normalizeRecipients(settings.recipients || []);
@@ -248,8 +253,22 @@ async function loadSettings() {
   settings.keys = settings.keys || [];
   if (settings.nsec) addKeyToList(settings.nsec);
   loadMessagesForCurrent(stored.messages || []);
-  if ((settings.keys || []).length !== prevKeys) await persistSettings();
+  const relaysChanged = JSON.stringify(settings.relays) !== JSON.stringify(prevRelays);
+  if ((settings.keys || []).length !== prevKeys || relaysChanged) await persistSettings();
   syncRecipientsForCurrent();
+}
+
+function mergeDefaultRelays(relays) {
+  if (!Array.isArray(relays) || relays.length === 0) return [...DEFAULT_RELAYS];
+  if (relays.length >= DEFAULT_RELAYS.length) return relays;
+  const merged = [...relays];
+  for (const relay of DEFAULT_RELAYS) {
+    if (!merged.includes(relay)) {
+      merged.push(relay);
+      if (merged.length >= DEFAULT_RELAYS.length) break;
+    }
+  }
+  return merged;
 }
 
 async function persistSettings() {
@@ -515,17 +534,20 @@ async function focusOrOpenChat() {
 
 function normalizePubkey(input) {
   if (!input) throw new Error("Missing pubkey");
+  let normalized = input.trim();
+  if (normalized.startsWith("nostr://")) normalized = normalized.slice(8);
+  else if (normalized.startsWith("nostr:")) normalized = normalized.slice(6);
   try {
-    const decoded = nt.nip19.decode(input);
+    const decoded = nt.nip19.decode(normalized);
     if (decoded.type === "npub" || decoded.type === "nprofile") {
       return decoded.data.pubkey || decoded.data;
     }
   } catch (_) {
     // fall through to raw hex handling
   }
-  const hex = input.trim();
+  const hex = normalized.trim();
   if (/^[0-9a-fA-F]{64}$/.test(hex)) return hex.toLowerCase();
-  throw new Error("Invalid recipient pubkey (expect hex or npub...)");
+  throw new Error("Invalid recipient pubkey (expect hex, npub, or nprofile)");
 }
 
 function normalizeRecipientEntry(entry) {
