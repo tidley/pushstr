@@ -1,7 +1,7 @@
 # Pushstr Functional Specification Document
 
 Version: 0.2
-Last updated: 2026-01-11
+Last updated: 2026-01-12
 Owner: Pushstr
 
 ## 1. Purpose
@@ -33,6 +33,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Generate a new Nostr keypair (nsec/npub).
 - Import an existing nsec.
 - Display the active npub and a QR code for sharing.
+- Browser extension popup can show a QR for the active npub.
 - Support multiple profiles (disposable or long-lived).
 - Store profile-specific settings (contacts, messages, DM mode overrides).
 
@@ -57,6 +58,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 
 ### 6.4 Attachments
 - Attach images, audio, video, or arbitrary files.
+- Record inline audio clips directly in the mobile composer.
 - Encrypt files for the recipient before upload.
 - Allow optional unencrypted uploads with a visible warning indicator.
 - Upload encrypted content to Blossom-compatible server.
@@ -67,6 +69,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Render local previews for newly sent/received media.
 - Allow download of attachments from the message list.
 - Warn users about large files (default recommended max 20MB).
+- Present attachment options in a grid picker with concise labels (e.g., Camera, Gallery, Video).
 
 ### 6.5 Relay Handling
 - Connect to default public relays for general messaging.

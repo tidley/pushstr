@@ -18,6 +18,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:workmanager/workmanager.dart';
@@ -211,6 +212,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _startingForeground = false;
   bool _appVisible = true;
   final ImagePicker _imagePicker = ImagePicker();
+  late final AudioRecorder _recorder;
   // StreamSubscription? _intentDataStreamSubscription;
   final Map<String, bool> _copiedMessages = {};
   final Map<String, Timer> _copiedMessageTimers = {};
@@ -230,6 +232,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _showScrollToBottom = false;
   bool _hasNewMessages = false;
   bool _encryptPendingAttachment = true;
+  bool _isRecordingAudio = false;
+  Timer? _recordingTimer;
+  int _recordingElapsed = 0;
 
   @override
   void initState() {
@@ -240,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _scrollToBottom(force: true);
       }
     });
+    _recorder = AudioRecorder();
     super.initState();
     _init();
     // TODO: Re-enable Android share support when API is stable
@@ -267,6 +273,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
     _messageFocus.dispose();
+    _recorder.dispose();
     for (final t in _copiedMessageTimers.values) {
       t.cancel();
     }
@@ -275,6 +282,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     _toastTimer?.cancel();
     _toastEntry?.remove();
+    _recordingTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     // _intentDataStreamSubscription?.cancel();
     super.dispose();
@@ -1984,6 +1992,172 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _showRecordAudioSheet() async {
+    if (selectedContact == null) {
+      _showThemedToast('Select a contact first', preferTop: true);
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          Future<void> startRecording() async {
+            final permitted = await _recorder.hasPermission();
+            if (!permitted) {
+              _showThemedToast('Microphone permission denied', preferTop: true);
+              return;
+            }
+            final dir = await getTemporaryDirectory();
+            final filename =
+                'pushstr_recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+            final path = '${dir.path}/$filename';
+            await _recorder.start(
+              const RecordConfig(
+                encoder: AudioEncoder.aacLc,
+                bitRate: 128000,
+                sampleRate: 44100,
+              ),
+              path: path,
+            );
+            _isRecordingAudio = true;
+            _recordingElapsed = 0;
+            _recordingTimer?.cancel();
+            _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+              _recordingElapsed += 1;
+              setModalState(() {});
+            });
+            setModalState(() {});
+          }
+
+          Future<void> stopRecording({required bool attach}) async {
+            final path = await _recorder.stop();
+            _recordingTimer?.cancel();
+            _isRecordingAudio = false;
+            _recordingElapsed = 0;
+            setModalState(() {});
+            if (path == null) return;
+            if (!attach) {
+              try {
+                final file = File(path);
+                if (await file.exists()) await file.delete();
+              } catch (_) {}
+              return;
+            }
+            final file = File(path);
+            if (!await file.exists()) return;
+            final bytes = await file.readAsBytes();
+            final name = file.path.split(Platform.pathSeparator).last;
+            final mime = lookupMimeType(name, headerBytes: bytes) ?? 'audio/mp4';
+            await _setPendingAttachment(
+              bytes: bytes,
+              name: name,
+              mime: mime,
+            );
+            try {
+              await file.delete();
+            } catch (_) {}
+          }
+
+          final recording = _isRecordingAudio;
+          final minutes = _recordingElapsed ~/ 60;
+          final seconds = _recordingElapsed % 60;
+          final timeLabel = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    recording ? 'Recording…' : 'Record audio',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    timeLabel,
+                    style: TextStyle(
+                      fontSize: 20,
+                      color: recording ? Colors.redAccent : Colors.white70,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      if (recording) {
+                        await stopRecording(attach: true);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } else {
+                        await startRecording();
+                      }
+                    },
+                    icon: Icon(recording ? Icons.stop : Icons.mic),
+                    label: Text(recording ? 'Stop & Attach' : 'Start'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: recording ? Colors.redAccent : Colors.greenAccent,
+                      foregroundColor: Colors.black,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      if (recording) {
+                        await stopRecording(attach: false);
+                      }
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (_isRecordingAudio) {
+      await _recorder.stop();
+      _recordingTimer?.cancel();
+      _isRecordingAudio = false;
+      _recordingElapsed = 0;
+    }
+  }
+
+  Widget _buildAttachOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.grey.shade900,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color ?? Colors.white70, size: 26),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _showAttachChooser() async {
     if (selectedContact == null) {
       _showThemedToast('Select a contact first', preferTop: true);
@@ -1996,59 +2170,75 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Take photo'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _attachImageFromCamera();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Pick image'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _attachImage();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam),
-              title: const Text('Record video'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _attachVideo(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_library),
-              title: const Text('Pick video'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _attachVideo(ImageSource.gallery);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.audiotrack),
-              title: const Text('Pick audio'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _attachAudio();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.insert_drive_file),
-              title: const Text('File'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _attachFile();
-              },
-            ),
-            const SizedBox(height: 4),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          child: GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.05,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildAttachOption(
+                icon: Icons.photo_camera,
+                label: 'Camera',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachImageFromCamera();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.photo_library,
+                label: 'Gallery',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachImage();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.videocam,
+                label: 'Video Cam',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachVideo(ImageSource.camera);
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.video_library,
+                label: 'Video',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachVideo(ImageSource.gallery);
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.mic,
+                label: 'Record',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showRecordAudioSheet();
+                },
+                color: Colors.redAccent,
+              ),
+              _buildAttachOption(
+                icon: Icons.audiotrack,
+                label: 'Audio',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachAudio();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.insert_drive_file,
+                label: 'File',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachFile();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
