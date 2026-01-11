@@ -306,14 +306,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
-    await _checkPrefsBackup();
     final prefs = await SharedPreferences.getInstance();
     final savedNsec = prefs.getString('nostr_nsec') ?? '';
     final profileIndex = prefs.getInt('selected_profile_index') ?? 0;
     _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
     _appVisible = true;
-    await _persistVisibleState();
-    await initLocalNotifications();
+    unawaited(_persistVisibleState());
+    unawaited(initLocalNotifications());
 
     // Handle shared content from Android intents
     _initShareListener();
@@ -349,41 +348,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     }
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_finishInit(savedNsec: savedNsec, profileIndex: profileIndex));
+    });
+  }
+
+  Future<void> _finishInit({
+    required String savedNsec,
+    required int profileIndex,
+  }) async {
+    unawaited(_checkPrefsBackup());
     try {
-      await _ensureRustInitialized();
-      final initedNpub = api.initNostr(nsec: savedNsec);
-      nsec = savedNsec.isNotEmpty ? savedNsec : api.getNsec();
-      if (mounted) {
-        setState(() {
-          npub = initedNpub;
-          isConnected = true;
-        });
-      }
-      // Load profile-specific stored data if present (fallback to shared above)
-      await _loadLocalProfileData(
-        profileIndex: profileIndex,
-        overrideLoaded: true,
+      final initResult = await _initRustClientInBackground(savedNsec);
+      if (!mounted) return;
+      nsec = initResult['nsec'];
+      setState(() {
+        npub = initResult['npub'];
+        isConnected = true;
+      });
+      unawaited(
+        _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true),
       );
       _ensureSelectedContact();
-      await _persistVisibleState();
+      unawaited(_persistVisibleState());
 
-      // Save nsec if it was generated
-      if (savedNsec.isEmpty) {
+      if (savedNsec.isEmpty && nsec != null && nsec!.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
         await prefs.setString('nostr_nsec', nsec!);
       }
 
-      // Fetch recent messages
-      _fetchMessages();
-      _startDmListener();
+      unawaited(_fetchMessages());
+      unawaited(_startDmListener());
       if (_foregroundEnabled && Platform.isAndroid) {
         unawaited(_startForegroundService());
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         lastError = 'Init failed: $e';
         isConnected = false;
       });
     }
+  }
+
+  Future<Map<String, String>> _initRustClientInBackground(
+    String savedNsec,
+  ) async {
+    return Isolate.run(() async {
+      try {
+        await RustLib.init();
+      } catch (_) {}
+      final npub = api.initNostr(nsec: savedNsec);
+      final nsec = savedNsec.isNotEmpty ? savedNsec : api.getNsec();
+      return {'npub': npub, 'nsec': nsec};
+    });
   }
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
@@ -769,15 +787,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final lastSeen = (nsec != null && nsec!.isNotEmpty)
           ? (prefs.getInt(_lastSeenKeyFor(nsec!)) ?? 0)
           : 0;
-      final dmsJson = api.fetchRecentDms(
-        limit: BigInt.from(100),
-        sinceTimestamp: BigInt.from(lastSeen),
+      final dmsJson = await RustSyncWorker.fetchRecentDms(
+        nsec: nsec ?? '',
+        limit: 100,
+        sinceTimestamp: lastSeen,
       );
-      final List<dynamic> dmsList = jsonDecode(dmsJson);
-      var fetchedMessages = dmsList.cast<Map<String, dynamic>>();
-      fetchedMessages = await _decodeMessages(fetchedMessages);
-      debugPrint('[dm] Fetch received ${fetchedMessages.length} messages');
-      _updateDmModesFromMessages(fetchedMessages);
+      List<Map<String, dynamic>> fetchedMessages = [];
+      if (dmsJson == null || dmsJson.isEmpty) {
+        debugPrint('[dm] Fetch received 0 messages');
+      } else {
+        final List<dynamic> dmsList = jsonDecode(dmsJson);
+        fetchedMessages = dmsList.cast<Map<String, dynamic>>();
+        fetchedMessages = await _decodeMessages(fetchedMessages);
+        debugPrint('[dm] Fetch received ${fetchedMessages.length} messages');
+        _updateDmModesFromMessages(fetchedMessages);
+      }
 
       // Merge any pending background-cached messages
       try {
