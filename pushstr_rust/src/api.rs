@@ -161,7 +161,7 @@ struct Nip44MessageKeys {
 }
 
 fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> Result<[u8; 32]> {
-    let mut mac = HmacSha256::new_from_slice(key)
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
         .map_err(|e| anyhow::anyhow!("HMAC init failed: {}", e))?;
     for part in parts {
         mac.update(part);
