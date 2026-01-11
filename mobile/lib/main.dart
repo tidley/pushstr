@@ -46,7 +46,11 @@ class _HoldDeleteIcon extends StatelessWidget {
     final eased = Curves.easeIn.transform(clamped);
     final pulse = 0.5 + 0.5 * math.sin(math.pi * (1 + clamped * 4) * clamped);
     final intensity = (0.25 + 0.75 * pulse) * eased;
-    final color = Color.lerp(Colors.white, Colors.redAccent.shade200, intensity.clamp(0, 1))!;
+    final color = Color.lerp(
+      Colors.white,
+      Colors.redAccent.shade200,
+      intensity.clamp(0, 1),
+    )!;
     final scale = active ? (1.0 + 0.12 * eased) : 1.0;
     final iconSize = 24.0 + 4.0 * eased;
     return GestureDetector(
@@ -61,7 +65,9 @@ class _HoldDeleteIcon extends StatelessWidget {
           onPressed: null,
           style: IconButton.styleFrom(
             backgroundColor: Colors.transparent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
             visualDensity: const VisualDensity(horizontal: 0, vertical: -1),
           ),
         ),
@@ -158,9 +164,7 @@ class PushstrApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Pushstr Mobile',
-      theme: ThemeData.dark(
-        useMaterial3: true,
-      ).copyWith(
+      theme: ThemeData.dark(useMaterial3: true).copyWith(
         colorScheme: const ColorScheme.dark(primary: Color(0xFF22C55E)),
       ),
       home: const HomeScreen(),
@@ -177,7 +181,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const MethodChannel _shareChannel = MethodChannel('com.pushstr.share');
-  static const MethodChannel _storageChannel = MethodChannel('com.pushstr.storage');
+  static const MethodChannel _storageChannel = MethodChannel(
+    'com.pushstr.storage',
+  );
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -323,13 +329,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         isConnected = false;
         messages = loadedMessages;
-        contacts = _dedupeContacts(savedContacts
-            .map((c) {
-              final parts = c.split('|');
-              return <String, dynamic>{'nickname': parts[0], 'pubkey': parts.length > 1 ? parts[1] : ''};
-            })
-            .where((c) => c['pubkey']!.isNotEmpty)
-            .toList());
+        contacts = _dedupeContacts(
+          savedContacts
+              .map((c) {
+                final parts = c.split('|');
+                return <String, dynamic>{
+                  'nickname': parts[0],
+                  'pubkey': parts.length > 1 ? parts[1] : '',
+                };
+              })
+              .where((c) => c['pubkey']!.isNotEmpty)
+              .toList(),
+        );
         _sortContactsByActivity();
       });
     }
@@ -345,7 +356,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
       // Load profile-specific stored data if present (fallback to shared above)
-      await _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true);
+      await _loadLocalProfileData(
+        profileIndex: profileIndex,
+        overrideLoaded: true,
+      );
       _ensureSelectedContact();
       await _persistVisibleState();
 
@@ -374,7 +388,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
   String _dmModesKeyFor(String profileNsec) => 'dm_modes_$profileNsec';
   String _dmOverridesKeyFor(String profileNsec) => 'dm_overrides_$profileNsec';
-  String _dmGiftwrapKeyFor(String profileNsec) => 'dm_giftwrap_formats_$profileNsec';
+  String _dmGiftwrapKeyFor(String profileNsec) =>
+      'dm_giftwrap_formats_$profileNsec';
 
   Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
     final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
@@ -410,7 +425,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  List<Map<String, dynamic>> _messagesForStorage(List<Map<String, dynamic>> source) {
+  List<Map<String, dynamic>> _messagesForStorage(
+    List<Map<String, dynamic>> source,
+  ) {
     return source.map((message) {
       final cloned = Map<String, dynamic>.from(message);
       final media = cloned['media'];
@@ -425,9 +442,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (encryption == 'aes-gcm') {
             mediaCopy['needsDecryption'] = true;
             mediaCopy['senderPubkey'] ??= cloned['from']?.toString() ?? '';
-            mediaCopy['cacheKey'] ??= (descriptor is Map && descriptor['cipher_sha256'] != null)
+            mediaCopy['cacheKey'] ??=
+                (descriptor is Map && descriptor['cipher_sha256'] != null)
                 ? descriptor['cipher_sha256'].toString()
-                : (descriptor is Map ? descriptor['url']?.toString() : mediaCopy['url']?.toString()) ?? '';
+                : (descriptor is Map
+                          ? descriptor['url']?.toString()
+                          : mediaCopy['url']?.toString()) ??
+                      '';
           }
           if (descriptor is Map && descriptor['url'] != null) {
             mediaCopy['url'] ??= descriptor['url'];
@@ -448,7 +469,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Large attachment'),
-        content: Text('This file is ${sizeMb}MB. Larger files may fail or be slow. Recommended max is ${maxMb}MB.'),
+        content: Text(
+          'This file is ${sizeMb}MB. Larger files may fail or be slow. Recommended max is ${maxMb}MB.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -470,7 +493,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final key = nsec != null ? _contactsKeyFor(nsec!) : 'contacts';
       await prefs.setStringList(
         key,
-        contacts.map((c) => '${c['nickname'] ?? ''}|${c['pubkey'] ?? ''}').toList(),
+        contacts
+            .map((c) => '${c['nickname'] ?? ''}|${c['pubkey'] ?? ''}')
+            .toList(),
       );
       if (nsec != null) {
         await prefs.remove('contacts');
@@ -503,7 +528,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _saveGiftwrapFormats() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = nsec != null ? _dmGiftwrapKeyFor(nsec!) : 'dm_giftwrap_formats';
+      final key = nsec != null
+          ? _dmGiftwrapKeyFor(nsec!)
+          : 'dm_giftwrap_formats';
       await prefs.setString(key, jsonEncode(_giftwrapFormats));
     } catch (e) {
       print('Failed to save DM giftwrap formats: $e');
@@ -596,14 +623,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final dmKind = message['dm_kind']?.toString();
     final kind = _messageKind(message);
     final isNip04 = dmKind == 'nip04' || kind == 4;
-    final isGiftwrap = dmKind == 'nip59' || dmKind == 'legacy_giftwrap' || kind == 1059;
+    final isGiftwrap =
+        dmKind == 'nip59' || dmKind == 'legacy_giftwrap' || kind == 1059;
     if (!isNip04 && !isGiftwrap) return null;
+    final iconData = isGiftwrap ? Icons.visibility_off : Icons.visibility;
     final color = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
     final label = isGiftwrap ? '17' : '04';
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.visibility_off, size: 12, color: color),
+        Icon(iconData, size: 12, color: color),
         const SizedBox(width: 4),
         Text(label, style: TextStyle(fontSize: 11, color: color)),
       ],
@@ -616,7 +645,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final enabled = target.isNotEmpty;
     final mode = enabled ? _effectiveDmMode(target) : 'nip59';
     final isGiftwrap = mode != 'nip04';
-    final activeColor = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final iconData = isGiftwrap ? Icons.visibility_off : Icons.visibility;
+
+    final activeColor = isGiftwrap
+        ? const Color(0xFF22C55E)
+        : Colors.grey.shade500;
     final color = enabled ? activeColor : Colors.grey.shade600;
     final label = enabled ? (isGiftwrap ? '17' : '04') : '17';
     final tooltip = enabled
@@ -646,7 +679,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.visibility_off, size: 18, color: color),
+              Icon(iconData, size: 18, color: color),
               const SizedBox(width: 4),
               Text(label, style: TextStyle(fontSize: 11, color: color)),
             ],
@@ -659,7 +692,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _checkPrefsBackup() async {
     if (!Platform.isAndroid) return;
     try {
-      final info = await _storageChannel.invokeMethod<Map>('getPrefsBackupInfo');
+      final info = await _storageChannel.invokeMethod<Map>(
+        'getPrefsBackupInfo',
+      );
       if (info == null || info['exists'] != true || !mounted) return;
       final size = (info['size'] as int?) ?? 0;
       final sizeMb = (size / (1024 * 1024)).toStringAsFixed(1);
@@ -685,9 +720,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       );
       if (shouldExport == true) {
-        final uri = await _storageChannel.invokeMethod<String>('exportPrefsBackup', {
-          'name': 'pushstr_prefs_backup.xml',
-        });
+        final uri = await _storageChannel.invokeMethod<String>(
+          'exportPrefsBackup',
+          {'name': 'pushstr_prefs_backup.xml'},
+        );
         if (uri != null) {
           _showThemedToast('Backup exported', preferTop: true);
         } else {
@@ -777,10 +813,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       // Merge fetched messages with local messages (keep local messages that aren't in fetched)
-      final fetchedIds = fetchedMessages.map((m) => m['id'] as String?).where((id) => id != null).toSet();
+      final fetchedIds = fetchedMessages
+          .map((m) => m['id'] as String?)
+          .where((id) => id != null)
+          .toSet();
       final localOnly = messages.where((m) {
         final id = m['id'] as String?;
-        return id != null && id.startsWith('local_') && !fetchedIds.contains(id);
+        return id != null &&
+            id.startsWith('local_') &&
+            !fetchedIds.contains(id);
       }).toList();
 
       final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
@@ -822,8 +863,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _sendMessage() async {
     final text = messageCtrl.text.trim();
-    print('[dm] _sendMessage called textLen=${text.length} pending=${_pendingAttachment != null}');
-    if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null) return;
+    print(
+      '[dm] _sendMessage called textLen=${text.length} pending=${_pendingAttachment != null}',
+    );
+    if ((text.isEmpty && _pendingAttachment == null) || selectedContact == null)
+      return;
     if (nsec == null || nsec!.isEmpty) {
       setState(() {
         lastError = 'Missing profile key; please re-import or pick a profile.';
@@ -854,9 +898,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'encryption': desc.encryption,
           'filename': desc.filename,
         };
-        payload = jsonEncode({
-          'media': descriptor
-        });
+        payload = jsonEncode({'media': descriptor});
         // Use the original picked bytes for local preview (matches browser extension behavior).
         localMedia = {
           'bytes': attachment.bytes,
@@ -865,7 +907,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'filename': attachment.name,
           'descriptor': descriptor,
           'senderPubkey': npub ?? '',
-          'cacheKey': desc.cipherSha256.isNotEmpty ? desc.cipherSha256 : desc.url,
+          'cacheKey': desc.cipherSha256.isNotEmpty
+              ? desc.cipherSha256
+              : desc.url,
           'url': desc.url,
         };
         localText = '(attachment)';
@@ -874,8 +918,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final dmMode = _effectiveDmMode(selectedContact!);
       final useLegacyDm = dmMode == 'nip04';
       final useLegacyGiftwrap = dmMode == 'legacy_giftwrap';
-      final modeLabel = useLegacyDm ? 'nip04' : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59');
-      print('[dm] send mode=$modeLabel to=${selectedContact!.substring(0, 8)} textLen=${text.length}');
+      final modeLabel = useLegacyDm
+          ? 'nip04'
+          : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59');
+      print(
+        '[dm] send mode=$modeLabel to=${selectedContact!.substring(0, 8)} textLen=${text.length}',
+      );
 
       // Add to local messages immediately before the send call to avoid UI delays.
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
@@ -893,7 +941,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
           'direction': 'out',
           'kind': useLegacyDm ? 4 : 1059,
-          'dm_kind': useLegacyDm ? 'nip04' : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59'),
+          'dm_kind': useLegacyDm
+              ? 'nip04'
+              : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59'),
         });
         messageCtrl.clear();
         _pendingAttachment = null;
@@ -904,35 +954,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       // Persist and fire off the send in the background; we optimistically assume success.
       unawaited(_saveMessages());
-      unawaited(Future(() async {
-        try {
-          if (useLegacyDm) {
-            await RustSyncWorker.sendLegacyDm(
-              recipient: selectedContact!,
-              message: payload,
-              nsec: nsec!,
-            );
-          } else if (useLegacyGiftwrap) {
-            await RustSyncWorker.sendLegacyGiftDm(
-              recipient: selectedContact!,
-              message: payload,
-              nsec: nsec!,
-            );
-          } else {
-            await RustSyncWorker.sendGiftDm(
-              recipient: selectedContact!,
-              content: payload,
-              nsec: nsec!,
-              useNip44: true,
-            );
+      unawaited(
+        Future(() async {
+          try {
+            if (useLegacyDm) {
+              await RustSyncWorker.sendLegacyDm(
+                recipient: selectedContact!,
+                message: payload,
+                nsec: nsec!,
+              );
+            } else if (useLegacyGiftwrap) {
+              await RustSyncWorker.sendLegacyGiftDm(
+                recipient: selectedContact!,
+                message: payload,
+                nsec: nsec!,
+              );
+            } else {
+              await RustSyncWorker.sendGiftDm(
+                recipient: selectedContact!,
+                content: payload,
+                nsec: nsec!,
+                useNip44: true,
+              );
+            }
+          } catch (e) {
+            if (!mounted) return;
+            setState(() {
+              lastError = 'Send failed: $e';
+            });
           }
-        } catch (e) {
-          if (!mounted) return;
-          setState(() {
-            lastError = 'Send failed: $e';
-          });
-        }
-      }));
+        }),
+      );
     } catch (e) {
       setState(() {
         lastError = 'Send failed: $e';
@@ -958,7 +1010,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 8),
             TextField(
               controller: pubkeyCtrl,
-              decoration: const InputDecoration(labelText: 'npub or hex pubkey'),
+              decoration: const InputDecoration(
+                labelText: 'npub or hex pubkey',
+              ),
             ),
           ],
         ),
@@ -998,7 +1052,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }
 
               setState(() {
-                contacts.add(<String, dynamic>{'nickname': nickname, 'pubkey': pubkey});
+                contacts.add(<String, dynamic>{
+                  'nickname': nickname,
+                  'pubkey': pubkey,
+                });
                 contacts = _dedupeContacts(contacts);
                 _sortContactsByActivity();
                 selectedContact = pubkey;
@@ -1015,8 +1072,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _editContact(BuildContext context, Map<String, dynamic> contact) async {
-    final nicknameCtrl = TextEditingController(text: contact['nickname']?.toString() ?? _short(contact['pubkey'] ?? ''));
+  Future<void> _editContact(
+    BuildContext context,
+    Map<String, dynamic> contact,
+  ) async {
+    final nicknameCtrl = TextEditingController(
+      text: contact['nickname']?.toString() ?? _short(contact['pubkey'] ?? ''),
+    );
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1026,8 +1088,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           decoration: const InputDecoration(labelText: 'Nickname'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
@@ -1036,7 +1104,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       for (final c in contacts) {
         if (c['pubkey'] == contact['pubkey']) {
-          c['nickname'] = updatedNick.isEmpty ? _short(c['pubkey'] ?? '') : updatedNick;
+          c['nickname'] = updatedNick.isEmpty
+              ? _short(c['pubkey'] ?? '')
+              : updatedNick;
           break;
         }
       }
@@ -1084,7 +1154,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             const Text('Pubkey'),
             const SizedBox(height: 4),
-            SelectableText(displayNpub ?? input, style: const TextStyle(fontSize: 12)),
+            SelectableText(
+              displayNpub ?? input,
+              style: const TextStyle(fontSize: 12),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: nicknameCtrl,
@@ -1125,7 +1198,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final granted = await _ensureCameraPermission();
     if (!granted) {
       if (mounted) {
-        _showThemedToast('Camera permission required to scan QR', preferTop: true);
+        _showThemedToast(
+          'Camera permission required to scan QR',
+          preferTop: true,
+        );
       }
       return null;
     }
@@ -1217,13 +1293,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _ensureSelectedContact() {
-    if (selectedContact != null && contacts.any((c) => c['pubkey'] == selectedContact)) {
+    if (selectedContact != null &&
+        contacts.any((c) => c['pubkey'] == selectedContact)) {
       return;
     }
     String? best;
     int bestTs = -1;
     for (final m in messages) {
-      final contact = m['direction'] == 'out' ? (m['to'] as String?) : (m['from'] as String?);
+      final contact = m['direction'] == 'out'
+          ? (m['to'] as String?)
+          : (m['from'] as String?);
       if (contact == null || contact.isEmpty) continue;
       if (!contacts.any((c) => c['pubkey'] == contact)) continue;
       final ts = m['created_at'] is int ? m['created_at'] as int : 0;
@@ -1245,7 +1324,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (pubkey == null || pubkey.isEmpty) return -1;
     var ts = -1;
     for (final m in messages) {
-      final contact = m['direction'] == 'out' ? (m['to'] as String?) : (m['from'] as String?);
+      final contact = m['direction'] == 'out'
+          ? (m['to'] as String?)
+          : (m['from'] as String?);
       if (contact != pubkey) continue;
       final created = m['created_at'];
       if (created is int && created > ts) {
@@ -1274,7 +1355,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return deduped;
   }
 
-  Future<void> _loadLocalProfileData({required int profileIndex, bool overrideLoaded = false}) async {
+  Future<void> _loadLocalProfileData({
+    required int profileIndex,
+    bool overrideLoaded = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final profileList = prefs.getStringList('profiles') ?? [];
     String? profileNsec;
@@ -1284,14 +1368,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } else {
       profileNsec = nsec;
     }
-    final contactsKey = profileNsec != null && profileNsec.isNotEmpty ? _contactsKeyFor(profileNsec) : 'contacts';
-    final messagesKey = profileNsec != null && profileNsec.isNotEmpty ? _messagesKeyFor(profileNsec) : 'messages';
+    final contactsKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _contactsKeyFor(profileNsec)
+        : 'contacts';
+    final messagesKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _messagesKeyFor(profileNsec)
+        : 'messages';
     final pendingKey = profileNsec != null && profileNsec.isNotEmpty
         ? _pendingDmsKeyFor(profileNsec)
         : 'pending_dms';
-    final dmModesKey = profileNsec != null && profileNsec.isNotEmpty ? _dmModesKeyFor(profileNsec) : 'dm_modes';
-    final dmOverridesKey =
-        profileNsec != null && profileNsec.isNotEmpty ? _dmOverridesKeyFor(profileNsec) : 'dm_overrides';
+    final dmModesKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _dmModesKeyFor(profileNsec)
+        : 'dm_modes';
+    final dmOverridesKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _dmOverridesKeyFor(profileNsec)
+        : 'dm_overrides';
     final dmGiftwrapKey = profileNsec != null && profileNsec.isNotEmpty
         ? _dmGiftwrapKeyFor(profileNsec)
         : 'dm_giftwrap_formats';
@@ -1328,7 +1419,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         final decoded = jsonDecode(dmModesJson);
         if (decoded is Map) {
-          _dmModes.addAll(decoded.map((key, value) => MapEntry(key.toString(), value.toString())));
+          _dmModes.addAll(
+            decoded.map(
+              (key, value) => MapEntry(key.toString(), value.toString()),
+            ),
+          );
         }
       } catch (_) {
         // ignore dm mode parse errors
@@ -1339,7 +1434,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         final decoded = jsonDecode(dmOverridesJson);
         if (decoded is Map) {
-          _dmOverrides.addAll(decoded.map((key, value) => MapEntry(key.toString(), value.toString())));
+          _dmOverrides.addAll(
+            decoded.map(
+              (key, value) => MapEntry(key.toString(), value.toString()),
+            ),
+          );
         }
       } catch (_) {
         // ignore dm override parse errors
@@ -1350,7 +1449,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         final decoded = jsonDecode(dmGiftwrapJson);
         if (decoded is Map) {
-          _giftwrapFormats.addAll(decoded.map((key, value) => MapEntry(key.toString(), value.toString())));
+          _giftwrapFormats.addAll(
+            decoded.map(
+              (key, value) => MapEntry(key.toString(), value.toString()),
+            ),
+          );
         }
       } catch (_) {
         // ignore giftwrap format parse errors
@@ -1360,7 +1463,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final loadedContacts = savedContacts
         .map((c) {
           final parts = c.split('|');
-          return <String, dynamic>{'nickname': parts[0], 'pubkey': parts.length > 1 ? parts[1] : ''};
+          return <String, dynamic>{
+            'nickname': parts[0],
+            'pubkey': parts.length > 1 ? parts[1] : '',
+          };
         })
         .where((c) => c['pubkey']!.isNotEmpty)
         .toList();
@@ -1380,7 +1486,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await prefs.remove(pendingKey);
   }
 
-  List<Map<String, dynamic>> _mergeMessages(List<Map<String, dynamic>> incoming) {
+  List<Map<String, dynamic>> _mergeMessages(
+    List<Map<String, dynamic>> incoming,
+  ) {
     final existingIds = <String>{};
     final merged = <Map<String, dynamic>>[];
     for (final m in messages) {
@@ -1398,11 +1506,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       merged.add(m);
     }
-    merged.sort((a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0));
+    merged.sort(
+      (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
+    );
     return merged;
   }
 
-  Future<List<Map<String, dynamic>>> _decodeMessages(List<Map<String, dynamic>> msgs) async {
+  Future<List<Map<String, dynamic>>> _decodeMessages(
+    List<Map<String, dynamic>> msgs,
+  ) async {
     final decoded = <Map<String, dynamic>>[];
     for (final m in msgs) {
       final content = m['content']?.toString() ?? '';
@@ -1418,9 +1530,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return decoded;
   }
 
-  Future<Map<String, dynamic>> _decodeContent(String raw, String senderPubkey, String? messageId) async {
+  Future<Map<String, dynamic>> _decodeContent(
+    String raw,
+    String senderPubkey,
+    String? messageId,
+  ) async {
     // Check if content is valid JSON before trying to parse it
-    if (!raw.trim().startsWith('{') && !raw.trim().startsWith('[')) {
+    if (!raw.trim().startsWith('{')) {
       // Plain text message, not a media descriptor
       return {'text': raw, 'media': null};
     }
@@ -1429,9 +1545,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final parsed = jsonDecode(raw);
       if (parsed is Map && parsed['media'] != null) {
         final media = Map<String, dynamic>.from(parsed['media'] as Map);
-        final cacheKey = (media['cipher_sha256'] as String?) ?? (media['url'] as String?) ?? '';
+        final cacheKey =
+            (media['cipher_sha256'] as String?) ??
+            (media['url'] as String?) ??
+            '';
 
-        final isEncrypted = (media['encryption'] == 'aes-gcm' && (media['iv'] ?? '').toString().isNotEmpty);
+        final isEncrypted =
+            (media['encryption'] == 'aes-gcm' &&
+            (media['iv'] ?? '').toString().isNotEmpty);
 
         // Non-encrypted link/media descriptor: show as downloadable attachment without decrypting
         if (!isEncrypted) {
@@ -1448,7 +1569,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'filename': filename,
               'url': url,
               'nonEncrypted': true,
-            }
+            },
           };
         }
 
@@ -1466,12 +1587,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'sha256': media['sha256'] as String?,
               'filename': filename,
               'cached': true,
-            }
+            },
           };
         }
 
         // Check if this is an old message (not from current session)
-        final isOldMessage = messageId != null && !_sessionMessages.contains(messageId);
+        final isOldMessage =
+            messageId != null && !_sessionMessages.contains(messageId);
 
         if (isOldMessage) {
           // Return placeholder for old messages - will show decrypt button
@@ -1489,7 +1611,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'descriptor': media,
               'senderPubkey': senderPubkey,
               'cacheKey': cacheKey,
-            }
+            },
           };
         }
 
@@ -1500,7 +1622,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             descriptorJson: descriptorJson,
             senderPubkey: senderPubkey,
             myNsec: nsec,
-          )
+          ),
         );
 
         // Cache the decrypted bytes
@@ -1516,7 +1638,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             'size': media['size'] as int?,
             'sha256': media['sha256'] as String?,
             'filename': filename,
-          }
+          },
         };
       }
     } catch (e) {
@@ -1574,8 +1696,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final bytes = file.bytes;
       if (bytes == null) return;
       final name = file.name;
-      final mime = lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
-      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+      final mime =
+          lookupMimeType(name, headerBytes: bytes) ??
+          'application/octet-stream';
+      await _setPendingAttachment(
+        bytes: bytes,
+        name: name,
+        mime: mime,
+        confirm: false,
+      );
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1616,7 +1745,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final bytes = await picked.readAsBytes();
       final name = picked.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
-      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+      await _setPendingAttachment(
+        bytes: bytes,
+        name: name,
+        mime: mime,
+        confirm: false,
+      );
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1640,7 +1774,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final bytes = await picked.readAsBytes();
       final name = picked.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'image/*';
-      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+      await _setPendingAttachment(
+        bytes: bytes,
+        name: name,
+        mime: mime,
+        confirm: false,
+      );
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1659,7 +1798,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final bytes = await picked.readAsBytes();
       final name = picked.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'video/*';
-      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+      await _setPendingAttachment(
+        bytes: bytes,
+        name: name,
+        mime: mime,
+        confirm: false,
+      );
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1683,7 +1827,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (bytes == null) return;
       final name = file.name;
       final mime = lookupMimeType(name, headerBytes: bytes) ?? 'audio/*';
-      await _setPendingAttachment(bytes: bytes, name: name, mime: mime, confirm: false);
+      await _setPendingAttachment(
+        bytes: bytes,
+        name: name,
+        mime: mime,
+        confirm: false,
+      );
     } catch (e) {
       _showThemedToast('Attach failed: $e', preferTop: true);
     }
@@ -1778,7 +1927,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _didInitRust = true;
     } catch (e) {
       // flutter_rust_bridge throws on double-init; if that's the case, continue.
-      if (!e.toString().contains('Should not initialize flutter_rust_bridge twice')) {
+      if (!e.toString().contains(
+        'Should not initialize flutter_rust_bridge twice',
+      )) {
         rethrow;
       }
       _didInitRust = true;
@@ -1872,7 +2023,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.1),
               ),
               child: SafeArea(
                 bottom: false,
@@ -1884,7 +2037,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('Pushstr', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Text(
+                            'Pushstr',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           if (npub != null)
                             Text(
@@ -1898,7 +2057,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       icon: const Icon(Icons.qr_code_2, size: 32),
                       tooltip: 'Show my npub QR',
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(width: 52, height: 52),
+                      constraints: const BoxConstraints.tightFor(
+                        width: 52,
+                        height: 52,
+                      ),
                       onPressed: _showMyNpubQr,
                     ),
                   ],
@@ -1922,22 +2084,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 onDismissed: (_) async {
                   setState(() {
-                    contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
+                    contacts.removeWhere(
+                      (c) => c['pubkey'] == contact['pubkey'],
+                    );
                     if (selectedContact == contact['pubkey']) {
-                      selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
+                      selectedContact = contacts.isNotEmpty
+                          ? contacts.first['pubkey']
+                          : null;
                     }
                   });
                   _persistVisibleState();
                   await _saveContacts();
                 },
                 child: ListTile(
-                  title: Text(
-                    () {
-                      final nickname = (contact['nickname'] ?? '').toString().trim();
-                      return nickname.isNotEmpty ? nickname : _short(contact['pubkey'] ?? '');
-                    }(),
+                  title: Text(() {
+                    final nickname = (contact['nickname'] ?? '')
+                        .toString()
+                        .trim();
+                    return nickname.isNotEmpty
+                        ? nickname
+                        : _short(contact['pubkey'] ?? '');
+                  }()),
+                  subtitle: Text(
+                    _short(contact['pubkey'] ?? ''),
+                    style: const TextStyle(fontSize: 11),
                   ),
-                  subtitle: Text(_short(contact['pubkey'] ?? ''), style: const TextStyle(fontSize: 11)),
                   selected: selectedContact == contact['pubkey'],
                   onTap: () {
                     setState(() => selectedContact = contact['pubkey']);
@@ -1953,27 +2124,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         onPressed: () => _editContact(context, contact),
                       ),
                       _HoldDeleteIcon(
-                        active: _holdActiveHome['delete_contact_${contact['pubkey']}'] ?? false,
-                        progress: _holdProgressHomeFor('delete_contact_${contact['pubkey']}'),
-                        onTap: () => _showHoldWarningHome('Hold 5s to delete contact'),
+                        active:
+                            _holdActiveHome['delete_contact_${contact['pubkey']}'] ??
+                            false,
+                        progress: _holdProgressHomeFor(
+                          'delete_contact_${contact['pubkey']}',
+                        ),
+                        onTap: () =>
+                            _showHoldWarningHome('Hold 5s to delete contact'),
                         onHoldStart: () {
                           _startHoldActionHome(
                             'delete_contact_${contact['pubkey']}',
                             () async {
-                            setState(() {
-                              contacts.removeWhere((c) => c['pubkey'] == contact['pubkey']);
-                              if (selectedContact == contact['pubkey']) {
-                                selectedContact = contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-                              }
-                            });
+                              setState(() {
+                                contacts.removeWhere(
+                                  (c) => c['pubkey'] == contact['pubkey'],
+                                );
+                                if (selectedContact == contact['pubkey']) {
+                                  selectedContact = contacts.isNotEmpty
+                                      ? contacts.first['pubkey']
+                                      : null;
+                                }
+                              });
                               _persistVisibleState();
-                            await _saveContacts();
-                            _cancelHoldActionHome('delete_contact_${contact['pubkey']}');
+                              await _saveContacts();
+                              _cancelHoldActionHome(
+                                'delete_contact_${contact['pubkey']}',
+                              );
                             },
                             countdownLabel: 'delete contact',
                           );
                         },
-                        onHoldEnd: () => _cancelHoldActionHome('delete_contact_${contact['pubkey']}'),
+                        onHoldEnd: () => _cancelHoldActionHome(
+                          'delete_contact_${contact['pubkey']}',
+                        ),
                       ),
                     ],
                   ),
@@ -2017,7 +2201,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Icon(Icons.warning, size: 16),
                   SizedBox(width: 8),
-                  Text('Connecting to relays...', style: TextStyle(fontSize: 12)),
+                  Text(
+                    'Connecting to relays...',
+                    style: TextStyle(fontSize: 12),
+                  ),
                 ],
               ),
             ),
@@ -2029,7 +2216,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Icon(Icons.error, size: 16),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(lastError!, style: const TextStyle(fontSize: 12))),
+                  Expanded(
+                    child: Text(
+                      lastError!,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2045,12 +2237,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return const Center(child: Text('Select a contact to start messaging'));
     }
 
-    final convo = messages
-        .where((m) =>
-            (m['direction'] == 'out' && m['to'] == selectedContact) ||
-            (m['direction'] == 'in' && m['from'] == selectedContact))
-        .toList()
-      ..sort((a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0));
+    final convo =
+        messages
+            .where(
+              (m) =>
+                  (m['direction'] == 'out' && m['to'] == selectedContact) ||
+                  (m['direction'] == 'in' && m['from'] == selectedContact),
+            )
+            .toList()
+          ..sort(
+            (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
+          );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -2064,7 +2261,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       itemCount: convo.length,
       itemBuilder: (context, idx) {
         final m = convo[idx];
-        final align = m['direction'] == 'out' ? Alignment.centerRight : Alignment.centerLeft;
+        final align = m['direction'] == 'out'
+            ? Alignment.centerRight
+            : Alignment.centerLeft;
         final isOut = m['direction'] == 'out';
         final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
         final blossomUrl = _extractBlossomUrl(m['content']);
@@ -2075,9 +2274,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   IconButton(
                     icon: Icon(
-                      _copiedMessages[_messageCopyKey(m)] == true ? Icons.check_circle : Icons.copy,
+                      _copiedMessages[_messageCopyKey(m)] == true
+                          ? Icons.check_circle
+                          : Icons.copy,
                       size: 18,
-                      color: _copiedMessages[_messageCopyKey(m)] == true ? Colors.greenAccent : null,
+                      color: _copiedMessages[_messageCopyKey(m)] == true
+                          ? Colors.greenAccent
+                          : null,
                     ),
                     tooltip: 'Copy message',
                     onPressed: () {
@@ -2099,7 +2302,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             : null;
 
         return Column(
-          crossAxisAlignment: isOut ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isOut
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           children: [
             Align(
               alignment: align,
@@ -2109,21 +2314,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Container(
                     margin: const EdgeInsets.only(bottom: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.7,
+                    ),
                     decoration: BoxDecoration(
                       color: color,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: _buildMessageContent(
-                      m,
-                      isOut: isOut,
-                    ),
+                    child: _buildMessageContent(m, isOut: isOut),
                   ),
-                  if (actions != null) ...[
-                    const SizedBox(width: 6),
-                    actions,
-                  ],
+                  if (actions != null) ...[const SizedBox(width: 6), actions],
                 ],
               ),
             ),
@@ -2134,15 +2338,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Text(
                     _friendlyTime(m['created_at']),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade500,
-                    ),
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                   ),
-                  if (dmBadge != null) ...[
-                    const SizedBox(width: 6),
-                    dmBadge,
-                  ],
+                  if (dmBadge != null) ...[const SizedBox(width: 6), dmBadge],
                 ],
               ),
             ),
@@ -2154,23 +2352,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildSendToDropdown({bool inAppBar = false}) {
     final showDetails = !inAppBar;
-    final contactItems = contacts
-        .map(
-          (c) {
-            final nickname = c['nickname'] ?? '';
-            final pubkey = c['pubkey'] ?? '';
-            final primary = _short(pubkey);
-            final label = nickname.trim().isNotEmpty ? '$primary · $nickname' : primary;
+    final contactItems = contacts.map((c) {
+      final nickname = c['nickname'] ?? '';
+      final pubkey = c['pubkey'] ?? '';
+      final primary = _short(pubkey);
+      final label = nickname.trim().isNotEmpty
+          ? '$primary · $nickname'
+          : primary;
 
-            return DropdownMenuItem<String>(
-              value: pubkey,
-              child: Text(label, overflow: TextOverflow.ellipsis),
-            );
-          },
-        )
-        .toList();
-    final selectedValue =
-        contacts.any((c) => c['pubkey'] == selectedContact) ? selectedContact : null;
+      return DropdownMenuItem<String>(
+        value: pubkey,
+        child: Text(label, overflow: TextOverflow.ellipsis),
+      );
+    }).toList();
+    final selectedValue = contacts.any((c) => c['pubkey'] == selectedContact)
+        ? selectedContact
+        : null;
 
     final dropdown = DropdownButtonFormField<String>(
       value: selectedValue,
@@ -2180,7 +2377,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       decoration: inAppBar
           ? InputDecoration(
               isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: Colors.white, width: 1),
@@ -2191,25 +2391,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.9), width: 1.2),
+                borderSide: BorderSide(
+                  color: Colors.white.withOpacity(0.9),
+                  width: 1.2,
+                ),
               ),
             )
           : const InputDecoration(
               labelText: 'Send to',
               border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
             ),
-      selectedItemBuilder: (_) => contacts
-          .map((c) {
-            final pubkey = c['pubkey'] ?? '';
-            final nickname = (c['nickname'] ?? '').toString().trim();
-            final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
-            return Align(
-              alignment: Alignment.centerLeft,
-              child: Text(primary, overflow: TextOverflow.ellipsis),
-            );
-          })
-          .toList(),
+      selectedItemBuilder: (_) => contacts.map((c) {
+        final pubkey = c['pubkey'] ?? '';
+        final nickname = (c['nickname'] ?? '').toString().trim();
+        final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Text(primary, overflow: TextOverflow.ellipsis),
+        );
+      }).toList(),
       hint: const Text('Select a contact'),
       items: contactItems,
       onChanged: contactItems.isEmpty
@@ -2250,7 +2454,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           padding: const EdgeInsets.all(8.0),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.3),
-            border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
+            border: Border(
+              top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+            ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2258,16 +2464,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: messageCtrl,
                 builder: (context, value, _) {
-                  final hasContent = value.text.trim().isNotEmpty || _pendingAttachment != null;
+                  final hasContent =
+                      value.text.trim().isNotEmpty ||
+                      _pendingAttachment != null;
                   final noContacts = contacts.isEmpty;
                   final canSend = selectedContact != null && !noContacts;
                   return Row(
                     children: [
                       Expanded(
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            maxHeight: 180,
-                          ),
+                          constraints: const BoxConstraints(maxHeight: 180),
                           child: TextField(
                             controller: messageCtrl,
                             focusNode: _messageFocus,
@@ -2278,7 +2484,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               hintText: 'Message',
                               filled: true,
                               border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
                             ),
                           ),
                         ),
@@ -2296,9 +2505,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   ? () => hasContent
                                         ? _sendMessage()
                                         : _showAttachChooser()
-                                : null),
+                                  : null),
                         style: IconButton.styleFrom(
-                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primary,
                           foregroundColor: Colors.black,
                         ),
                       ),
@@ -2326,11 +2537,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final updatedPrefs = await SharedPreferences.getInstance();
     final currentNsec = updatedPrefs.getString('nostr_nsec') ?? '';
-    final currentProfileIndex = updatedPrefs.getInt('selected_profile_index') ?? 0;
+    final currentProfileIndex =
+        updatedPrefs.getInt('selected_profile_index') ?? 0;
     final cachedNpubs = updatedPrefs.getStringList('profile_npubs_cache') ?? [];
-    final cachedNpub =
-        (currentProfileIndex < cachedNpubs.length) ? cachedNpubs[currentProfileIndex] : '';
-    final didProfileChange = currentNsec != previousNsec || currentProfileIndex != previousProfileIndex;
+    final cachedNpub = (currentProfileIndex < cachedNpubs.length)
+        ? cachedNpubs[currentProfileIndex]
+        : '';
+    final didProfileChange =
+        currentNsec != previousNsec ||
+        currentProfileIndex != previousProfileIndex;
 
     if (!didProfileChange && cachedNpub.isEmpty) {
       // No profile change and nothing to refresh
@@ -2374,7 +2589,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     if (didProfileChange) {
-      await _loadLocalProfileData(profileIndex: currentProfileIndex, overrideLoaded: true);
+      await _loadLocalProfileData(
+        profileIndex: currentProfileIndex,
+        overrideLoaded: true,
+      );
       // Restart listener and fetch messages
       _startDmListener();
       _fetchMessages();
@@ -2383,7 +2601,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _showMyNpubQr() async {
     try {
-      final npubValue = (npub != null && npub!.isNotEmpty) ? npub! : api.getNpub();
+      final npubValue = (npub != null && npub!.isNotEmpty)
+          ? npub!
+          : api.getNpub();
       if (!mounted) return;
       if (npubValue.isEmpty) {
         _showThemedToast('No npub available', preferTop: true);
@@ -2397,7 +2617,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('My npub', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text(
+                  'My npub',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -2472,10 +2695,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _stripNip18(String text) {
     // Remove NIP-18 prefix: [//]: # (nip18)
-    return text.replaceFirst(RegExp(r'^\[\/\/\]:\s*#\s*\(nip18\)\s*', caseSensitive: false), '').trim();
+    return text
+        .replaceFirst(
+          RegExp(r'^\[\/\/\]:\s*#\s*\(nip18\)\s*', caseSensitive: false),
+          '',
+        )
+        .trim();
   }
 
-  Widget _buildMessageContent(Map<String, dynamic> message, {required bool isOut}) {
+  Widget _buildMessageContent(
+    Map<String, dynamic> message, {
+    required bool isOut,
+  }) {
     final content = message['content']?.toString() ?? '';
     final media = message['media'] as Map<String, dynamic>?;
     final cleaned = _stripNip18(content);
@@ -2502,7 +2733,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   children: [
                     Icon(isImage ? Icons.image : Icons.attach_file, size: 16),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(filename, style: const TextStyle(fontSize: 13))),
+                    Expanded(
+                      child: Text(
+                        filename,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -2510,7 +2746,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   icon: const Icon(Icons.lock_open, size: 16),
                   label: Text('Decrypt: $filename'),
                   style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                   onPressed: () => _decryptMedia(message),
                 ),
@@ -2536,8 +2775,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Image.memory(
               bytes,
               fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) =>
-                  Text('Failed to load image', style: TextStyle(color: Colors.grey.shade400)),
+              errorBuilder: (context, error, stackTrace) => Text(
+                'Failed to load image',
+                style: TextStyle(color: Colors.grey.shade400),
+              ),
             ),
           if (!isImage)
             Text(
@@ -2558,7 +2799,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   icon: const Icon(Icons.copy, size: 20),
                   color: Colors.white,
                   onPressed: () {
-                    Clipboard.setData(ClipboardData(text: 'Attachment (${mime})'));
+                    Clipboard.setData(
+                      ClipboardData(text: 'Attachment (${mime})'),
+                    );
                     _showThemedToast('Attachment copied', preferTop: true);
                   },
                 ),
@@ -2574,7 +2817,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final filename = media['filename']?.toString() ?? 'Attachment';
       final mime = media['mime']?.toString() ?? 'application/octet-stream';
       final isBlossom = _isBlossomLink(url, media);
-      final isImage = mime.startsWith('image/') || RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(url);
+      final isImage =
+          mime.startsWith('image/') ||
+          RegExp(
+            r'\.(png|jpe?g|gif|webp)$',
+            caseSensitive: false,
+          ).hasMatch(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2586,15 +2834,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Image.network(
                 url,
                 fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) =>
-                    Text('Image preview failed', style: TextStyle(color: Colors.grey.shade400)),
+                errorBuilder: (context, error, stackTrace) => Text(
+                  'Image preview failed',
+                  style: TextStyle(color: Colors.grey.shade400),
+                ),
               ),
             ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextButton.icon(
-                icon: Icon(isBlossom ? Icons.download : Icons.open_in_new, size: 18),
+                icon: Icon(
+                  isBlossom ? Icons.download : Icons.open_in_new,
+                  size: 18,
+                ),
                 label: Text(isBlossom ? 'Download' : 'Open link'),
                 onPressed: () => _launchUrl(url),
               ),
@@ -2626,17 +2879,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Regular text message
     final url = _firstUrl(cleaned);
     if (url != null) {
-      final isImage = RegExp(r'\.(png|jpe?g|gif|webp)$', caseSensitive: false).hasMatch(url);
+      final isImage = RegExp(
+        r'\.(png|jpe?g|gif|webp)$',
+        caseSensitive: false,
+      ).hasMatch(url);
       final textPart = cleaned.replaceFirst(url, '').trim();
       final isBlossom = _isBlossomLink(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (textPart.isNotEmpty)
-            Text(
-              textPart,
-              style: const TextStyle(fontSize: 15),
-            ),
+            Text(textPart, style: const TextStyle(fontSize: 15)),
           TextButton(
             onPressed: () => _launchUrl(url),
             child: Text(
@@ -2653,27 +2906,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Image.network(
                 url,
                 fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) =>
-                    Text('Image preview failed', style: TextStyle(color: Colors.grey.shade400)),
+                errorBuilder: (context, error, stackTrace) => Text(
+                  'Image preview failed',
+                  style: TextStyle(color: Colors.grey.shade400),
+                ),
               ),
             ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextButton.icon(
-                icon: Icon(isBlossom ? Icons.download : Icons.open_in_new, size: 18),
+                icon: Icon(
+                  isBlossom ? Icons.download : Icons.open_in_new,
+                  size: 18,
+                ),
                 label: Text(isBlossom ? 'Download' : 'Open link'),
                 onPressed: () => _launchUrl(url),
               ),
               IconButton(
                 icon: const Icon(Icons.copy, size: 20),
                 color: Colors.white,
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: url));
-                _showThemedToast('Link copied', preferTop: true);
-              },
-            ),
-          ],
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: url));
+                  _showThemedToast('Link copied', preferTop: true);
+                },
+              ),
+            ],
           ),
         ],
       );
@@ -2702,7 +2960,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           descriptorJson: descriptorJson,
           senderPubkey: senderPubkey,
           myNsec: nsec,
-        )
+        ),
       );
 
       // Cache the decrypted bytes
@@ -2725,9 +2983,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _saveMedia(Uint8List bytes, String mime) async {
     try {
-      final selectedDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose where to save');
+      final selectedDir = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Choose where to save',
+      );
       if (selectedDir == null) {
-        if (mounted) _showThemedToast('Save cancelled', preferTop: true, duration: const Duration(milliseconds: 800));
+        if (mounted)
+          _showThemedToast(
+            'Save cancelled',
+            preferTop: true,
+            duration: const Duration(milliseconds: 800),
+          );
         return;
       }
       final ext = extensionFromMime(mime);
@@ -2771,7 +3036,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String? _firstUrl(String text) {
-    final match = RegExp(r'https?://\S+', caseSensitive: false).firstMatch(text);
+    final match = RegExp(
+      r'https?://\S+',
+      caseSensitive: false,
+    ).firstMatch(text);
     return match?.group(0);
   }
 
@@ -2779,8 +3047,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final uri = Uri.tryParse(url);
     final hostHasBlossom = uri?.host.contains('blossom') ?? false;
     final frag = uri?.fragment ?? '';
-    final fragHasMeta = frag.contains('m=') || frag.contains('size=') || frag.contains('x=');
-    final hasMeta = (meta?['sha256']?.toString().isNotEmpty ?? false) ||
+    final fragHasMeta =
+        frag.contains('m=') || frag.contains('size=') || frag.contains('x=');
+    final hasMeta =
+        (meta?['sha256']?.toString().isNotEmpty ?? false) ||
         (meta?['cipher_sha256']?.toString().isNotEmpty ?? false) ||
         (meta?['iv']?.toString().isNotEmpty ?? false) ||
         (meta?['mime']?.toString().isNotEmpty ?? false) ||
@@ -2791,7 +3061,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _initShareListener() async {
     try {
       // Handle initial share when app is launched from share sheet
-      final initial = await _shareChannel.invokeMethod<dynamic>('getInitialShare');
+      final initial = await _shareChannel.invokeMethod<dynamic>(
+        'getInitialShare',
+      );
       await _handleSharedPayload(initial);
 
       // Listen for subsequent shares while app is alive
@@ -2815,8 +3087,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (bytes != null && bytes.isNotEmpty) {
       if (!await _confirmLargeAttachment(bytes.length)) return;
-      final resolvedMime = mime.isNotEmpty ? mime : (lookupMimeType(name ?? '', headerBytes: bytes) ?? 'application/octet-stream');
-      final filename = (name != null && name.isNotEmpty) ? name : 'shared.${extensionFromMime(resolvedMime)}';
+      final resolvedMime = mime.isNotEmpty
+          ? mime
+          : (lookupMimeType(name ?? '', headerBytes: bytes) ??
+                'application/octet-stream');
+      final filename = (name != null && name.isNotEmpty)
+          ? name
+          : 'shared.${extensionFromMime(resolvedMime)}';
       setState(() {
         _pendingAttachment = _PendingAttachment(
           bytes: bytes,
@@ -2857,7 +3134,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final dateStart = midnight(date);
 
     // Format time part (e.g., "6:30 PM")
-    final hour = date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+    final hour = date.hour > 12
+        ? date.hour - 12
+        : (date.hour == 0 ? 12 : date.hour);
     final minute = date.minute.toString().padLeft(2, '0');
     final period = date.hour >= 12 ? 'PM' : 'AM';
     final timePart = '$hour:$minute $period';
@@ -2871,9 +3150,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     // For older dates, show full date
-    final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    final months = ['January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
+    final weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
 
     final weekday = weekdays[date.weekday - 1];
     final month = months[date.month - 1];
@@ -2930,7 +3229,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               color: theme.colorScheme.surface.withOpacity(0.95),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: theme.colorScheme.primary.withOpacity(0.8)),
+              border: Border.all(
+                color: theme.colorScheme.primary.withOpacity(0.8),
+              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.45),
@@ -2957,7 +3258,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // Home screen hold helpers
-  void _startHoldActionHome(String key, VoidCallback onComplete, {String? countdownLabel}) {
+  void _startHoldActionHome(
+    String key,
+    VoidCallback onComplete, {
+    String? countdownLabel,
+  }) {
     _holdTimersHome[key]?.cancel();
     final start = DateTime.now();
     final totalSeconds = (_holdMillis / 1000).ceil();
@@ -2969,7 +3274,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (countdownLabel != null) {
       _showHoldWarningHome('Hold ${totalSeconds}s to $countdownLabel');
     }
-    _holdTimersHome[key] = Timer.periodic(const Duration(milliseconds: 120), (t) {
+    _holdTimersHome[key] = Timer.periodic(const Duration(milliseconds: 120), (
+      t,
+    ) {
       final elapsed = DateTime.now().difference(start).inMilliseconds;
       final progress = (elapsed / _holdMillis).clamp(0.0, 1.0);
       if (!mounted) {
@@ -2979,8 +3286,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _holdProgressHome[key] = progress;
       });
-      final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
-      if (countdownLabel != null && remainingSeconds != _holdLastSecondHome[key]) {
+      final remainingSeconds =
+          ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
+      if (countdownLabel != null &&
+          remainingSeconds != _holdLastSecondHome[key]) {
         _holdLastSecondHome[key] = remainingSeconds;
         _showHoldWarningHome('Hold ${remainingSeconds}s to $countdownLabel');
       }
@@ -3016,7 +3325,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 }
 
 class _PendingAttachment {
-  _PendingAttachment({required this.bytes, required this.mime, required this.name});
+  _PendingAttachment({
+    required this.bytes,
+    required this.mime,
+    required this.name,
+  });
   final Uint8List bytes;
   final String mime;
   final String name;
@@ -3035,11 +3348,7 @@ class _PendingPreview extends StatelessWidget {
     if (isImage) {
       preview = ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Image.memory(
-          attachment.bytes,
-          height: 120,
-          fit: BoxFit.cover,
-        ),
+        child: Image.memory(attachment.bytes, height: 120, fit: BoxFit.cover),
       );
     } else {
       preview = Row(
@@ -3105,7 +3414,9 @@ class _QrScanPageState extends State<_QrScanPage> {
         controller: _controller,
         onDetect: (capture) {
           if (_handled) return;
-          final code = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null;
+          final code = capture.barcodes.isNotEmpty
+              ? capture.barcodes.first.rawValue
+              : null;
           if (code == null || code.isEmpty) return;
           _handled = true;
           Navigator.of(context).pop(code);
@@ -3239,9 +3550,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     if (mounted) {
-    setState(() {
-      _isSaving = true;
-    });
+      setState(() {
+        _isSaving = true;
+      });
     }
     final prefs = await SharedPreferences.getInstance();
 
@@ -3261,16 +3572,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     final selectedIndex = prefs.getInt('selected_profile_index') ?? 0;
-    final currentNickname = loadedProfiles.isNotEmpty && selectedIndex < loadedProfiles.length
+    final currentNickname =
+        loadedProfiles.isNotEmpty && selectedIndex < loadedProfiles.length
         ? loadedProfiles[selectedIndex]['nickname'] ?? ''
         : '';
 
     // Load relays
-    final loadedRelays = prefs.getStringList('relays') ?? [
-      'wss://relay.damus.io',
-      'wss://relay.primal.net',
-      'wss://nos.lol',
-    ];
+    final loadedRelays =
+        prefs.getStringList('relays') ??
+        ['wss://relay.damus.io', 'wss://relay.primal.net', 'wss://nos.lol'];
 
     var npub = '';
     try {
@@ -3323,7 +3633,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _isRelayInputValid(String relay) {
     final trimmed = relay.trim();
-    return trimmed.isNotEmpty && (trimmed.startsWith('ws://') || trimmed.startsWith('wss://'));
+    return trimmed.isNotEmpty &&
+        (trimmed.startsWith('ws://') || trimmed.startsWith('wss://'));
   }
 
   void _updateRelayValidity() {
@@ -3423,19 +3734,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-              onPressed: () async {
-                final nsec = ctrl.text.trim();
-                final nickname = nicknameDialogCtrl.text.trim();
-                if (nsec.isNotEmpty) {
-                  setState(() {
-                    profiles.add({'nsec': nsec, 'nickname': nickname});
-                  });
-                  _markDirty();
-                  await _saveSettings();
-                  await _refreshProfileNpubs();
-                }
-                Navigator.pop(ctx);
-              },
+            onPressed: () async {
+              final nsec = ctrl.text.trim();
+              final nickname = nicknameDialogCtrl.text.trim();
+              if (nsec.isNotEmpty) {
+                setState(() {
+                  profiles.add({'nsec': nsec, 'nickname': nickname});
+                });
+                _markDirty();
+                await _saveSettings();
+                await _refreshProfileNpubs();
+              }
+              Navigator.pop(ctx);
+            },
             child: const Text('Add'),
           ),
         ],
@@ -3452,9 +3763,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Generate New Profile'),
         content: TextField(
           controller: nicknameDialogCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Nickname (optional)',
-          ),
+          decoration: const InputDecoration(labelText: 'Nickname (optional)'),
         ),
         actions: [
           TextButton(
@@ -3495,8 +3804,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final npubToCopy = currentNpub.isNotEmpty
         ? currentNpub
         : (selectedProfileIndex < profileNpubs.length
-            ? profileNpubs[selectedProfileIndex]
-            : '');
+              ? profileNpubs[selectedProfileIndex]
+              : '');
 
     if (npubToCopy.isEmpty) {
       if (mounted) {
@@ -3550,7 +3859,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             decoration: BoxDecoration(
               color: theme.colorScheme.surface.withOpacity(0.95),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: theme.colorScheme.primary.withOpacity(0.8)),
+              border: Border.all(
+                color: theme.colorScheme.primary.withOpacity(0.8),
+              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.45),
@@ -3576,7 +3887,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _startHoldAction(String key, VoidCallback onComplete, {String? countdownLabel}) {
+  void _startHoldAction(
+    String key,
+    VoidCallback onComplete, {
+    String? countdownLabel,
+  }) {
     _holdTimers[key]?.cancel();
     final start = DateTime.now();
     final totalSeconds = (_holdMillis / 1000).ceil();
@@ -3598,7 +3913,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _holdProgress[key] = progress;
       });
-      final remainingSeconds = ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
+      final remainingSeconds =
+          ((_holdMillis - elapsed).clamp(0, _holdMillis) / 1000).ceil();
       if (countdownLabel != null && remainingSeconds != _holdLastSecond[key]) {
         _holdLastSecond[key] = remainingSeconds;
         _showHoldWarning('Hold ${remainingSeconds}s to $countdownLabel');
@@ -3647,8 +3963,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final npubToShow = currentNpub.isNotEmpty
         ? currentNpub
         : (selectedProfileIndex < profileNpubs.length
-            ? profileNpubs[selectedProfileIndex]
-            : '');
+              ? profileNpubs[selectedProfileIndex]
+              : '');
 
     if (npubToShow.isEmpty) {
       if (mounted) {
@@ -3667,7 +3983,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('My npub', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text(
+                  'My npub',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -3684,26 +4003,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: const TextStyle(fontSize: 13),
                   textAlign: TextAlign.center,
                 ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Close'),
-                    ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Close'),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
   Future<void> _refreshProfileNpubs() async {
     if (profiles.isEmpty) return;
 
-    final current = (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
+    final current =
+        (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
         ? profiles[selectedProfileIndex]['nsec'] ?? ''
         : '';
 
@@ -3760,12 +4080,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _addRelay() async {
-      final relay = relayInputCtrl.text.trim();
-      setState(() => relayError = '');
-      if (relay.isEmpty || !(relay.startsWith('ws://') || relay.startsWith('wss://'))) {
-        setState(() => relayError = 'Enter a valid ws:// or wss:// URL');
-        return;
-      }
+    final relay = relayInputCtrl.text.trim();
+    setState(() => relayError = '');
+    if (relay.isEmpty ||
+        !(relay.startsWith('ws://') || relay.startsWith('wss://'))) {
+      setState(() => relayError = 'Enter a valid ws:// or wss:// URL');
+      return;
+    }
     if (relays.contains(relay)) {
       setState(() => relayError = 'Relay already added');
       return;
@@ -3793,16 +4114,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       relayStatuses[relay] = RelayStatus.loading;
     });
-    WebSocket.connect(relay).timeout(const Duration(seconds: 4)).then((ws) {
-      relayStatuses[relay] = RelayStatus.ok;
-      relayStatusCheckedAt[relay] = DateTime.now();
-      ws.close();
-      if (mounted) setState(() {});
-    }).catchError((_) {
-      relayStatuses[relay] = RelayStatus.warn;
-      relayStatusCheckedAt[relay] = DateTime.now();
-      if (mounted) setState(() {});
-    });
+    WebSocket.connect(relay)
+        .timeout(const Duration(seconds: 4))
+        .then((ws) {
+          relayStatuses[relay] = RelayStatus.ok;
+          relayStatusCheckedAt[relay] = DateTime.now();
+          ws.close();
+          if (mounted) setState(() {});
+        })
+        .catchError((_) {
+          relayStatuses[relay] = RelayStatus.warn;
+          relayStatusCheckedAt[relay] = DateTime.now();
+          if (mounted) setState(() {});
+        });
   }
 
   @override
@@ -3812,8 +4136,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: Colors.greenAccent.withOpacity(0.2)),
       boxShadow: [
-        BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 8, offset: const Offset(0, 6)),
-        BoxShadow(color: Colors.greenAccent.withOpacity(0.04), blurRadius: 8, spreadRadius: 0.5),
+        BoxShadow(
+          color: Colors.black.withOpacity(0.25),
+          blurRadius: 8,
+          offset: const Offset(0, 6),
+        ),
+        BoxShadow(
+          color: Colors.greenAccent.withOpacity(0.04),
+          blurRadius: 8,
+          spreadRadius: 0.5,
+        ),
       ],
     );
 
@@ -3836,11 +4168,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: buttons,
-          ),
+          Wrap(spacing: 8, runSpacing: 8, children: buttons),
         ],
       );
     }
@@ -3949,10 +4277,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final showProfileSave = !_isSaving && (_hasPendingChanges || nicknameDirty);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        actions: const [],
-      ),
+      appBar: AppBar(title: const Text('Settings'), actions: const []),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -3967,17 +4292,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) ...[
+                if (profiles.isNotEmpty &&
+                    selectedProfileIndex < profiles.length) ...[
                   InputDecorator(
                     decoration: InputDecoration(
                       labelText: 'Active profile',
                       filled: true,
                       fillColor: Colors.black.withOpacity(0.35),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 3,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                        borderSide: BorderSide(
+                          color: Colors.greenAccent.shade200,
+                        ),
                       ),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -4023,7 +4356,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           }).toList();
                         },
                         onChanged: (idx) async {
-                          if (idx != null && idx < profiles.length && idx != selectedProfileIndex) {
+                          if (idx != null &&
+                              idx < profiles.length &&
+                              idx != selectedProfileIndex) {
                             final nsec = profiles[idx]['nsec'] ?? '';
                             if (nsec.isNotEmpty) {
                               // Switch the active key in Rust
@@ -4058,95 +4393,116 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             labelText: 'Profile nickname (optional)',
                             filled: true,
                             fillColor: Colors.black.withOpacity(0.35),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                              borderSide: BorderSide(
+                                color: Colors.greenAccent.shade200,
+                              ),
                             ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
                           ),
-                      onChanged: (value) {
-                        if (profiles.isNotEmpty && selectedProfileIndex < profiles.length) {
-                          profiles[selectedProfileIndex]['nickname'] = value;
-                          _markDirty(schedule: false);
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 150),
+                          onChanged: (value) {
+                            if (profiles.isNotEmpty &&
+                                selectedProfileIndex < profiles.length) {
+                              profiles[selectedProfileIndex]['nickname'] =
+                                  value;
+                              _markDirty(schedule: false);
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
                         child: showProfileSave
-                        ? IconButton.filled(
-                            key: const ValueKey('save_profile'),
-                            onPressed: _saveSettings,
-                            style: IconButton.styleFrom(
-                              backgroundColor: Colors.greenAccent.shade400,
-                              foregroundColor: Colors.black,
-                              shape: const CircleBorder(),
-                              padding: const EdgeInsets.all(10),
-                            ),
-                            icon: const Icon(Icons.check, size: 22),
-                            tooltip: 'Save profile',
-                          )
-                        : _HoldDeleteIcon(
-                            active: _holdActive['delete_profile'] ?? false,
-                            progress: _holdProgressFor('delete_profile'),
-                            onTap: () => _showHoldWarning('Hold 5s to delete profile'),
-                            onHoldStart: () {
-                              if (_isSaving || profiles.length <= 1) return;
-                              _startHoldAction('delete_profile', () async {
-                                final removing = selectedProfileIndex;
-                                setState(() {
-                                  profiles.removeAt(removing);
-                                  if (removing < profileNpubs.length) {
-                                    profileNpubs.removeAt(removing);
-                                  }
-                                  if (selectedProfileIndex >= profiles.length) {
-                                    selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
-                                  }
-                                  profileNickname =
-                                      profiles.isNotEmpty ? (profiles[selectedProfileIndex]['nickname'] ?? '') : '';
-                                  nicknameCtrl.text = profileNickname;
-                                });
+                            ? IconButton.filled(
+                                key: const ValueKey('save_profile'),
+                                onPressed: _saveSettings,
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.greenAccent.shade400,
+                                  foregroundColor: Colors.black,
+                                  shape: const CircleBorder(),
+                                  padding: const EdgeInsets.all(10),
+                                ),
+                                icon: const Icon(Icons.check, size: 22),
+                                tooltip: 'Save profile',
+                              )
+                            : _HoldDeleteIcon(
+                                active: _holdActive['delete_profile'] ?? false,
+                                progress: _holdProgressFor('delete_profile'),
+                                onTap: () => _showHoldWarning(
+                                  'Hold 5s to delete profile',
+                                ),
+                                onHoldStart: () {
+                                  if (_isSaving || profiles.length <= 1) return;
+                                  _startHoldAction(
+                                    'delete_profile',
+                                    () async {
+                                      final removing = selectedProfileIndex;
+                                      setState(() {
+                                        profiles.removeAt(removing);
+                                        if (removing < profileNpubs.length) {
+                                          profileNpubs.removeAt(removing);
+                                        }
+                                        if (selectedProfileIndex >=
+                                            profiles.length) {
+                                          selectedProfileIndex =
+                                              profiles.isEmpty
+                                              ? 0
+                                              : profiles.length - 1;
+                                        }
+                                        profileNickname = profiles.isNotEmpty
+                                            ? (profiles[selectedProfileIndex]['nickname'] ??
+                                                  '')
+                                            : '';
+                                        nicknameCtrl.text = profileNickname;
+                                      });
                                       _hasPendingChanges = false;
-                                await _saveSettings();
-                                await _refreshProfileNpubs();
-                                _cancelHoldAction('delete_profile');
-                              }, countdownLabel: 'delete profile');
-                            },
-                            onHoldEnd: () => _cancelHoldAction('delete_profile'),
-                          ),
-                  ),
+                                      await _saveSettings();
+                                      await _refreshProfileNpubs();
+                                      _cancelHoldAction('delete_profile');
+                                    },
+                                    countdownLabel: 'delete profile',
+                                  );
+                                },
+                                onHoldEnd: () =>
+                                    _cancelHoldAction('delete_profile'),
+                              ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
                 ],
-                actionGroup(
-                  'Management',
-                  [
-                    ElevatedButton.icon(
-                      style: textButtonStyle,
-                      onPressed: _generateProfile,
-                      icon: const Icon(Icons.add, size: 22),
+                actionGroup('Management', [
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _generateProfile,
+                    icon: const Icon(Icons.add, size: 22),
                     label: const Text('New Profile'),
-                    ),
-                    ElevatedButton.icon(
-                      style: textButtonStyle,
-                      onPressed: _addProfile,
-                      icon: const Icon(Icons.input_outlined, size: 20),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _addProfile,
+                    icon: const Icon(Icons.input_outlined, size: 20),
                     label: const Text('Import Profile (nSec)'),
-                    ),
-                  ],
-                ),
+                  ),
+                ]),
                 const SizedBox(height: 8),
-                actionGroup(
-                  'Utilities',
-                  [
-                    Builder(builder: (context) {
+                actionGroup('Utilities', [
+                  Builder(
+                    builder: (context) {
                       final holdActive = _holdActive['copy_nsec'] ?? false;
                       final progress = _holdProgress['copy_nsec'] ?? 0.0;
-                      final remainingMs = (_holdMillis * (1 - progress)).clamp(0.0, _holdMillis.toDouble());
+                      final remainingMs = (_holdMillis * (1 - progress)).clamp(
+                        0.0,
+                        _holdMillis.toDouble(),
+                      );
                       final remainingSeconds = (remainingMs / 1000).ceil();
                       final label = _nsecCopied
                           ? 'Copied'
@@ -4154,11 +4510,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ? 'Hold ${remainingSeconds}s to copy profile secret (nSec)'
                           : 'Hold 5s to copy profile secret (nSec)';
                       return GestureDetector(
-                        onLongPressStart: (_) => _startHoldAction('copy_nsec', () async {
-                          await _exportCurrentKey();
-                          _setCopyState(nsec: true);
-                          _cancelHoldAction('copy_nsec');
-                        }, countdownLabel: 'copy profile secret (nSec)'),
+                        onLongPressStart: (_) => _startHoldAction(
+                          'copy_nsec',
+                          () async {
+                            await _exportCurrentKey();
+                            _setCopyState(nsec: true);
+                            _cancelHoldAction('copy_nsec');
+                          },
+                          countdownLabel: 'copy profile secret (nSec)',
+                        ),
                         onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
                         onTap: () {},
                         child: AnimatedOpacity(
@@ -4172,24 +4532,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                       );
-                    }),
-                    ElevatedButton.icon(
-                      style: textButtonStyle,
-                      onPressed: () async {
-                        await _copyNpub();
-                        _setCopyState(npub: true);
-                      },
-                      icon: const Icon(Icons.mail_outline, size: 22),
-                      label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
-                    ),
-                    ElevatedButton.icon(
-                      style: textButtonStyle,
-                      onPressed: _showNpubQr,
-                      icon: const Icon(Icons.qr_code_2, size: 20),
-                      label: const Text('Show QR'),
+                    },
                   ),
-                  ],
-                ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: () async {
+                      await _copyNpub();
+                      _setCopyState(npub: true);
+                    },
+                    icon: const Icon(Icons.mail_outline, size: 22),
+                    label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _showNpubQr,
+                    icon: const Icon(Icons.qr_code_2, size: 20),
+                    label: const Text('Show QR'),
+                  ),
+                ]),
                 const SizedBox(height: 12),
                 SwitchListTile(
                   title: const Text('Stay connected (foreground)'),
@@ -4202,7 +4562,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setBool('foreground_service_enabled', val);
                     if (val) {
-                      _showThemedToast('Enabling background connection...', preferTop: true);
+                      _showThemedToast(
+                        'Enabling background connection...',
+                        preferTop: true,
+                      );
                       final ok = await _startForegroundService();
                       if (!ok) {
                         setState(() => _foregroundEnabled = false);
@@ -4210,7 +4573,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           'foreground_service_enabled',
                           false,
                         );
-                        _showThemedToast('Foreground service blocked (notification permission?)', preferTop: true);
+                        _showThemedToast(
+                          'Foreground service blocked (notification permission?)',
+                          preferTop: true,
+                        );
                         return;
                       }
                       unawaited(
@@ -4219,10 +4585,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           budget: const Duration(seconds: 10),
                         ),
                       );
-                      _showThemedToast('Foreground service running', preferTop: true);
+                      _showThemedToast(
+                        'Foreground service running',
+                        preferTop: true,
+                      );
                     } else {
                       await _stopForegroundService();
-                      _showThemedToast('Foreground service stopped', preferTop: true);
+                      _showThemedToast(
+                        'Foreground service stopped',
+                        preferTop: true,
+                      );
                     }
                   },
                 ),
@@ -4251,13 +4623,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           labelText: 'Relay URL',
                           filled: true,
                           fillColor: Colors.black.withOpacity(0.35),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.greenAccent.shade200),
+                            borderSide: BorderSide(
+                              color: Colors.greenAccent.shade200,
+                            ),
                           ),
                           errorText: relayError.isEmpty ? null : relayError,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
                         ),
                         onChanged: (_) {
                           if (relayError.isNotEmpty) {
@@ -4274,7 +4653,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: IconButton.styleFrom(
                         backgroundColor: Colors.greenAccent.shade400,
                         foregroundColor: Colors.black,
-                        disabledBackgroundColor: Colors.greenAccent.shade200.withOpacity(0.4),
+                        disabledBackgroundColor: Colors.greenAccent.shade200
+                            .withOpacity(0.4),
                         disabledForegroundColor: Colors.black.withOpacity(0.4),
                         padding: const EdgeInsets.all(12),
                         shape: const CircleBorder(),

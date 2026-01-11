@@ -20,8 +20,9 @@ use aes_gcm::{
 };
 use rand::RngCore;
 use secp256k1::{PublicKey as Secp256k1PublicKey, SecretKey as Secp256k1SecretKey, XOnlyPublicKey as Secp256k1XOnlyPublicKey, Secp256k1 as Secp256k1Context};
-use ::hkdf::Hkdf;
 use getrandom;
+use hmac::{Hmac, Mac};
+use chacha20::cipher::{KeyIvInit, StreamCipher};
 use std::collections::HashSet as StdHashSet;
 
 // Global tokio runtime for all FFI calls
@@ -127,115 +128,212 @@ async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
 }
 
 // Helper function to derive NIP-44 conversation key
-fn get_nip44_conversation_key(secret_key: &SecretKey, public_key: &PublicKey) -> Result<String> {
+type HmacSha256 = Hmac<Sha256>;
+
+struct Nip44MessageKeys {
+    chacha_key: [u8; 32],
+    chacha_nonce: [u8; 12],
+    hmac_key: [u8; 32],
+}
+
+fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> Result<[u8; 32]> {
+    let mut mac = HmacSha256::new_from_slice(key)
+        .map_err(|e| anyhow::anyhow!("HMAC init failed: {}", e))?;
+    for part in parts {
+        mac.update(part);
+    }
+    let result = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
+    Ok(out)
+}
+
+fn nip44_calc_padded_len(len: usize) -> usize {
+    if len <= 32 {
+        return 32;
+    }
+    let len_minus = len - 1;
+    let mut next_power = len_minus.next_power_of_two();
+    if next_power == len_minus {
+        next_power = next_power.saturating_mul(2);
+    }
+    let chunk = if next_power <= 256 { 32 } else { next_power / 8 };
+    chunk * ((len_minus / chunk) + 1)
+}
+
+fn nip44_pad(plaintext: &str) -> Result<Vec<u8>> {
+    let unpadded = plaintext.as_bytes();
+    let unpadded_len = unpadded.len();
+    if unpadded_len == 0 {
+        anyhow::bail!("Message is empty");
+    }
+    const MAX_PLAINTEXT: usize = 0xFFFF;
+    const EXT_MAX_PLAINTEXT: usize = 0xFFFF_FFFE;
+
+    let mut prefix = Vec::with_capacity(6);
+    if unpadded_len <= MAX_PLAINTEXT {
+        prefix.push(((unpadded_len >> 8) & 0xFF) as u8);
+        prefix.push((unpadded_len & 0xFF) as u8);
+    } else if unpadded_len <= EXT_MAX_PLAINTEXT {
+        prefix.extend_from_slice(&[0, 0]);
+        prefix.push(((unpadded_len >> 24) & 0xFF) as u8);
+        prefix.push(((unpadded_len >> 16) & 0xFF) as u8);
+        prefix.push(((unpadded_len >> 8) & 0xFF) as u8);
+        prefix.push((unpadded_len & 0xFF) as u8);
+    } else {
+        anyhow::bail!("Message is too long ({})", unpadded_len);
+    }
+
+    let padded_len = nip44_calc_padded_len(unpadded_len);
+    let mut out = Vec::with_capacity(prefix.len() + padded_len);
+    out.extend_from_slice(&prefix);
+    out.extend_from_slice(unpadded);
+    out.resize(prefix.len() + padded_len, 0u8);
+    Ok(out)
+}
+
+fn nip44_unpad(padded: &[u8]) -> Result<String> {
+    if padded.len() < 2 {
+        anyhow::bail!("Invalid padded payload");
+    }
+    let len_pre = ((padded[0] as usize) << 8) | padded[1] as usize;
+    if len_pre == 0 {
+        if padded.len() < 6 {
+            anyhow::bail!("Invalid extended padding");
+        }
+        let len_ext = ((padded[2] as usize) << 24)
+            | ((padded[3] as usize) << 16)
+            | ((padded[4] as usize) << 8)
+            | (padded[5] as usize);
+        if len_ext == 0 || len_ext > 0xFFFF_FFFE {
+            anyhow::bail!("Invalid size {}", len_ext);
+        }
+        let expected = 6 + nip44_calc_padded_len(len_ext);
+        if padded.len() != expected {
+            anyhow::bail!("Invalid padding {} != {}", padded.len(), expected);
+        }
+        return String::from_utf8(padded[6..6 + len_ext].to_vec())
+            .map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e));
+    }
+    if len_pre > 0xFFFF {
+        anyhow::bail!("Invalid size {}", len_pre);
+    }
+    let expected = 2 + nip44_calc_padded_len(len_pre);
+    if padded.len() != expected {
+        anyhow::bail!("Invalid padding {} != {}", padded.len(), expected);
+    }
+    String::from_utf8(padded[2..2 + len_pre].to_vec())
+        .map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
+}
+
+fn nip44_hmac_aad(key: &[u8; 32], message: &[u8], aad: &[u8; 32]) -> Result<[u8; 32]> {
+    hmac_sha256(key, &[aad, message])
+}
+
+fn nip44_fast_expand(
+    conversation_key: &[u8; 32],
+    nonce: &[u8; 32],
+    ciphertext: Option<&[u8]>,
+    mac: Option<&[u8]>,
+) -> Result<Nip44MessageKeys> {
+    let round1 = hmac_sha256(conversation_key, &[nonce, &[1u8]])?;
+    let round2 = hmac_sha256(conversation_key, &[&round1, nonce, &[2u8]])?;
+    let round3 = hmac_sha256(conversation_key, &[&round2, nonce, &[3u8]])?;
+
+    let mut hmac_key = [0u8; 32];
+    hmac_key[0..20].copy_from_slice(&round2[12..32]);
+    hmac_key[20..32].copy_from_slice(&round3[0..12]);
+
+    if let (Some(ciphertext), Some(mac)) = (ciphertext, mac) {
+        if mac.len() != 32 {
+            anyhow::bail!("Invalid mac length {}", mac.len());
+        }
+        let calc = nip44_hmac_aad(&hmac_key, ciphertext, nonce)?;
+        if calc.as_ref() != mac {
+            anyhow::bail!("Invalid Mac");
+        }
+    }
+
+    let mut chacha_nonce = [0u8; 12];
+    chacha_nonce.copy_from_slice(&round2[0..12]);
+
+    Ok(Nip44MessageKeys {
+        chacha_key: round1,
+        chacha_nonce,
+        hmac_key,
+    })
+}
+
+fn get_nip44_conversation_key(secret_key: &SecretKey, public_key: &PublicKey) -> Result<[u8; 32]> {
     let secp = Secp256k1Context::new();
 
-    // Convert nostr-sdk keys to secp256k1 keys
     let secret_bytes = secret_key.secret_bytes();
     let secp_secret = Secp256k1SecretKey::from_slice(&secret_bytes)?;
 
-    // Parse x-only public key (32 bytes)
     let public_bytes = public_key.to_bytes();
     let xonly_pubkey = Secp256k1XOnlyPublicKey::from_slice(&public_bytes)?;
 
-    // Compute shared point: multiply other's pubkey by our privkey
-    let public_key_even = Secp256k1PublicKey::from_x_only_public_key(xonly_pubkey, secp256k1::Parity::Even);
+    let public_key_even =
+        Secp256k1PublicKey::from_x_only_public_key(xonly_pubkey, secp256k1::Parity::Even);
     let shared_point = public_key_even.mul_tweak(&secp, &secp_secret.into())?;
 
-    // Get x-coordinate of shared point (first 32 bytes after dropping the prefix byte)
     let shared_bytes = shared_point.serialize_uncompressed();
     let shared_x = &shared_bytes[1..33];
 
-    // Derive conversation key using HKDF-SHA256
-    let hkdf = Hkdf::<Sha256>::new(None, shared_x);
-    let mut conversation_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2", &mut conversation_key)
-        .map_err(|e| anyhow::anyhow!("HKDF failed: {}", e))?;
-
-    Ok(hex::encode(conversation_key))
+    let salt = b"nip44-v2";
+    hmac_sha256(salt, &[shared_x])
 }
 
-// Custom NIP-44 v2 encrypt that matches WASM implementation exactly
+// NIP-44 v2 encrypt compatible with Amethyst/NIP-59
 fn nip44_encrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, plaintext: &str) -> Result<String> {
-    use chacha20poly1305::{ChaCha20Poly1305 as ChaCha, KeyInit as ChaChaKeyInit, AeadInPlace};
+    let conv_key = get_nip44_conversation_key(secret_key, public_key)?;
 
-    // Get conversation key
-    let conv_key_hex = get_nip44_conversation_key(secret_key, public_key)?;
-    let conv_key = hex::decode(&conv_key_hex)?;
-
-    // Generate random 32-byte nonce
     let mut nonce = [0u8; 32];
     getrandom::getrandom(&mut nonce)?;
 
-    // Derive encryption key and AAD using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(&nonce), &conv_key);
-    let mut chacha_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-key", &mut chacha_key)
-        .map_err(|e| anyhow::anyhow!("HKDF chacha key failed: {}", e))?;
-    let mut aad = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-aad", &mut aad)
-        .map_err(|e| anyhow::anyhow!("HKDF aad failed: {}", e))?;
+    let keys = nip44_fast_expand(&conv_key, &nonce, None, None)?;
+    let mut buffer = nip44_pad(plaintext)?;
 
-    // Encrypt with ChaCha20-Poly1305
-    let cipher = ChaCha::new(chacha_key.as_ref().into());
-    let chacha_nonce = chacha20poly1305::Nonce::from_slice(&[0u8; 12]); // NIP-44 uses all-zero nonce
+    let mut cipher = chacha20::ChaCha20::new((&keys.chacha_key).into(), (&keys.chacha_nonce).into());
+    cipher.apply_keystream(&mut buffer);
 
-    let mut buffer = plaintext.as_bytes().to_vec();
-    cipher.encrypt_in_place(chacha_nonce, &aad, &mut buffer)
-        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+    let mac = nip44_hmac_aad(&keys.hmac_key, &buffer, &nonce)?;
 
-    // Construct payload: version (1) || nonce (32) || ciphertext+mac
-    let mut payload = Vec::with_capacity(1 + 32 + buffer.len());
-    payload.push(0x02); // version
+    let mut payload = Vec::with_capacity(1 + 32 + buffer.len() + 32);
+    payload.push(0x02);
     payload.extend_from_slice(&nonce);
     payload.extend_from_slice(&buffer);
+    payload.extend_from_slice(&mac);
 
     Ok(base64::engine::general_purpose::STANDARD.encode(&payload))
 }
 
-// Custom NIP-44 v2 decrypt that matches WASM implementation exactly
+// NIP-44 v2 decrypt compatible with Amethyst/NIP-59
 fn nip44_decrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, ciphertext_b64: &str) -> Result<String> {
-    use chacha20poly1305::{ChaCha20Poly1305 as ChaCha, KeyInit as ChaChaKeyInit, AeadInPlace};
+    let conv_key = get_nip44_conversation_key(secret_key, public_key)?;
 
-    // Get conversation key
-    let conv_key_hex = get_nip44_conversation_key(secret_key, public_key)?;
-    let conv_key = hex::decode(&conv_key_hex)?;
-
-    // Decode base64
     let payload = base64::engine::general_purpose::STANDARD.decode(ciphertext_b64)?;
-
-    // Check minimum size: version (1) + nonce (32) + mac (16) = 49 bytes
-    if payload.len() < 49 {
+    if payload.len() < 65 {
         anyhow::bail!("ciphertext too short");
     }
-
-    // Check version
     if payload[0] != 0x02 {
         anyhow::bail!("unsupported version: {}", payload[0]);
     }
+    if payload.len() < 1 + 32 + 32 {
+        anyhow::bail!("ciphertext too short");
+    }
+    let mut nonce = [0u8; 32];
+    nonce.copy_from_slice(&payload[1..33]);
+    let mac_offset = payload.len() - 32;
+    let ciphertext = &payload[33..mac_offset];
+    let mac = &payload[mac_offset..];
 
-    // Extract nonce and ciphertext+mac
-    let nonce = &payload[1..33];
-    let ciphertext_with_mac = &payload[33..];
+    let keys = nip44_fast_expand(&conv_key, &nonce, Some(ciphertext), Some(mac))?;
+    let mut buffer = ciphertext.to_vec();
+    let mut cipher = chacha20::ChaCha20::new((&keys.chacha_key).into(), (&keys.chacha_nonce).into());
+    cipher.apply_keystream(&mut buffer);
 
-    // Derive decryption key and AAD using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(nonce), &conv_key);
-    let mut chacha_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-key", &mut chacha_key)
-        .map_err(|e| anyhow::anyhow!("HKDF chacha key failed: {}", e))?;
-    let mut aad = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-aad", &mut aad)
-        .map_err(|e| anyhow::anyhow!("HKDF aad failed: {}", e))?;
-
-    // Decrypt with ChaCha20-Poly1305
-    let cipher = ChaCha::new(chacha_key.as_ref().into());
-    let chacha_nonce = chacha20poly1305::Nonce::from_slice(&[0u8; 12]); // NIP-44 uses all-zero nonce
-
-    let mut buffer = ciphertext_with_mac.to_vec();
-    cipher.decrypt_in_place(chacha_nonce, &aad, &mut buffer)
-        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
-
-    String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
+    nip44_unpad(&buffer)
 }
 
 fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, keys: &Keys) -> Result<Event> {
@@ -270,6 +368,7 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
 
     // Debug: Log conversation key
     let conv_key = get_nip44_conversation_key(keys.secret_key(), &gift_event.pubkey)
+        .map(|k| hex::encode(k))
         .unwrap_or_else(|_| "ERROR".to_string());
     eprintln!("[mobile] Giftwrap decrypt - myPriv: {}... wrapperPub: {}...",
         hex::encode(keys.secret_key().secret_bytes()).chars().take(8).collect::<String>(),
@@ -966,17 +1065,9 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
     eprintln!("[encrypt_media] Got current keys");
 
     // Derive shared secret using NIP-44's conversation key (32 bytes)
-    let conversation_key_hex = get_nip44_conversation_key(keys.secret_key(), &recipient_pk)
+    let key_bytes = get_nip44_conversation_key(keys.secret_key(), &recipient_pk)
         .context("Failed to derive conversation key")?;
-    eprintln!("[encrypt_media] Derived conversation key (len: {})", conversation_key_hex.len());
-
-    let key_bytes = hex::decode(&conversation_key_hex)
-        .context("Failed to decode conversation key hex")?;
-
-    if key_bytes.len() != 32 {
-        anyhow::bail!("Conversation key must be 32 bytes, got {}", key_bytes.len());
-    }
-    eprintln!("[encrypt_media] Key bytes decoded: {} bytes", key_bytes.len());
+    eprintln!("[encrypt_media] Derived conversation key (len: {})", key_bytes.len());
 
     // Generate random 12-byte IV for AES-GCM
     let mut iv = [0u8; 12];
@@ -1107,8 +1198,7 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
     // Decrypt based on encryption type
     let plaintext = if descriptor.encryption == "aes-gcm" {
         // Derive shared secret using NIP-44's conversation key
-        let conversation_key_hex = get_nip44_conversation_key(keys.secret_key(), &sender_pk)?;
-        let key_bytes = hex::decode(&conversation_key_hex)?;
+        let key_bytes = get_nip44_conversation_key(keys.secret_key(), &sender_pk)?;
 
         let iv_bytes = general_purpose::STANDARD.decode(&descriptor.iv)?;
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)?;
