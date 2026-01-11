@@ -14,6 +14,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:video_player/video_player.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -225,6 +228,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Set<String> _sessionMessages = {};
   bool _showScrollToBottom = false;
   bool _hasNewMessages = false;
+  bool _encryptPendingAttachment = true;
 
   @override
   void initState() {
@@ -916,12 +920,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       String localText = text;
 
       if (attachment != null) {
-        final desc = api.encryptMedia(
-          bytes: attachment.bytes,
-          recipient: selectedContact!,
-          mime: attachment.mime,
-          filename: attachment.name,
-        );
+        final isEncrypted = _encryptPendingAttachment;
+        final desc = isEncrypted
+            ? api.encryptMedia(
+                bytes: attachment.bytes,
+                recipient: selectedContact!,
+                mime: attachment.mime,
+                filename: attachment.name,
+              )
+            : api.uploadMediaUnencrypted(
+                bytes: attachment.bytes,
+                mime: attachment.mime,
+                filename: attachment.name,
+              );
         final descriptor = {
           'url': desc.url,
           'iv': desc.iv,
@@ -963,6 +974,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ? desc.cipherSha256
               : desc.url,
           'url': desc.url,
+          'nonEncrypted': !isEncrypted,
         };
         localText = text.isNotEmpty ? text : '(attachment)';
       }
@@ -1856,6 +1868,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         mime: mime,
         name: name,
       );
+      _encryptPendingAttachment = true;
     });
     _scrollToBottom(force: true);
   }
@@ -2380,6 +2393,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final color = isOut ? const Color(0xFF1E3A5F) : const Color(0xFF2E7D32);
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
+        final attachmentBadge = _buildAttachmentBadge(m);
         final actions = !isOut
             ? Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2452,7 +2466,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     _friendlyTime(m['created_at']),
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                   ),
-                  if (dmBadge != null) ...[const SizedBox(width: 6), dmBadge],
+                if (dmBadge != null) ...[const SizedBox(width: 6), dmBadge],
+                if (attachmentBadge != null)
+                  ...[const SizedBox(width: 6), attachmentBadge],
                 ],
               ),
             ),
@@ -2497,6 +2513,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           child: Icon(Icons.arrow_downward_rounded, size: 18, color: iconColor),
+        ),
+      ),
+    );
+  }
+
+  Widget? _buildAttachmentBadge(Map<String, dynamic> message) {
+    final media = message['media'];
+    if (media is! Map) return null;
+    final nonEncrypted = media['nonEncrypted'] == true ||
+        (media['encryption']?.toString() == 'none');
+    if (!nonEncrypted) return null;
+    return Tooltip(
+      message: 'Unencrypted attachment',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.lock_open, size: 14, color: Colors.orange),
+          ],
         ),
       ),
     );
@@ -2600,6 +2641,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: _PendingPreview(
               attachment: _pendingAttachment!,
               onRemove: () => setState(() => _pendingAttachment = null),
+              encrypted: _encryptPendingAttachment,
+              onToggleEncryption: () {
+                setState(() {
+                  _encryptPendingAttachment = !_encryptPendingAttachment;
+                });
+              },
             ),
           ),
         Container(
@@ -2920,22 +2967,64 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       final mime = media['mime']?.toString() ?? 'application/octet-stream';
       final isImage = mime.startsWith('image/');
+      final isVideo = mime.startsWith('video/');
+      final isAudio = mime.startsWith('audio/');
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (isImage)
-            Image.memory(
-              bytes,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => Text(
-                'Failed to load image',
-                style: TextStyle(color: Colors.grey.shade400),
+            GestureDetector(
+              onTap: () => _openImageViewer(
+                bytes: bytes,
+                title: media['filename']?.toString(),
+              ),
+              child: Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => Text(
+                  'Failed to load image',
+                  style: TextStyle(color: Colors.grey.shade400),
+                ),
               ),
             ),
           if (!isImage)
-            Text(
-              media['filename']?.toString() ?? 'Attachment',
-              style: const TextStyle(decoration: TextDecoration.underline),
+            InkWell(
+              onTap: () {
+                if (isVideo) {
+                  _openVideoPlayer(
+                    bytes: bytes,
+                    title: media['filename']?.toString(),
+                    mime: mime,
+                  );
+                } else if (isAudio) {
+                  _openAudioPlayer(
+                    bytes: bytes,
+                    title: media['filename']?.toString(),
+                    mime: mime,
+                  );
+                }
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isVideo
+                        ? Icons.play_circle_outline
+                        : (isAudio ? Icons.volume_up : Icons.attach_file),
+                    size: 20,
+                    color: Colors.white70,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      media['filename']?.toString() ?? 'Attachment',
+                      style: const TextStyle(
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           const SizedBox(height: 4),
           Row(
@@ -2975,6 +3064,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             r'\.(png|jpe?g|gif|webp)$',
             caseSensitive: false,
           ).hasMatch(url);
+      final isVideo =
+          mime.startsWith('video/') ||
+          RegExp(
+            r'\.(mp4|mov|webm|mkv)$',
+            caseSensitive: false,
+          ).hasMatch(url);
+      final isAudio =
+          mime.startsWith('audio/') ||
+          RegExp(
+            r'\.(mp3|m4a|wav|ogg)$',
+            caseSensitive: false,
+          ).hasMatch(url);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2983,12 +3084,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           if (isImage)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: Image.network(
-                url,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => Text(
-                  'Image preview failed',
-                  style: TextStyle(color: Colors.grey.shade400),
+              child: GestureDetector(
+                onTap: () => _openImageViewer(url: url, title: filename),
+                child: Image.network(
+                  url,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) => Text(
+                    'Image preview failed',
+                    style: TextStyle(color: Colors.grey.shade400),
+                  ),
+                ),
+              ),
+            ),
+          if (!isImage && (isVideo || isAudio))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: InkWell(
+                onTap: () {
+                  if (isVideo) {
+                    _openVideoPlayer(url: url, title: filename, mime: mime);
+                  } else if (isAudio) {
+                    _openAudioPlayer(url: url, title: filename, mime: mime);
+                  }
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isVideo
+                          ? Icons.play_circle_outline
+                          : Icons.volume_up,
+                      size: 20,
+                      color: Colors.white70,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        isVideo ? 'Play video' : 'Play audio',
+                        style: const TextStyle(
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -3159,6 +3297,77 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<File> _writeTempMediaFile(Uint8List bytes, String mime) async {
+    final dir = await getTemporaryDirectory();
+    final ext = extensionFromMime(mime);
+    final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  Future<void> _openImageViewer({
+    Uint8List? bytes,
+    String? url,
+    String? title,
+  }) async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _ImageViewerPage(bytes: bytes, url: url, title: title),
+      ),
+    );
+  }
+
+  Future<void> _openVideoPlayer({
+    Uint8List? bytes,
+    String? url,
+    String? title,
+    required String mime,
+  }) async {
+    if (!mounted) return;
+    String? filePath;
+    if (bytes != null) {
+      final file = await _writeTempMediaFile(bytes, mime);
+      filePath = file.path;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _VideoPlayerPage(
+          url: url,
+          filePath: filePath,
+          title: title,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openAudioPlayer({
+    Uint8List? bytes,
+    String? url,
+    String? title,
+    required String mime,
+  }) async {
+    if (!mounted) return;
+    String? filePath;
+    if (bytes != null) {
+      final file = await _writeTempMediaFile(bytes, mime);
+      filePath = file.path;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _AudioPlayerPage(
+          url: url,
+          filePath: filePath,
+          title: title,
+        ),
+      ),
+    );
+  }
+
   String extensionFromMime(String mime) {
     switch (mime) {
       case 'image/png':
@@ -3169,6 +3378,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return 'gif';
       case 'image/webp':
         return 'webp';
+      case 'video/mp4':
+        return 'mp4';
+      case 'video/quicktime':
+        return 'mov';
+      case 'video/webm':
+        return 'webm';
+      case 'video/x-matroska':
+        return 'mkv';
+      case 'audio/mpeg':
+        return 'mp3';
+      case 'audio/mp4':
+        return 'm4a';
+      case 'audio/wav':
+        return 'wav';
+      case 'audio/ogg':
+        return 'ogg';
       default:
         return 'bin';
     }
@@ -3252,6 +3477,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mime: resolvedMime,
           name: filename,
         );
+        _encryptPendingAttachment = true;
         if (text.isNotEmpty) {
           messageCtrl.text = text;
         }
@@ -3488,10 +3714,17 @@ class _PendingAttachment {
 }
 
 class _PendingPreview extends StatelessWidget {
-  const _PendingPreview({required this.attachment, required this.onRemove});
+  const _PendingPreview({
+    required this.attachment,
+    required this.onRemove,
+    required this.encrypted,
+    required this.onToggleEncryption,
+  });
 
   final _PendingAttachment attachment;
   final VoidCallback onRemove;
+  final bool encrypted;
+  final VoidCallback onToggleEncryption;
 
   @override
   Widget build(BuildContext context) {
@@ -3530,6 +3763,16 @@ class _PendingPreview extends StatelessWidget {
         children: [
           Flexible(fit: FlexFit.loose, child: preview),
           const SizedBox(width: 8),
+          IconButton(
+            icon: Icon(
+              encrypted ? Icons.lock : Icons.lock_open,
+              color: encrypted ? Colors.greenAccent : Colors.orangeAccent,
+            ),
+            onPressed: onToggleEncryption,
+            tooltip: encrypted
+                ? 'Encrypted attachment (tap to send unencrypted)'
+                : 'Unencrypted attachment (tap to encrypt)',
+          ),
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: onRemove,
@@ -3573,6 +3816,222 @@ class _QrScanPageState extends State<_QrScanPage> {
           _handled = true;
           Navigator.of(context).pop(code);
         },
+      ),
+    );
+  }
+}
+
+class _ImageViewerPage extends StatelessWidget {
+  const _ImageViewerPage({this.bytes, this.url, this.title});
+
+  final Uint8List? bytes;
+  final String? url;
+  final String? title;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = bytes != null
+        ? Image.memory(bytes!, fit: BoxFit.contain)
+        : Image.network(url ?? '', fit: BoxFit.contain);
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Text(title ?? 'Image'),
+        backgroundColor: Colors.black,
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          child: image,
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoPlayerPage extends StatefulWidget {
+  const _VideoPlayerPage({this.url, this.filePath, this.title});
+
+  final String? url;
+  final String? filePath;
+  final String? title;
+
+  @override
+  State<_VideoPlayerPage> createState() => _VideoPlayerPageState();
+}
+
+class _VideoPlayerPageState extends State<_VideoPlayerPage> {
+  VideoPlayerController? _controller;
+  Future<void>? _initFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.filePath != null) {
+      _controller = VideoPlayerController.file(File(widget.filePath!));
+    } else {
+      _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url ?? ''));
+    }
+    _initFuture = _controller!.initialize();
+    _controller!.setLooping(true);
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Text(widget.title ?? 'Video'),
+        backgroundColor: Colors.black,
+      ),
+      body: FutureBuilder<void>(
+        future: _initFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final controller = _controller!;
+          return Center(
+            child: AspectRatio(
+              aspectRatio: controller.value.aspectRatio,
+              child: VideoPlayer(controller),
+            ),
+          );
+        },
+      ),
+      floatingActionButton: _controller == null
+          ? null
+          : FloatingActionButton(
+              onPressed: () {
+                setState(() {
+                  if (_controller!.value.isPlaying) {
+                    _controller!.pause();
+                  } else {
+                    _controller!.play();
+                  }
+                });
+              },
+              child: Icon(
+                _controller!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+              ),
+            ),
+    );
+  }
+}
+
+class _AudioPlayerPage extends StatefulWidget {
+  const _AudioPlayerPage({this.url, this.filePath, this.title});
+
+  final String? url;
+  final String? filePath;
+  final String? title;
+
+  @override
+  State<_AudioPlayerPage> createState() => _AudioPlayerPageState();
+}
+
+class _AudioPlayerPageState extends State<_AudioPlayerPage> {
+  final AudioPlayer _player = AudioPlayer();
+  Duration _duration = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      if (widget.filePath != null) {
+        await _player.setFilePath(widget.filePath!);
+      } else if (widget.url != null && widget.url!.isNotEmpty) {
+        await _player.setUrl(widget.url!);
+      }
+      _duration = _player.duration ?? Duration.zero;
+      setState(() {});
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration value) {
+    final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '${value.inHours > 0 ? '${value.inHours}:' : ''}$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title ?? 'Audio')),
+      body: Center(
+        child: StreamBuilder<Duration>(
+          stream: _player.positionStream,
+          builder: (context, snapshot) {
+            final position = snapshot.data ?? Duration.zero;
+            final max = _duration.inMilliseconds > 0
+                ? _duration
+                : Duration.zero;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.audiotrack,
+                  size: 64,
+                  color: Colors.white70,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '${_formatDuration(position)} / ${_formatDuration(max)}',
+                  style: const TextStyle(fontSize: 13, color: Colors.white70),
+                ),
+                Slider(
+                  value: max.inMilliseconds == 0
+                      ? 0
+                      : position.inMilliseconds.clamp(
+                            0,
+                            max.inMilliseconds,
+                          ) /
+                          max.inMilliseconds,
+                  onChanged: max.inMilliseconds == 0
+                      ? null
+                      : (value) async {
+                          final targetMs =
+                              (value * max.inMilliseconds).round();
+                          await _player.seek(Duration(milliseconds: targetMs));
+                        },
+                ),
+                StreamBuilder<PlayerState>(
+                  stream: _player.playerStateStream,
+                  builder: (context, stateSnapshot) {
+                    final playing = stateSnapshot.data?.playing ?? false;
+                    return ElevatedButton.icon(
+                      onPressed: () {
+                        if (playing) {
+                          _player.pause();
+                        } else {
+                          _player.play();
+                        }
+                        setState(() {});
+                      },
+                      icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                      label: Text(playing ? 'Pause' : 'Play'),
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

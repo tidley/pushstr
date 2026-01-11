@@ -81,6 +81,12 @@ abstract class RustLibApi extends BaseApi {
     String? filename,
   });
 
+  MediaDescriptor crateApiUploadMediaUnencrypted({
+    required List<int> bytes,
+    required String mime,
+    String? filename,
+  });
+
   String crateApiFetchRecentDms({required BigInt limit, required BigInt sinceTimestamp});
 
   String crateApiGenerateNewKey();
@@ -187,6 +193,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiEncryptMediaConstMeta =>
       const TaskConstMeta(debugName: "encrypt_media", argNames: ["bytes", "recipient", "mime", "filename"]);
+
+  @override
+  MediaDescriptor crateApiUploadMediaUnencrypted({
+    required List<int> bytes,
+    required String mime,
+    String? filename,
+  }) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(bytes, serializer);
+          sse_encode_String(mime, serializer);
+          sse_encode_opt_String(filename, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_media_descriptor, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiUploadMediaUnencryptedConstMeta,
+        argValues: [bytes, mime, filename],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiUploadMediaUnencryptedConstMeta =>
+      const TaskConstMeta(debugName: "upload_media_unencrypted", argNames: ["bytes", "mime", "filename"]);
 
   @override
   String crateApiFetchRecentDms({required BigInt limit, required BigInt sinceTimestamp}) {

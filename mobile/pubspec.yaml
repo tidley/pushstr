@@ -55,6 +55,8 @@ dependencies:
   flutter_local_notifications: ^17.1.2
   flutter_foreground_task: ^6.2.6
   workmanager: ^0.9.0+3
+  just_audio: ^0.9.36
+  video_player: ^2.9.2
   # receive_sharing_intent: ^1.6.1  # Commented out - causes JVM compatibility issues
 
 

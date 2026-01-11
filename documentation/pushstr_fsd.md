@@ -51,11 +51,14 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Support legacy giftwrap DMs for older clients.
 - Tag messages with their DM type (04/17) in history and UI.
 - Allow per-contact DM mode override (NIP-04 vs giftwrap) with a quick toggle in the composer.
+- Tap media in the message history to open full-screen image/video or in-app audio playback.
+- Display an unlocked padlock badge on messages containing unencrypted attachments.
 - Persist message history locally.
 
 ### 6.4 Attachments
 - Attach images, audio, video, or arbitrary files.
 - Encrypt files for the recipient before upload.
+- Allow optional unencrypted uploads with a visible warning indicator.
 - Upload encrypted content to Blossom-compatible server.
 - Transmit encrypted media descriptors in DMs.
 - For cross-client readability, include a plain URL line plus a Pushstr-only metadata block:

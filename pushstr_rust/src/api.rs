@@ -1153,6 +1153,34 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
     })
 }
 
+/// Upload unencrypted media to Blossom and return a descriptor.
+#[frb(sync)]
+pub fn upload_media_unencrypted(bytes: Vec<u8>, mime: String, filename: Option<String>) -> Result<MediaDescriptor> {
+    let keys = run_block_on(async {
+        let guard = NOSTR_KEYS.lock().await;
+        if let Some(k) = guard.as_ref() {
+            Ok(k.clone())
+        } else {
+            anyhow::bail!("Nostr not initialized. Call init_nostr first.")
+        }
+    })?;
+
+    let plain_hash = sha256_hex(&bytes)?;
+    let url = upload_to_blossom(&bytes, &plain_hash, &keys)
+        .context("Failed to upload to Blossom")?;
+
+    Ok(MediaDescriptor {
+        url,
+        iv: String::new(),
+        sha256: plain_hash,
+        cipher_sha256: String::new(),
+        mime,
+        size: bytes.len(),
+        encryption: "none".to_string(),
+        filename,
+    })
+}
+
 /// Upload encrypted data to Blossom server
 fn upload_to_blossom(data: &[u8], hash: &str, keys: &Keys) -> Result<String> {
     let created_at = timestamp();

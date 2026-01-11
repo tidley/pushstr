@@ -72,6 +72,13 @@ MediaDescriptor encryptMedia({
   String? filename,
 }) => RustLib.instance.api.crateApiEncryptMedia(bytes: bytes, recipient: recipient, mime: mime, filename: filename);
 
+/// Upload unencrypted media and return a descriptor
+MediaDescriptor uploadMediaUnencrypted({
+  required List<int> bytes,
+  required String mime,
+  String? filename,
+}) => RustLib.instance.api.crateApiUploadMediaUnencrypted(bytes: bytes, mime: mime, filename: filename);
+
 /// Decrypt media descriptor to raw bytes using provided or current key
 /// sender_pubkey: hex or npub of the message sender (for deriving shared secret)
 Uint8List decryptMedia({required String descriptorJson, required String senderPubkey, String? myNsec}) => RustLib
