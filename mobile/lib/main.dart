@@ -221,13 +221,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Session-based decryption caching
   final Map<String, Uint8List> _decryptedMediaCache = {};
   final Set<String> _sessionMessages = {};
+  bool _showScrollToBottom = false;
+  bool _hasNewMessages = false;
 
   @override
   void initState() {
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_handleScroll);
     _messageFocus.addListener(() {
       if (_messageFocus.hasFocus) {
-        _scrollToBottom();
+        _scrollToBottom(force: true);
       }
     });
     super.initState();
@@ -254,6 +257,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
     _messageFocus.dispose();
     for (final t in _copiedMessageTimers.values) {
@@ -275,7 +279,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (bottom != _lastViewInsets) {
       _lastViewInsets = bottom;
       if (bottom > 0) {
-        _scrollToBottom();
+        _scrollToBottom(force: true);
       }
     }
     super.didChangeMetrics();
@@ -851,8 +855,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
         await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
       }
-      if (added && _isNearBottom()) {
-        _scrollToBottom();
+      if (added) {
+        if (_isNearBottom()) {
+          _scrollToBottom();
+        } else {
+          _flagNewMessageWhileScrolledBack();
+        }
       }
     } catch (e) {
       setState(() {
@@ -950,7 +958,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = null;
       });
 
-      _scrollToBottom();
+      _scrollToBottom(force: true);
 
       // Persist and fire off the send in the background; we optimistically assume success.
       unawaited(_saveMessages());
@@ -1281,6 +1289,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           } catch (_) {}
           if (_isNearBottom()) {
             _scrollToBottom();
+          } else {
+            _flagNewMessageWhileScrolledBack();
           }
         }
       } catch (e) {
@@ -1648,19 +1658,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return {'text': raw, 'media': null};
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool force = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-      final target = _scrollController.position.maxScrollExtent + 80;
-      if (_isNearBottom()) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      } else {
+      if (!force && !_isNearBottom()) return;
+      final max = _scrollController.position.maxScrollExtent;
+      if (force) {
         _scrollController.animateTo(
-          target,
+          max,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
+        return;
       }
+      _scrollController.jumpTo(max);
     });
   }
 
@@ -1669,6 +1680,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final max = _scrollController.position.maxScrollExtent;
     final offset = _scrollController.offset;
     return (max - offset) < 200;
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients || !mounted) return;
+    final nearBottom = _isNearBottom();
+    if (nearBottom) {
+      if (_showScrollToBottom || _hasNewMessages) {
+        setState(() {
+          _showScrollToBottom = false;
+          _hasNewMessages = false;
+        });
+      }
+      return;
+    }
+    if (!_showScrollToBottom) {
+      setState(() {
+        _showScrollToBottom = true;
+      });
+    }
+  }
+
+  void _flagNewMessageWhileScrolledBack() {
+    if (!_scrollController.hasClients || !mounted) return;
+    if (_isNearBottom()) return;
+    setState(() {
+      _showScrollToBottom = true;
+      _hasNewMessages = true;
+    });
   }
 
   Future<void> _launchUrl(String url) async {
@@ -1724,7 +1763,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         name: name,
       );
     });
-    _scrollToBottom();
+    _scrollToBottom(force: true);
   }
 
   Future<void> _attachImage() async {
@@ -2249,7 +2288,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
           );
 
-    return ListView.builder(
+    final listView = ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(12),
       itemCount: convo.length,
@@ -2342,6 +2381,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
+    return Stack(
+      children: [
+        listView,
+        if (_showScrollToBottom)
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: _buildScrollToBottomButton(),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildScrollToBottomButton() {
+    final iconColor = _hasNewMessages ? const Color(0xFF22C55E) : Colors.grey;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          _scrollToBottom(force: true);
+        },
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(Icons.arrow_downward_rounded, size: 18, color: iconColor),
+        ),
+      ),
+    );
   }
 
   Widget _buildSendToDropdown({bool inAppBar = false}) {
@@ -2416,7 +2495,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (value == null) return;
               setState(() => selectedContact = value);
               _persistVisibleState();
-              _scrollToBottom();
+              _scrollToBottom(force: true);
             },
     );
 
@@ -3099,7 +3178,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       });
       _messageFocus.requestFocus();
-      _scrollToBottom();
+      _scrollToBottom(force: true);
       return;
     }
 
@@ -3431,6 +3510,13 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  static const List<String> _defaultRelays = [
+    'wss://relay.damus.io',
+    'wss://relay.primal.net',
+    'wss://nos.lol',
+    'wss://nostr.mom',
+    'wss://relay.nostr.band',
+  ];
   List<Map<String, String>> profiles = [];
   List<String> profileNpubs = [];
   int selectedProfileIndex = 0;
@@ -3572,9 +3658,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         : '';
 
     // Load relays
-    final loadedRelays =
-        prefs.getStringList('relays') ??
-        ['wss://relay.damus.io', 'wss://relay.primal.net', 'wss://nos.lol'];
+    final storedRelays = prefs.getStringList('relays');
+    final loadedRelays = _mergeDefaultRelays(storedRelays);
+    if (storedRelays == null ||
+        storedRelays.length < _defaultRelays.length) {
+      await prefs.setStringList('relays', loadedRelays);
+    }
 
     var npub = '';
     try {
@@ -3613,6 +3702,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
     _probeAllRelays(loadedRelays);
+  }
+
+  List<String> _mergeDefaultRelays(List<String>? existing) {
+    if (existing == null || existing.isEmpty) {
+      return List<String>.from(_defaultRelays);
+    }
+    if (existing.length >= _defaultRelays.length) {
+      return List<String>.from(existing);
+    }
+    final merged = List<String>.from(existing);
+    for (final relay in _defaultRelays) {
+      if (!merged.contains(relay)) {
+        merged.add(relay);
+        if (merged.length >= _defaultRelays.length) break;
+      }
+    }
+    return merged;
   }
 
   void _markDirty({bool schedule = true}) {

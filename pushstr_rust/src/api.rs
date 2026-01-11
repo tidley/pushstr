@@ -442,8 +442,10 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
 // Default relay configuration
 const RELAYS: &[&str] = &[
     "wss://relay.damus.io",
-    "wss://relay.snort.social",
-    "wss://offchain.pub",
+    "wss://relay.primal.net",
+    "wss://nos.lol",
+    "wss://nostr.mom",
+    "wss://relay.nostr.band",
 ];
 const DM_RELAYS: &[&str] = &[
     "wss://nos.lol",

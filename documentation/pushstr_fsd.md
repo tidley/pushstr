@@ -1,21 +1,21 @@
 # Pushstr Functional Specification Document
 
-Version: 0.1
-Last updated: 2025-01-11
+Version: 0.2
+Last updated: 2026-01-11
 Owner: Pushstr
 
 ## 1. Purpose
 Define the functional scope, behavior, and system boundaries for the Pushstr project, including the browser extension, mobile app, and Rust core.
 
 ## 2. Product Summary
-Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, end-to-end encrypted direct messaging (DMs) and file sharing between devices using NIP-04 and NIP-59 (giftwrap) flows, without centralized servers or accounts. Users control their keys and can create multiple identities for privacy.
+Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, end-to-end encrypted direct messaging (DMs) and file sharing between devices using NIP-04 and NIP-59 giftwrap flows (NIP-44 v2 encryption), plus legacy giftwrap compatibility for older clients, without centralized servers or accounts. Users control their keys and can create multiple identities for privacy.
 
 ## 3. Goals
 - Fast, private, reliable messaging across devices.
 - No central server dependency; use multiple relays for resilience.
 - Simple onboarding: generate or import keys and start messaging quickly.
 - Secure file transfer with end-to-end encryption and relay-backed transport.
-- Compatibility with other Nostr clients (e.g., Amethyst) for DMs.
+- Compatibility with other Nostr clients (e.g., Amethyst) and the Pushstr browser extension for DMs.
 
 ## 4. In-Scope Components
 - Browser extension (Firefox/Chrome) for quick messaging and file sending.
@@ -46,9 +46,10 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 ### 6.3 Messaging
 - Send and receive text DMs.
 - Support NIP-04 (kind 4) encrypted DMs.
-- Support NIP-59 giftwrap DMs (kind 1059 with sealed rumor kind 13 and inner kind 14).
-- Tag messages with their DM type (04/17) in history.
-- Allow per-contact DM mode override (NIP-04 vs giftwrap).
+- Support NIP-59 giftwrap DMs (kind 1059 with sealed rumor kind 13 and inner kind 14) using NIP-44 v2.
+- Support legacy giftwrap DMs for older clients.
+- Tag messages with their DM type (04/17) in history and UI.
+- Allow per-contact DM mode override (NIP-04 vs giftwrap) with a quick toggle in the composer.
 - Persist message history locally.
 
 ### 6.4 Attachments
@@ -66,6 +67,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Publish a relay list (kind 10050) for DMs if none exists.
 - Read recipient relay list (kind 10050) when sending giftwraps.
 - Send events through all connected relays.
+- Default public relays: wss://relay.damus.io, wss://relay.primal.net, wss://nos.lol, wss://nostr.mom, wss://relay.nostr.band.
 
 ### 6.6 Sync & Background Processing (Mobile)
 - Fetch recent messages at startup and on manual refresh.
@@ -81,12 +83,13 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 ### 6.8 Settings & Utilities
 - Export and back up nsec.
 - Copy message contents to clipboard.
-- Manage relay preferences (read-only defaults in current UI).
+- Manage relay preferences in settings (editable list stored locally).
 - Display status/errors in-app.
 
 ### 6.9 Logging & Diagnostics
 - Log DM send/receive state transitions.
 - Capture decrypt or parse errors for diagnostics.
+- Avoid auto-jumping to latest when the user is scrolling history; show a scroll-to-bottom indicator instead.
 
 ## 7. Data Model
 
@@ -134,7 +137,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 1. Compose message for contact.
 2. Build inner kind 14 event with p-tag and alt.
 3. Convert to rumor (unsigned JSON).
-4. Encrypt rumor into sealed event (kind 13) using NIP-44.
+4. Encrypt rumor into sealed event (kind 13) using NIP-44 v2.
 5. Encrypt sealed event into giftwrap (kind 1059) with ephemeral key.
 6. Publish to recipient DM relays.
 
@@ -179,7 +182,14 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Large attachments may exceed device memory limits.
 - Cross-client NIP-59 compatibility depends on correct relay lists and encryption.
 
-## 12. Out of Scope (Current)
+## 12. Current State Notes
+- NIP-04 DMs are reliable across Pushstr, the browser extension, and Amethyst.
+- NIP-59 giftwrap DMs are reliable inbound from Amethyst; outbound reliability to Amethyst is intermittent and still being tuned.
+- Giftwrap uses NIP-44 v2 with legacy giftwrap support for older clients.
+- Relay defaults are aligned with Amethyst’s bootstrap inbox set; users can add/remove relays in settings.
+- Chat history now preserves scroll position and exposes a scroll-to-bottom indicator when new messages arrive.
+
+## 13. Out of Scope (Current)
 - Group chats or public channels.
 - Centralized push notification service.
 - Server-side message storage beyond relays.
