@@ -356,7 +356,7 @@ fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, keys: &Keys) ->
     let gift_ciphertext = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &sealed_json)?;
     let builder = EventBuilder::new(Kind::GiftWrap, gift_ciphertext)
         .custom_created_at(random_timestamp_within_two_days())
-        .tag(Tag::public_key(recipient_pk));
+        .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]));
     let gift = builder.sign_with_keys(&wrapper_keys)?;
     Ok(gift)
 }
@@ -560,7 +560,11 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
 
         // NIP-17: Inner DM with plaintext content, signed by user - kind 14
         let inner_event = EventBuilder::new(Kind::Custom(14), content)
-            .tag(Tag::public_key(recipient_pk))
+            .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
+            .tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Direct message".to_string()],
+            ))
             .sign_with_keys(&keys)?;
 
         let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
@@ -584,7 +588,11 @@ pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String>
         // Inner DM (kind 14) with NIP-44 encrypted content
         let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
         let inner_event = EventBuilder::new(Kind::Custom(14), ciphertext)
-            .tag(Tag::public_key(recipient_pk))
+            .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
+            .tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Direct message".to_string()],
+            ))
             .sign_with_keys(&keys)?;
 
         // Giftwrap with random timestamp and expiration tag (matches browser extension)
@@ -596,7 +604,7 @@ pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String>
         let random_timestamp = random_timestamp_within_two_days();
         let expiration = now.as_u64() + (24 * 60 * 60);
         let tags = vec![
-            Tag::public_key(recipient_pk),
+            Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]),
             Tag::expiration(Timestamp::from(expiration)),
         ];
 
