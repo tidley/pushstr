@@ -2713,10 +2713,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
+    final canScroll = _scrollController.hasClients &&
+        _scrollController.position.maxScrollExtent > 8;
     return Stack(
       children: [
         listView,
-        if (_showScrollToBottom)
+        if (_showScrollToBottom && canScroll)
           Positioned(
             right: 12,
             bottom: 12,
@@ -2839,8 +2841,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       selectedItemBuilder: (_) => contacts.map((c) {
         final pubkey = c['pubkey'] ?? '';
         final nickname = (c['nickname'] ?? '').toString().trim();
-        final primary = _short(pubkey);
-        final label = nickname.isNotEmpty ? '$nickname · $primary' : primary;
+        final label = nickname.isNotEmpty ? nickname : _short(pubkey);
         return Align(
           alignment: Alignment.centerLeft,
           child: Text(label, overflow: TextOverflow.ellipsis),
