@@ -249,7 +249,8 @@ button:hover {
 
 .dm-toggle.active {
   color: #22c55e;
-  border-color: rgba(34, 197, 94, 0.5);
+  border-color: rgba(34, 197, 94, 0.8);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.8);
 }
 
 main {
@@ -373,7 +374,7 @@ main {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
-  background: var(--panel-alt);
+  background: #0b0b0c;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -571,11 +572,10 @@ main {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: var(--bg);
+  background: #0b0b0c;
   align-items: stretch;
   position: sticky;
   bottom: 0;
-  box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.35);
   z-index: 2;
 }
 
@@ -604,6 +604,7 @@ main {
   gap: 8px;
   position: relative;
   align-items: center;
+  background: #0b0b0c;
 }
 
 #attach,
@@ -635,13 +636,13 @@ main {
 #message {
   flex: 1;
   resize: none;
-  padding: 8px 10px;
+  padding: 2px 10px;
   font-size: 13px;
-  background: #121318;
+  background: #0b0b0c;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  min-height: 44px;
+  min-height: 22px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
