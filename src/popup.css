@@ -579,6 +579,12 @@ main {
   z-index: 2;
 }
 
+#composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 #upload-warning {
   display: none;
   background: rgba(255, 204, 0, 0.1);
@@ -600,13 +606,14 @@ main {
 }
 
 #input-row {
-  position: relative;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
   background: #121318;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 6px;
+  padding: 6px 8px;
 }
 
 #attach,
@@ -622,24 +629,11 @@ main {
   align-items: center;
   justify-content: center;
   padding: 0;
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-}
-
-#attach {
-  left: 8px;
 }
 
 #send {
-  right: 8px;
   border-color: rgba(34, 197, 94, 0.6);
   background: rgba(34, 197, 94, 0.18);
-}
-
-#dm-toggle {
-  right: 50px;
 }
 
 #dm-toggle svg {
@@ -656,7 +650,7 @@ main {
 #message {
   flex: 1;
   resize: none;
-  padding: 8px 86px 8px 44px;
+  padding: 6px 6px;
   font-size: 13px;
   background: transparent;
   color: var(--text);
@@ -664,7 +658,6 @@ main {
   border-radius: 8px;
   min-height: 44px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
-  z-index: 1;
 }
 
 #message::placeholder {

@@ -1281,8 +1281,10 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
 function updateComposerMode() {
   const hasContent = messageInput.value.trim().length > 0 || pendingFile;
   if (hasContent) {
+    attachBtn.classList.add("hidden");
     sendBtn.classList.remove("hidden");
   } else {
+    attachBtn.classList.remove("hidden");
     sendBtn.classList.add("hidden");
   }
   updateDmToggle();

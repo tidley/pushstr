@@ -32,13 +32,15 @@
           <span>Attachments upload unencrypted; encrypt sensitive data yourself.</span>
           <button id="dismiss-warning">Don’t show again</button>
         </div>
-        <div id="input-row">
-          <button id="attach" title="Attach file" aria-label="Attach file">📎</button>
-          <textarea id="message" rows="3" placeholder="Type a message, press enter to send"></textarea>
-          <button id="send" class="hidden" title="Send" aria-label="Send">➤</button>
+        <div id="composer-row">
           <button id="dm-toggle" class="icon-btn dm-toggle" title="NIP-17 (giftwrap)" aria-label="Toggle DM mode">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7a5 5 0 0 1 5 5v1h2v-1a7 7 0 1 0-14 0v1h2v-1a5 5 0 0 1 5-5zm-7 7h14v6H5v-6zm3 2v2h2v-2H8zm6 0v2h2v-2h-2z"/></svg>
           </button>
+          <div id="input-row">
+            <button id="attach" title="Attach file" aria-label="Attach file">📎</button>
+            <textarea id="message" rows="3" placeholder="Type a message, press enter to send"></textarea>
+            <button id="send" class="hidden" title="Send" aria-label="Send">➤</button>
+          </div>
         </div>
         <div id="preview">
           <button id="clearPreview" title="Remove attachment" aria-label="Remove attachment">✕</button>
