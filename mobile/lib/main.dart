@@ -3824,30 +3824,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (_) => Positioned(
         top: preferTop ? padding.top + 16 : null,
         bottom: preferTop ? null : padding.bottom + 16,
-        left: 16,
-        right: 16,
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: theme.colorScheme.primary.withOpacity(0.8),
+        left: 0,
+        right: 0,
+        child: Align(
+          alignment: preferTop ? Alignment.topCenter : Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.8,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.45),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
+              child: IntrinsicWidth(
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface.withOpacity(0.95),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.primary.withOpacity(0.8),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.45),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
-              ],
-            ),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+              ),
             ),
           ),
         ),
@@ -4816,30 +4834,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (_) => Positioned(
         top: preferTop ? padding.top + 16 : null,
         bottom: preferTop ? null : padding.bottom + 16,
-        left: 16,
-        right: 16,
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: theme.colorScheme.primary.withOpacity(0.8),
+        left: 0,
+        right: 0,
+        child: Align(
+          alignment: preferTop ? Alignment.topCenter : Alignment.bottomCenter,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.8,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.45),
-                  blurRadius: 12,
-                  offset: const Offset(0, 6),
+              child: IntrinsicWidth(
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface.withOpacity(0.95),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.primary.withOpacity(0.8),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.45),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
-              ],
-            ),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
+              ),
             ),
           ),
         ),
