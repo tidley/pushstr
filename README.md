@@ -95,6 +95,7 @@ cd .. # If in /wasm_crypto
 npm install
 cd wasm_crypto
 wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
+npm run patch:wasm
 # Firefox (MV2)
 npm run package
 # Chrome (MV3)
