@@ -21,7 +21,7 @@ use rand::RngCore;
 use secp256k1::{PublicKey as Secp256k1PublicKey, SecretKey as Secp256k1SecretKey, XOnlyPublicKey as Secp256k1XOnlyPublicKey, Secp256k1 as Secp256k1Context};
 use getrandom;
 use hmac::{Hmac, Mac};
-use hkdf::Hkdf;
+use ::hkdf::Hkdf;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use std::collections::HashSet as StdHashSet;
 
