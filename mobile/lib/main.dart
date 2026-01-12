@@ -1205,6 +1205,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
         actions: [
           TextButton(
+            onPressed: () async {
+              final pubkey = contact['pubkey']?.toString() ?? '';
+              if (pubkey.isEmpty) return;
+              String npub = pubkey;
+              try {
+                npub = api.hexToNpub(hex: pubkey);
+              } catch (_) {}
+              await Clipboard.setData(ClipboardData(text: npub));
+              if (mounted) {
+                _showThemedToast('Copied npub', preferTop: true);
+              }
+            },
+            child: const Text('Copy npub'),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
@@ -2773,7 +2788,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final pubkey = c['pubkey'] ?? '';
       final primary = _short(pubkey);
       final label = nickname.trim().isNotEmpty
-          ? '$primary · $nickname'
+          ? '$nickname · $primary'
           : primary;
 
       return DropdownMenuItem<String>(
@@ -2824,10 +2839,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       selectedItemBuilder: (_) => contacts.map((c) {
         final pubkey = c['pubkey'] ?? '';
         final nickname = (c['nickname'] ?? '').toString().trim();
-        final primary = nickname.isNotEmpty ? nickname : _short(pubkey);
+        final primary = _short(pubkey);
+        final label = nickname.isNotEmpty ? '$nickname · $primary' : primary;
         return Align(
           alignment: Alignment.centerLeft,
-          child: Text(primary, overflow: TextOverflow.ellipsis),
+          child: Text(label, overflow: TextOverflow.ellipsis),
         );
       }).toList(),
       hint: const Text('Select a contact'),
