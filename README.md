@@ -136,6 +136,13 @@ flutter run
 
 See `mobile/QUICKSTART.md` for more detail.
 
+## Zapstore
+From project route:
+```
+~/code/zapstore publish
+```
+
+
 ## Notes
 - No cloud backups. Export your `nsec` and keep it safe.
 - Relay outages aren’t retried automatically; reload/refresh to reconnect.
