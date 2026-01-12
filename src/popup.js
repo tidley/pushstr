@@ -380,6 +380,7 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
       img.style.maxWidth = "180px";
       img.style.maxHeight = "180px";
       img.style.display = "block";
+      makeZoomableImage(img, cached);
       container.appendChild(img);
     } else if (mime.startsWith("video")) {
       container.appendChild(buildVideoPlayer(cached));
@@ -509,6 +510,23 @@ function buildVideoPlayer(url) {
     playBtn.textContent = video.paused ? "▶" : "❚❚";
   };
 
+  let hideTimer = null;
+  const setControlsVisible = (visible) => {
+    if (visible) {
+      overlay.classList.remove("video-hidden");
+      scrubRow.classList.remove("video-hidden");
+    } else {
+      overlay.classList.add("video-hidden");
+      scrubRow.classList.add("video-hidden");
+    }
+  };
+  const scheduleHide = () => {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!video.paused) setControlsVisible(false);
+    }, 2000);
+  };
+
   backBtn.addEventListener("click", () => {
     video.currentTime = Math.max(0, (video.currentTime || 0) - 10);
   });
@@ -525,8 +543,22 @@ function buildVideoPlayer(url) {
     video.currentTime = Number(scrubber.value) * video.duration;
   });
   video.addEventListener("timeupdate", syncScrub);
-  video.addEventListener("play", syncScrub);
-  video.addEventListener("pause", syncScrub);
+  video.addEventListener("play", () => {
+    syncScrub();
+    scheduleHide();
+  });
+  video.addEventListener("pause", () => {
+    syncScrub();
+    setControlsVisible(true);
+  });
+  video.addEventListener("click", () => {
+    const currentlyHidden = overlay.classList.contains("video-hidden");
+    setControlsVisible(currentlyHidden);
+    if (!video.paused && currentlyHidden) scheduleHide();
+    if (!video.paused && !currentlyHidden) scheduleHide();
+  });
+  controls.addEventListener("click", (event) => event.stopPropagation());
+  scrubRow.addEventListener("click", (event) => event.stopPropagation());
 
   controls.appendChild(backBtn);
   controls.appendChild(playBtn);
@@ -536,6 +568,7 @@ function buildVideoPlayer(url) {
   wrapper.appendChild(video);
   wrapper.appendChild(overlay);
   wrapper.appendChild(scrubRow);
+  setControlsVisible(true);
   return wrapper;
 }
 
@@ -548,6 +581,7 @@ function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadC
     img.style.maxWidth = "180px";
     img.style.maxHeight = "180px";
     img.style.display = "block";
+    makeZoomableImage(img, cachedData.blobUrl);
     container.appendChild(img);
   } else if (mime && mime.startsWith("video")) {
     container.appendChild(buildVideoPlayer(cachedData.blobUrl));
@@ -1028,6 +1062,36 @@ function openSettings() {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+function makeZoomableImage(img, url) {
+  img.style.cursor = "zoom-in";
+  img.addEventListener("click", () => showImageModal(url));
+}
+
+function showImageModal(url) {
+  const overlay = document.createElement("div");
+  overlay.className = "image-modal";
+  const img = document.createElement("img");
+  img.src = url;
+  let scale = 1;
+  const setScale = (next) => {
+    scale = Math.min(3, Math.max(1, next));
+    img.style.transform = `scale(${scale})`;
+    img.style.cursor = scale > 1 ? "zoom-out" : "zoom-in";
+  };
+  img.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setScale(scale > 1 ? 1 : 2);
+  });
+  img.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -0.1 : 0.1;
+    setScale(scale + delta);
+  }, { passive: false });
+  overlay.addEventListener("click", () => overlay.remove());
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
+}
+
 function flashCopyButton(btn) {
   if (!btn) return;
   const original = btn.textContent;
@@ -1105,6 +1169,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, fullUrl);
         container.appendChild(img);
       } else if (mime.startsWith("video")) {
         container.appendChild(buildVideoPlayer(fullUrl));
@@ -1146,6 +1211,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, fullUrl);
         container.appendChild(img);
       }
       renderTextIfAny(fullUrl);
@@ -1170,6 +1236,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, meta.url);
         container.appendChild(img);
       }
       renderTextIfAny(meta.url);
@@ -1195,6 +1262,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, metaFromUrl.url);
         container.appendChild(img);
       }
       renderTextIfAny(metaFromUrl.url);

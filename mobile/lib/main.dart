@@ -4067,6 +4067,8 @@ class _VideoPlayerPage extends StatefulWidget {
 class _VideoPlayerPageState extends State<_VideoPlayerPage> {
   VideoPlayerController? _controller;
   Future<void>? _initFuture;
+  bool _showControls = true;
+  Timer? _hideControlsTimer;
 
   @override
   void initState() {
@@ -4085,7 +4087,26 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
   @override
   void dispose() {
     _controller?.dispose();
+    _hideControlsTimer?.cancel();
     super.dispose();
+  }
+
+  void _toggleControls() {
+    if (!mounted) return;
+    setState(() => _showControls = !_showControls);
+    if (_showControls && _controller?.value.isPlaying == true) {
+      _startHideTimer();
+    }
+  }
+
+  void _startHideTimer() {
+    _hideControlsTimer?.cancel();
+    _hideControlsTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      if (_controller?.value.isPlaying == true) {
+        setState(() => _showControls = false);
+      }
+    });
   }
 
   @override
@@ -4112,92 +4133,99 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                   ? 0.0
                   : (position.inMilliseconds / duration.inMilliseconds)
                       .clamp(0.0, 1.0);
-              return Center(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    AspectRatio(
-                      aspectRatio: controller.value.aspectRatio,
-                      child: VideoPlayer(controller),
-                    ),
-                    Positioned.fill(
-                      child: Column(
-                        children: [
-                          Expanded(
-                            child: Center(
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.replay_10, color: Colors.white),
-                                    onPressed: () {
-                                      final newPos = position - const Duration(seconds: 10);
-                                      controller.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                    icon: Icon(
-                                      controller.value.isPlaying
-                                          ? Icons.pause_circle
-                                          : Icons.play_circle,
-                                      color: Colors.white,
-                                      size: 48,
-                                    ),
-                                    onPressed: () {
-                                      if (controller.value.isPlaying) {
-                                        controller.pause();
-                                      } else {
-                                        controller.play();
-                                      }
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                    icon: const Icon(Icons.forward_10, color: Colors.white),
-                                    onPressed: () {
-                                      final newPos = position + const Duration(seconds: 10);
-                                      controller.seekTo(
-                                        newPos > duration ? duration : newPos,
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Padding(
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _toggleControls,
+                child: Center(
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: controller.value.aspectRatio,
+                        child: VideoPlayer(controller),
+                      ),
+                      if (_showControls)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            child: Row(
+                            color: Colors.black.withOpacity(0.35),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  _formatDuration(position),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.replay_10, color: Colors.white),
+                                      onPressed: () {
+                                        final newPos = position - const Duration(seconds: 10);
+                                        controller.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: Icon(
+                                        controller.value.isPlaying
+                                            ? Icons.pause_circle
+                                            : Icons.play_circle,
+                                        color: Colors.white,
+                                        size: 48,
+                                      ),
+                                      onPressed: () {
+                                        if (controller.value.isPlaying) {
+                                          controller.pause();
+                                        } else {
+                                          controller.play();
+                                          _startHideTimer();
+                                        }
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      icon: const Icon(Icons.forward_10, color: Colors.white),
+                                      onPressed: () {
+                                        final newPos = position + const Duration(seconds: 10);
+                                        controller.seekTo(
+                                          newPos > duration ? duration : newPos,
+                                        );
+                                      },
+                                    ),
+                                  ],
                                 ),
-                                Expanded(
-                                  child: Slider(
-                                    value: progress,
-                                    onChanged: (value) {
-                                      if (duration.inMilliseconds == 0) return;
-                                      final target = Duration(
-                                        milliseconds:
-                                            (duration.inMilliseconds * value).round(),
-                                      );
-                                      controller.seekTo(target);
-                                    },
-                                  ),
-                                ),
-                                Text(
-                                  _formatDuration(duration),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                Row(
+                                  children: [
+                                    Text(
+                                      _formatDuration(position),
+                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
+                                    Expanded(
+                                      child: Slider(
+                                        value: progress,
+                                        onChanged: (value) {
+                                          if (duration.inMilliseconds == 0) return;
+                                          final target = Duration(
+                                            milliseconds:
+                                                (duration.inMilliseconds * value).round(),
+                                          );
+                                          controller.seekTo(target);
+                                        },
+                                      ),
+                                    ),
+                                    Text(
+                                      _formatDuration(duration),
+                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  ],
+                        ),
+                    ],
+                  ),
                 ),
               );
             },
