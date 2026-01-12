@@ -1,6 +1,6 @@
 # Pushstr Functional Specification Document
 
-Version: 0.2
+Version: 0.5
 Last updated: 2026-01-12
 Owner: Pushstr
 
@@ -42,6 +42,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Accept nprofile inputs and `nostr:`-prefixed QR codes when adding contacts.
 - Optionally store a nickname.
 - Edit or delete contacts.
+- Copy a contact’s npub from the edit contact dialog.
 - Select an active contact for messaging.
 - Add contact via QR scan.
 
@@ -53,6 +54,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Tag messages with their DM type (04/17) in history and UI.
 - Allow per-contact DM mode override (NIP-04 vs giftwrap) with a quick toggle in the composer.
 - Browser extension provides a NIP-04/NIP-17 toggle in the composer and displays DM mode badges per message.
+- Contact dropdown displays nickname-first labels; selected value shows nickname only when available.
 - Tap media in the message history to open full-screen image/video or in-app audio playback.
 - Display an unlocked padlock badge on messages containing unencrypted attachments.
 - Persist message history locally.
@@ -61,7 +63,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Attach images, audio, video, or arbitrary files.
 - Record inline audio clips directly in the mobile composer.
 - Encrypt files for the recipient before upload.
-- Allow optional unencrypted uploads with a visible warning indicator.
+- Allow optional unencrypted uploads with a visible warning indicator (useful when sending non-private data to other Nostr clients).
 - Upload encrypted content to Blossom-compatible server.
 - Transmit encrypted media descriptors in DMs.
 - For cross-client readability, include a plain URL line plus a Pushstr-only metadata block:
@@ -86,8 +88,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Connect to relays and fetch updates in the background without blocking the UI.
 - Fetch recent messages at startup and on manual refresh.
 - Poll for new messages while app is active.
-- Optional foreground service for Android to keep connections alive.
-- Periodic background fetch via Workmanager (Android).
+- Optional foreground service for Android to keep connections alive via Workmanager (not reliable).
 
 ### 6.7 Sharing (Mobile)
 - Share text/media into Pushstr via system share sheet (Android).
@@ -100,11 +101,12 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Manage relay preferences in settings (editable list stored locally).
 - Display status/errors in-app.
 - Display app/extension version numbers at the bottom of settings.
+- Custom toast/notification bars.
 
 ### 6.9 Logging & Diagnostics
 - Log DM send/receive state transitions.
 - Capture decrypt or parse errors for diagnostics.
-- Avoid auto-jumping to latest when the user is scrolling history; show a scroll-to-bottom indicator instead.
+- A scroll-to-bottom indicates when a new message arrives.
 
 ## 7. Data Model
 
@@ -198,15 +200,10 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Cross-client NIP-59 compatibility depends on correct relay lists and encryption.
 
 ## 12. Current State Notes
-- NIP-04 DMs are reliable across Pushstr, the browser extension, and Amethyst.
-- NIP-59 giftwrap DMs are reliable inbound from Amethyst; outbound reliability to Amethyst is intermittent and still being tuned.
+- NIP-04 and NIP-59 giftwrap DMs DMs are reliable across Pushstr, the browser extension, and Amethyst.
 - Giftwrap uses NIP-44 v2 with legacy giftwrap support for older clients.
 - Relay defaults are aligned with Amethyst’s bootstrap inbox set; users can add/remove relays in settings.
 - Chat history now preserves scroll position and exposes a scroll-to-bottom indicator when new messages arrive.
-- Mobile video viewer uses centered playback controls with 10s skip buttons and a timeline scrubber.
-
-## 13. Out of Scope (Current)
-- Group chats or public channels.
-- Centralized push notification service.
-- Server-side message storage beyond relays.
-- Desktop native app.
+- Mobile/extension video viewer uses bottom controls with 10s skip buttons and a timeline scrubber that auto-hides during playback.
+- Extension styling is aligned with mobile (near-black history/composer background, compact bubbles, refined input layout).
+- Mobile toast notifications are centered and width-limited to content rather than full width.
