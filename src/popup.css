@@ -579,12 +579,6 @@ main {
   z-index: 2;
 }
 
-#composer-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 #upload-warning {
   display: none;
   background: rgba(255, 204, 0, 0.1);
@@ -607,13 +601,9 @@ main {
 
 #input-row {
   display: flex;
-  align-items: center;
   gap: 8px;
-  flex: 1;
-  background: #121318;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 6px 8px;
+  position: relative;
+  align-items: center;
 }
 
 #attach,
@@ -636,11 +626,6 @@ main {
   background: rgba(34, 197, 94, 0.18);
 }
 
-#dm-toggle svg {
-  width: 22px;
-  height: 22px;
-}
-
 #attach:hover,
 #send:hover,
 #dm-toggle:hover {
@@ -650,11 +635,11 @@ main {
 #message {
   flex: 1;
   resize: none;
-  padding: 6px 6px;
+  padding: 8px 10px;
   font-size: 13px;
-  background: transparent;
+  background: #121318;
   color: var(--text);
-  border: none;
+  border: 1px solid var(--border);
   border-radius: 8px;
   min-height: 44px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
