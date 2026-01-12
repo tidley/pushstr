@@ -625,6 +625,7 @@ main {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 2;
 }
 
 #attach {
@@ -639,6 +640,11 @@ main {
 
 #dm-toggle {
   right: 50px;
+}
+
+#dm-toggle svg {
+  width: 22px;
+  height: 22px;
 }
 
 #attach:hover,
@@ -658,6 +664,7 @@ main {
   border-radius: 8px;
   min-height: 44px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  z-index: 1;
 }
 
 #message::placeholder {
