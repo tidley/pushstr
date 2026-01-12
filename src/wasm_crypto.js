@@ -267,6 +267,21 @@ const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
 
 async function __wbg_load(module, imports) {
     if (typeof Response === 'function' && module instanceof Response) {
+        if (typeof WebAssembly.instantiateStreaming === 'function') {
+            try {
+                return await WebAssembly.instantiateStreaming(module, imports);
+            } catch (e) {
+                const validResponse = module.ok && EXPECTED_RESPONSE_TYPES.has(module.type);
+
+                if (validResponse && module.headers.get('Content-Type') !== 'application/wasm') {
+                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+
+                } else {
+                    throw e;
+                }
+            }
+        }
+
         const bytes = await module.arrayBuffer();
         return await WebAssembly.instantiate(bytes, imports);
     } else {
@@ -327,14 +342,8 @@ function __wbg_get_imports() {
         return ret;
     };
     imports.wbg.__wbg_new_no_args_cb138f77cf6151ee = function(arg0, arg1) {
-        const code = getStringFromWasm0(arg0, arg1);
-        if (code === "return this") {
-            return () => globalThis;
-        }
-        console.warn("[wasm] blocking dynamic Function call", code);
-        return () => {
-            throw new Error("Dynamic code execution is disabled");
-        };
+        const ret = new Function(getStringFromWasm0(arg0, arg1));
+        return ret;
     };
     imports.wbg.__wbg_new_with_length_aa5eaf41d35235e5 = function(arg0) {
         const ret = new Uint8Array(arg0 >>> 0);

@@ -2586,11 +2586,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final isOut = m['direction'] == 'out';
         final bubbleColor = isOut
             ? const Color(0xFF223E63)
-            : const Color.fromARGB(255, 47, 86, 47);
+            : const Color(0xFF282830);
         final textColor = isOut
             ? const Color.fromARGB(255, 238, 238, 238)
             : Colors.white;
-        final fontWeight = isOut ? FontWeight.w400 : FontWeight.w500;
+        final fontWeight = FontWeight.w400;
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);

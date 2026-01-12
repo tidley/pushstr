@@ -89,7 +89,12 @@ Android and Firefox are stable - Chrome and iOS function but are a little buggy.
 ## Build & run
 ### Browser extension
 ```bash
+From %pushstr/
+
+cd .. # If in /wasm_crypto
 npm install
+cd wasm_crypto
+wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
 # Firefox (MV2)
 npm run package
 # Chrome (MV3)

@@ -1,13 +1,2153 @@
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __commonJS = (cb, mod2) => function __require() {
+  return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+  mod2
+));
 var __publicField = (obj, key, value) => {
   __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
   return value;
 };
+
+// node_modules/qrcode/lib/can-promise.js
+var require_can_promise = __commonJS({
+  "node_modules/qrcode/lib/can-promise.js"(exports, module) {
+    module.exports = function() {
+      return typeof Promise === "function" && Promise.prototype && Promise.prototype.then;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/utils.js
+var require_utils = __commonJS({
+  "node_modules/qrcode/lib/core/utils.js"(exports) {
+    var toSJISFunction;
+    var CODEWORDS_COUNT = [
+      0,
+      // Not used
+      26,
+      44,
+      70,
+      100,
+      134,
+      172,
+      196,
+      242,
+      292,
+      346,
+      404,
+      466,
+      532,
+      581,
+      655,
+      733,
+      815,
+      901,
+      991,
+      1085,
+      1156,
+      1258,
+      1364,
+      1474,
+      1588,
+      1706,
+      1828,
+      1921,
+      2051,
+      2185,
+      2323,
+      2465,
+      2611,
+      2761,
+      2876,
+      3034,
+      3196,
+      3362,
+      3532,
+      3706
+    ];
+    exports.getSymbolSize = function getSymbolSize(version) {
+      if (!version)
+        throw new Error('"version" cannot be null or undefined');
+      if (version < 1 || version > 40)
+        throw new Error('"version" should be in range from 1 to 40');
+      return version * 4 + 17;
+    };
+    exports.getSymbolTotalCodewords = function getSymbolTotalCodewords(version) {
+      return CODEWORDS_COUNT[version];
+    };
+    exports.getBCHDigit = function(data) {
+      let digit = 0;
+      while (data !== 0) {
+        digit++;
+        data >>>= 1;
+      }
+      return digit;
+    };
+    exports.setToSJISFunction = function setToSJISFunction(f) {
+      if (typeof f !== "function") {
+        throw new Error('"toSJISFunc" is not a valid function.');
+      }
+      toSJISFunction = f;
+    };
+    exports.isKanjiModeEnabled = function() {
+      return typeof toSJISFunction !== "undefined";
+    };
+    exports.toSJIS = function toSJIS(kanji) {
+      return toSJISFunction(kanji);
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/error-correction-level.js
+var require_error_correction_level = __commonJS({
+  "node_modules/qrcode/lib/core/error-correction-level.js"(exports) {
+    exports.L = { bit: 1 };
+    exports.M = { bit: 0 };
+    exports.Q = { bit: 3 };
+    exports.H = { bit: 2 };
+    function fromString(string) {
+      if (typeof string !== "string") {
+        throw new Error("Param is not a string");
+      }
+      const lcStr = string.toLowerCase();
+      switch (lcStr) {
+        case "l":
+        case "low":
+          return exports.L;
+        case "m":
+        case "medium":
+          return exports.M;
+        case "q":
+        case "quartile":
+          return exports.Q;
+        case "h":
+        case "high":
+          return exports.H;
+        default:
+          throw new Error("Unknown EC Level: " + string);
+      }
+    }
+    exports.isValid = function isValid2(level) {
+      return level && typeof level.bit !== "undefined" && level.bit >= 0 && level.bit < 4;
+    };
+    exports.from = function from(value, defaultValue) {
+      if (exports.isValid(value)) {
+        return value;
+      }
+      try {
+        return fromString(value);
+      } catch (e) {
+        return defaultValue;
+      }
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/bit-buffer.js
+var require_bit_buffer = __commonJS({
+  "node_modules/qrcode/lib/core/bit-buffer.js"(exports, module) {
+    function BitBuffer() {
+      this.buffer = [];
+      this.length = 0;
+    }
+    BitBuffer.prototype = {
+      get: function(index) {
+        const bufIndex = Math.floor(index / 8);
+        return (this.buffer[bufIndex] >>> 7 - index % 8 & 1) === 1;
+      },
+      put: function(num, length) {
+        for (let i2 = 0; i2 < length; i2++) {
+          this.putBit((num >>> length - i2 - 1 & 1) === 1);
+        }
+      },
+      getLengthInBits: function() {
+        return this.length;
+      },
+      putBit: function(bit) {
+        const bufIndex = Math.floor(this.length / 8);
+        if (this.buffer.length <= bufIndex) {
+          this.buffer.push(0);
+        }
+        if (bit) {
+          this.buffer[bufIndex] |= 128 >>> this.length % 8;
+        }
+        this.length++;
+      }
+    };
+    module.exports = BitBuffer;
+  }
+});
+
+// node_modules/qrcode/lib/core/bit-matrix.js
+var require_bit_matrix = __commonJS({
+  "node_modules/qrcode/lib/core/bit-matrix.js"(exports, module) {
+    function BitMatrix(size) {
+      if (!size || size < 1) {
+        throw new Error("BitMatrix size must be defined and greater than 0");
+      }
+      this.size = size;
+      this.data = new Uint8Array(size * size);
+      this.reservedBit = new Uint8Array(size * size);
+    }
+    BitMatrix.prototype.set = function(row, col, value, reserved) {
+      const index = row * this.size + col;
+      this.data[index] = value;
+      if (reserved)
+        this.reservedBit[index] = true;
+    };
+    BitMatrix.prototype.get = function(row, col) {
+      return this.data[row * this.size + col];
+    };
+    BitMatrix.prototype.xor = function(row, col, value) {
+      this.data[row * this.size + col] ^= value;
+    };
+    BitMatrix.prototype.isReserved = function(row, col) {
+      return this.reservedBit[row * this.size + col];
+    };
+    module.exports = BitMatrix;
+  }
+});
+
+// node_modules/qrcode/lib/core/alignment-pattern.js
+var require_alignment_pattern = __commonJS({
+  "node_modules/qrcode/lib/core/alignment-pattern.js"(exports) {
+    var getSymbolSize = require_utils().getSymbolSize;
+    exports.getRowColCoords = function getRowColCoords(version) {
+      if (version === 1)
+        return [];
+      const posCount = Math.floor(version / 7) + 2;
+      const size = getSymbolSize(version);
+      const intervals = size === 145 ? 26 : Math.ceil((size - 13) / (2 * posCount - 2)) * 2;
+      const positions = [size - 7];
+      for (let i2 = 1; i2 < posCount - 1; i2++) {
+        positions[i2] = positions[i2 - 1] - intervals;
+      }
+      positions.push(6);
+      return positions.reverse();
+    };
+    exports.getPositions = function getPositions(version) {
+      const coords = [];
+      const pos = exports.getRowColCoords(version);
+      const posLength = pos.length;
+      for (let i2 = 0; i2 < posLength; i2++) {
+        for (let j = 0; j < posLength; j++) {
+          if (i2 === 0 && j === 0 || // top-left
+          i2 === 0 && j === posLength - 1 || // bottom-left
+          i2 === posLength - 1 && j === 0) {
+            continue;
+          }
+          coords.push([pos[i2], pos[j]]);
+        }
+      }
+      return coords;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/finder-pattern.js
+var require_finder_pattern = __commonJS({
+  "node_modules/qrcode/lib/core/finder-pattern.js"(exports) {
+    var getSymbolSize = require_utils().getSymbolSize;
+    var FINDER_PATTERN_SIZE = 7;
+    exports.getPositions = function getPositions(version) {
+      const size = getSymbolSize(version);
+      return [
+        // top-left
+        [0, 0],
+        // top-right
+        [size - FINDER_PATTERN_SIZE, 0],
+        // bottom-left
+        [0, size - FINDER_PATTERN_SIZE]
+      ];
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/mask-pattern.js
+var require_mask_pattern = __commonJS({
+  "node_modules/qrcode/lib/core/mask-pattern.js"(exports) {
+    exports.Patterns = {
+      PATTERN000: 0,
+      PATTERN001: 1,
+      PATTERN010: 2,
+      PATTERN011: 3,
+      PATTERN100: 4,
+      PATTERN101: 5,
+      PATTERN110: 6,
+      PATTERN111: 7
+    };
+    var PenaltyScores = {
+      N1: 3,
+      N2: 3,
+      N3: 40,
+      N4: 10
+    };
+    exports.isValid = function isValid2(mask) {
+      return mask != null && mask !== "" && !isNaN(mask) && mask >= 0 && mask <= 7;
+    };
+    exports.from = function from(value) {
+      return exports.isValid(value) ? parseInt(value, 10) : void 0;
+    };
+    exports.getPenaltyN1 = function getPenaltyN1(data) {
+      const size = data.size;
+      let points = 0;
+      let sameCountCol = 0;
+      let sameCountRow = 0;
+      let lastCol = null;
+      let lastRow = null;
+      for (let row = 0; row < size; row++) {
+        sameCountCol = sameCountRow = 0;
+        lastCol = lastRow = null;
+        for (let col = 0; col < size; col++) {
+          let module2 = data.get(row, col);
+          if (module2 === lastCol) {
+            sameCountCol++;
+          } else {
+            if (sameCountCol >= 5)
+              points += PenaltyScores.N1 + (sameCountCol - 5);
+            lastCol = module2;
+            sameCountCol = 1;
+          }
+          module2 = data.get(col, row);
+          if (module2 === lastRow) {
+            sameCountRow++;
+          } else {
+            if (sameCountRow >= 5)
+              points += PenaltyScores.N1 + (sameCountRow - 5);
+            lastRow = module2;
+            sameCountRow = 1;
+          }
+        }
+        if (sameCountCol >= 5)
+          points += PenaltyScores.N1 + (sameCountCol - 5);
+        if (sameCountRow >= 5)
+          points += PenaltyScores.N1 + (sameCountRow - 5);
+      }
+      return points;
+    };
+    exports.getPenaltyN2 = function getPenaltyN2(data) {
+      const size = data.size;
+      let points = 0;
+      for (let row = 0; row < size - 1; row++) {
+        for (let col = 0; col < size - 1; col++) {
+          const last = data.get(row, col) + data.get(row, col + 1) + data.get(row + 1, col) + data.get(row + 1, col + 1);
+          if (last === 4 || last === 0)
+            points++;
+        }
+      }
+      return points * PenaltyScores.N2;
+    };
+    exports.getPenaltyN3 = function getPenaltyN3(data) {
+      const size = data.size;
+      let points = 0;
+      let bitsCol = 0;
+      let bitsRow = 0;
+      for (let row = 0; row < size; row++) {
+        bitsCol = bitsRow = 0;
+        for (let col = 0; col < size; col++) {
+          bitsCol = bitsCol << 1 & 2047 | data.get(row, col);
+          if (col >= 10 && (bitsCol === 1488 || bitsCol === 93))
+            points++;
+          bitsRow = bitsRow << 1 & 2047 | data.get(col, row);
+          if (col >= 10 && (bitsRow === 1488 || bitsRow === 93))
+            points++;
+        }
+      }
+      return points * PenaltyScores.N3;
+    };
+    exports.getPenaltyN4 = function getPenaltyN4(data) {
+      let darkCount = 0;
+      const modulesCount = data.data.length;
+      for (let i2 = 0; i2 < modulesCount; i2++)
+        darkCount += data.data[i2];
+      const k = Math.abs(Math.ceil(darkCount * 100 / modulesCount / 5) - 10);
+      return k * PenaltyScores.N4;
+    };
+    function getMaskAt(maskPattern, i2, j) {
+      switch (maskPattern) {
+        case exports.Patterns.PATTERN000:
+          return (i2 + j) % 2 === 0;
+        case exports.Patterns.PATTERN001:
+          return i2 % 2 === 0;
+        case exports.Patterns.PATTERN010:
+          return j % 3 === 0;
+        case exports.Patterns.PATTERN011:
+          return (i2 + j) % 3 === 0;
+        case exports.Patterns.PATTERN100:
+          return (Math.floor(i2 / 2) + Math.floor(j / 3)) % 2 === 0;
+        case exports.Patterns.PATTERN101:
+          return i2 * j % 2 + i2 * j % 3 === 0;
+        case exports.Patterns.PATTERN110:
+          return (i2 * j % 2 + i2 * j % 3) % 2 === 0;
+        case exports.Patterns.PATTERN111:
+          return (i2 * j % 3 + (i2 + j) % 2) % 2 === 0;
+        default:
+          throw new Error("bad maskPattern:" + maskPattern);
+      }
+    }
+    exports.applyMask = function applyMask(pattern, data) {
+      const size = data.size;
+      for (let col = 0; col < size; col++) {
+        for (let row = 0; row < size; row++) {
+          if (data.isReserved(row, col))
+            continue;
+          data.xor(row, col, getMaskAt(pattern, row, col));
+        }
+      }
+    };
+    exports.getBestMask = function getBestMask(data, setupFormatFunc) {
+      const numPatterns = Object.keys(exports.Patterns).length;
+      let bestPattern = 0;
+      let lowerPenalty = Infinity;
+      for (let p = 0; p < numPatterns; p++) {
+        setupFormatFunc(p);
+        exports.applyMask(p, data);
+        const penalty = exports.getPenaltyN1(data) + exports.getPenaltyN2(data) + exports.getPenaltyN3(data) + exports.getPenaltyN4(data);
+        exports.applyMask(p, data);
+        if (penalty < lowerPenalty) {
+          lowerPenalty = penalty;
+          bestPattern = p;
+        }
+      }
+      return bestPattern;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/error-correction-code.js
+var require_error_correction_code = __commonJS({
+  "node_modules/qrcode/lib/core/error-correction-code.js"(exports) {
+    var ECLevel = require_error_correction_level();
+    var EC_BLOCKS_TABLE = [
+      // L  M  Q  H
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      2,
+      2,
+      1,
+      2,
+      2,
+      4,
+      1,
+      2,
+      4,
+      4,
+      2,
+      4,
+      4,
+      4,
+      2,
+      4,
+      6,
+      5,
+      2,
+      4,
+      6,
+      6,
+      2,
+      5,
+      8,
+      8,
+      4,
+      5,
+      8,
+      8,
+      4,
+      5,
+      8,
+      11,
+      4,
+      8,
+      10,
+      11,
+      4,
+      9,
+      12,
+      16,
+      4,
+      9,
+      16,
+      16,
+      6,
+      10,
+      12,
+      18,
+      6,
+      10,
+      17,
+      16,
+      6,
+      11,
+      16,
+      19,
+      6,
+      13,
+      18,
+      21,
+      7,
+      14,
+      21,
+      25,
+      8,
+      16,
+      20,
+      25,
+      8,
+      17,
+      23,
+      25,
+      9,
+      17,
+      23,
+      34,
+      9,
+      18,
+      25,
+      30,
+      10,
+      20,
+      27,
+      32,
+      12,
+      21,
+      29,
+      35,
+      12,
+      23,
+      34,
+      37,
+      12,
+      25,
+      34,
+      40,
+      13,
+      26,
+      35,
+      42,
+      14,
+      28,
+      38,
+      45,
+      15,
+      29,
+      40,
+      48,
+      16,
+      31,
+      43,
+      51,
+      17,
+      33,
+      45,
+      54,
+      18,
+      35,
+      48,
+      57,
+      19,
+      37,
+      51,
+      60,
+      19,
+      38,
+      53,
+      63,
+      20,
+      40,
+      56,
+      66,
+      21,
+      43,
+      59,
+      70,
+      22,
+      45,
+      62,
+      74,
+      24,
+      47,
+      65,
+      77,
+      25,
+      49,
+      68,
+      81
+    ];
+    var EC_CODEWORDS_TABLE = [
+      // L  M  Q  H
+      7,
+      10,
+      13,
+      17,
+      10,
+      16,
+      22,
+      28,
+      15,
+      26,
+      36,
+      44,
+      20,
+      36,
+      52,
+      64,
+      26,
+      48,
+      72,
+      88,
+      36,
+      64,
+      96,
+      112,
+      40,
+      72,
+      108,
+      130,
+      48,
+      88,
+      132,
+      156,
+      60,
+      110,
+      160,
+      192,
+      72,
+      130,
+      192,
+      224,
+      80,
+      150,
+      224,
+      264,
+      96,
+      176,
+      260,
+      308,
+      104,
+      198,
+      288,
+      352,
+      120,
+      216,
+      320,
+      384,
+      132,
+      240,
+      360,
+      432,
+      144,
+      280,
+      408,
+      480,
+      168,
+      308,
+      448,
+      532,
+      180,
+      338,
+      504,
+      588,
+      196,
+      364,
+      546,
+      650,
+      224,
+      416,
+      600,
+      700,
+      224,
+      442,
+      644,
+      750,
+      252,
+      476,
+      690,
+      816,
+      270,
+      504,
+      750,
+      900,
+      300,
+      560,
+      810,
+      960,
+      312,
+      588,
+      870,
+      1050,
+      336,
+      644,
+      952,
+      1110,
+      360,
+      700,
+      1020,
+      1200,
+      390,
+      728,
+      1050,
+      1260,
+      420,
+      784,
+      1140,
+      1350,
+      450,
+      812,
+      1200,
+      1440,
+      480,
+      868,
+      1290,
+      1530,
+      510,
+      924,
+      1350,
+      1620,
+      540,
+      980,
+      1440,
+      1710,
+      570,
+      1036,
+      1530,
+      1800,
+      570,
+      1064,
+      1590,
+      1890,
+      600,
+      1120,
+      1680,
+      1980,
+      630,
+      1204,
+      1770,
+      2100,
+      660,
+      1260,
+      1860,
+      2220,
+      720,
+      1316,
+      1950,
+      2310,
+      750,
+      1372,
+      2040,
+      2430
+    ];
+    exports.getBlocksCount = function getBlocksCount(version, errorCorrectionLevel) {
+      switch (errorCorrectionLevel) {
+        case ECLevel.L:
+          return EC_BLOCKS_TABLE[(version - 1) * 4 + 0];
+        case ECLevel.M:
+          return EC_BLOCKS_TABLE[(version - 1) * 4 + 1];
+        case ECLevel.Q:
+          return EC_BLOCKS_TABLE[(version - 1) * 4 + 2];
+        case ECLevel.H:
+          return EC_BLOCKS_TABLE[(version - 1) * 4 + 3];
+        default:
+          return void 0;
+      }
+    };
+    exports.getTotalCodewordsCount = function getTotalCodewordsCount(version, errorCorrectionLevel) {
+      switch (errorCorrectionLevel) {
+        case ECLevel.L:
+          return EC_CODEWORDS_TABLE[(version - 1) * 4 + 0];
+        case ECLevel.M:
+          return EC_CODEWORDS_TABLE[(version - 1) * 4 + 1];
+        case ECLevel.Q:
+          return EC_CODEWORDS_TABLE[(version - 1) * 4 + 2];
+        case ECLevel.H:
+          return EC_CODEWORDS_TABLE[(version - 1) * 4 + 3];
+        default:
+          return void 0;
+      }
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/galois-field.js
+var require_galois_field = __commonJS({
+  "node_modules/qrcode/lib/core/galois-field.js"(exports) {
+    var EXP_TABLE = new Uint8Array(512);
+    var LOG_TABLE = new Uint8Array(256);
+    (function initTables() {
+      let x = 1;
+      for (let i2 = 0; i2 < 255; i2++) {
+        EXP_TABLE[i2] = x;
+        LOG_TABLE[x] = i2;
+        x <<= 1;
+        if (x & 256) {
+          x ^= 285;
+        }
+      }
+      for (let i2 = 255; i2 < 512; i2++) {
+        EXP_TABLE[i2] = EXP_TABLE[i2 - 255];
+      }
+    })();
+    exports.log = function log(n) {
+      if (n < 1)
+        throw new Error("log(" + n + ")");
+      return LOG_TABLE[n];
+    };
+    exports.exp = function exp(n) {
+      return EXP_TABLE[n];
+    };
+    exports.mul = function mul3(x, y) {
+      if (x === 0 || y === 0)
+        return 0;
+      return EXP_TABLE[LOG_TABLE[x] + LOG_TABLE[y]];
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/polynomial.js
+var require_polynomial = __commonJS({
+  "node_modules/qrcode/lib/core/polynomial.js"(exports) {
+    var GF = require_galois_field();
+    exports.mul = function mul3(p1, p2) {
+      const coeff = new Uint8Array(p1.length + p2.length - 1);
+      for (let i2 = 0; i2 < p1.length; i2++) {
+        for (let j = 0; j < p2.length; j++) {
+          coeff[i2 + j] ^= GF.mul(p1[i2], p2[j]);
+        }
+      }
+      return coeff;
+    };
+    exports.mod = function mod2(divident, divisor) {
+      let result = new Uint8Array(divident);
+      while (result.length - divisor.length >= 0) {
+        const coeff = result[0];
+        for (let i2 = 0; i2 < divisor.length; i2++) {
+          result[i2] ^= GF.mul(divisor[i2], coeff);
+        }
+        let offset = 0;
+        while (offset < result.length && result[offset] === 0)
+          offset++;
+        result = result.slice(offset);
+      }
+      return result;
+    };
+    exports.generateECPolynomial = function generateECPolynomial(degree) {
+      let poly = new Uint8Array([1]);
+      for (let i2 = 0; i2 < degree; i2++) {
+        poly = exports.mul(poly, new Uint8Array([1, GF.exp(i2)]));
+      }
+      return poly;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/reed-solomon-encoder.js
+var require_reed_solomon_encoder = __commonJS({
+  "node_modules/qrcode/lib/core/reed-solomon-encoder.js"(exports, module) {
+    var Polynomial = require_polynomial();
+    function ReedSolomonEncoder(degree) {
+      this.genPoly = void 0;
+      this.degree = degree;
+      if (this.degree)
+        this.initialize(this.degree);
+    }
+    ReedSolomonEncoder.prototype.initialize = function initialize(degree) {
+      this.degree = degree;
+      this.genPoly = Polynomial.generateECPolynomial(this.degree);
+    };
+    ReedSolomonEncoder.prototype.encode = function encode(data) {
+      if (!this.genPoly) {
+        throw new Error("Encoder not initialized");
+      }
+      const paddedData = new Uint8Array(data.length + this.degree);
+      paddedData.set(data);
+      const remainder = Polynomial.mod(paddedData, this.genPoly);
+      const start = this.degree - remainder.length;
+      if (start > 0) {
+        const buff = new Uint8Array(this.degree);
+        buff.set(remainder, start);
+        return buff;
+      }
+      return remainder;
+    };
+    module.exports = ReedSolomonEncoder;
+  }
+});
+
+// node_modules/qrcode/lib/core/version-check.js
+var require_version_check = __commonJS({
+  "node_modules/qrcode/lib/core/version-check.js"(exports) {
+    exports.isValid = function isValid2(version) {
+      return !isNaN(version) && version >= 1 && version <= 40;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/regex.js
+var require_regex = __commonJS({
+  "node_modules/qrcode/lib/core/regex.js"(exports) {
+    var numeric = "[0-9]+";
+    var alphanumeric = "[A-Z $%*+\\-./:]+";
+    var kanji = "(?:[u3000-u303F]|[u3040-u309F]|[u30A0-u30FF]|[uFF00-uFFEF]|[u4E00-u9FAF]|[u2605-u2606]|[u2190-u2195]|u203B|[u2010u2015u2018u2019u2025u2026u201Cu201Du2225u2260]|[u0391-u0451]|[u00A7u00A8u00B1u00B4u00D7u00F7])+";
+    kanji = kanji.replace(/u/g, "\\u");
+    var byte = "(?:(?![A-Z0-9 $%*+\\-./:]|" + kanji + ")(?:.|[\r\n]))+";
+    exports.KANJI = new RegExp(kanji, "g");
+    exports.BYTE_KANJI = new RegExp("[^A-Z0-9 $%*+\\-./:]+", "g");
+    exports.BYTE = new RegExp(byte, "g");
+    exports.NUMERIC = new RegExp(numeric, "g");
+    exports.ALPHANUMERIC = new RegExp(alphanumeric, "g");
+    var TEST_KANJI = new RegExp("^" + kanji + "$");
+    var TEST_NUMERIC = new RegExp("^" + numeric + "$");
+    var TEST_ALPHANUMERIC = new RegExp("^[A-Z0-9 $%*+\\-./:]+$");
+    exports.testKanji = function testKanji(str) {
+      return TEST_KANJI.test(str);
+    };
+    exports.testNumeric = function testNumeric(str) {
+      return TEST_NUMERIC.test(str);
+    };
+    exports.testAlphanumeric = function testAlphanumeric(str) {
+      return TEST_ALPHANUMERIC.test(str);
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/mode.js
+var require_mode = __commonJS({
+  "node_modules/qrcode/lib/core/mode.js"(exports) {
+    var VersionCheck = require_version_check();
+    var Regex = require_regex();
+    exports.NUMERIC = {
+      id: "Numeric",
+      bit: 1 << 0,
+      ccBits: [10, 12, 14]
+    };
+    exports.ALPHANUMERIC = {
+      id: "Alphanumeric",
+      bit: 1 << 1,
+      ccBits: [9, 11, 13]
+    };
+    exports.BYTE = {
+      id: "Byte",
+      bit: 1 << 2,
+      ccBits: [8, 16, 16]
+    };
+    exports.KANJI = {
+      id: "Kanji",
+      bit: 1 << 3,
+      ccBits: [8, 10, 12]
+    };
+    exports.MIXED = {
+      bit: -1
+    };
+    exports.getCharCountIndicator = function getCharCountIndicator(mode, version) {
+      if (!mode.ccBits)
+        throw new Error("Invalid mode: " + mode);
+      if (!VersionCheck.isValid(version)) {
+        throw new Error("Invalid version: " + version);
+      }
+      if (version >= 1 && version < 10)
+        return mode.ccBits[0];
+      else if (version < 27)
+        return mode.ccBits[1];
+      return mode.ccBits[2];
+    };
+    exports.getBestModeForData = function getBestModeForData(dataStr) {
+      if (Regex.testNumeric(dataStr))
+        return exports.NUMERIC;
+      else if (Regex.testAlphanumeric(dataStr))
+        return exports.ALPHANUMERIC;
+      else if (Regex.testKanji(dataStr))
+        return exports.KANJI;
+      else
+        return exports.BYTE;
+    };
+    exports.toString = function toString(mode) {
+      if (mode && mode.id)
+        return mode.id;
+      throw new Error("Invalid mode");
+    };
+    exports.isValid = function isValid2(mode) {
+      return mode && mode.bit && mode.ccBits;
+    };
+    function fromString(string) {
+      if (typeof string !== "string") {
+        throw new Error("Param is not a string");
+      }
+      const lcStr = string.toLowerCase();
+      switch (lcStr) {
+        case "numeric":
+          return exports.NUMERIC;
+        case "alphanumeric":
+          return exports.ALPHANUMERIC;
+        case "kanji":
+          return exports.KANJI;
+        case "byte":
+          return exports.BYTE;
+        default:
+          throw new Error("Unknown mode: " + string);
+      }
+    }
+    exports.from = function from(value, defaultValue) {
+      if (exports.isValid(value)) {
+        return value;
+      }
+      try {
+        return fromString(value);
+      } catch (e) {
+        return defaultValue;
+      }
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/version.js
+var require_version = __commonJS({
+  "node_modules/qrcode/lib/core/version.js"(exports) {
+    var Utils = require_utils();
+    var ECCode = require_error_correction_code();
+    var ECLevel = require_error_correction_level();
+    var Mode2 = require_mode();
+    var VersionCheck = require_version_check();
+    var G18 = 1 << 12 | 1 << 11 | 1 << 10 | 1 << 9 | 1 << 8 | 1 << 5 | 1 << 2 | 1 << 0;
+    var G18_BCH = Utils.getBCHDigit(G18);
+    function getBestVersionForDataLength(mode, length, errorCorrectionLevel) {
+      for (let currentVersion = 1; currentVersion <= 40; currentVersion++) {
+        if (length <= exports.getCapacity(currentVersion, errorCorrectionLevel, mode)) {
+          return currentVersion;
+        }
+      }
+      return void 0;
+    }
+    function getReservedBitsCount(mode, version) {
+      return Mode2.getCharCountIndicator(mode, version) + 4;
+    }
+    function getTotalBitsFromDataArray(segments, version) {
+      let totalBits = 0;
+      segments.forEach(function(data) {
+        const reservedBits = getReservedBitsCount(data.mode, version);
+        totalBits += reservedBits + data.getBitsLength();
+      });
+      return totalBits;
+    }
+    function getBestVersionForMixedData(segments, errorCorrectionLevel) {
+      for (let currentVersion = 1; currentVersion <= 40; currentVersion++) {
+        const length = getTotalBitsFromDataArray(segments, currentVersion);
+        if (length <= exports.getCapacity(currentVersion, errorCorrectionLevel, Mode2.MIXED)) {
+          return currentVersion;
+        }
+      }
+      return void 0;
+    }
+    exports.from = function from(value, defaultValue) {
+      if (VersionCheck.isValid(value)) {
+        return parseInt(value, 10);
+      }
+      return defaultValue;
+    };
+    exports.getCapacity = function getCapacity(version, errorCorrectionLevel, mode) {
+      if (!VersionCheck.isValid(version)) {
+        throw new Error("Invalid QR Code version");
+      }
+      if (typeof mode === "undefined")
+        mode = Mode2.BYTE;
+      const totalCodewords = Utils.getSymbolTotalCodewords(version);
+      const ecTotalCodewords = ECCode.getTotalCodewordsCount(version, errorCorrectionLevel);
+      const dataTotalCodewordsBits = (totalCodewords - ecTotalCodewords) * 8;
+      if (mode === Mode2.MIXED)
+        return dataTotalCodewordsBits;
+      const usableBits = dataTotalCodewordsBits - getReservedBitsCount(mode, version);
+      switch (mode) {
+        case Mode2.NUMERIC:
+          return Math.floor(usableBits / 10 * 3);
+        case Mode2.ALPHANUMERIC:
+          return Math.floor(usableBits / 11 * 2);
+        case Mode2.KANJI:
+          return Math.floor(usableBits / 13);
+        case Mode2.BYTE:
+        default:
+          return Math.floor(usableBits / 8);
+      }
+    };
+    exports.getBestVersionForData = function getBestVersionForData(data, errorCorrectionLevel) {
+      let seg;
+      const ecl = ECLevel.from(errorCorrectionLevel, ECLevel.M);
+      if (Array.isArray(data)) {
+        if (data.length > 1) {
+          return getBestVersionForMixedData(data, ecl);
+        }
+        if (data.length === 0) {
+          return 1;
+        }
+        seg = data[0];
+      } else {
+        seg = data;
+      }
+      return getBestVersionForDataLength(seg.mode, seg.getLength(), ecl);
+    };
+    exports.getEncodedBits = function getEncodedBits(version) {
+      if (!VersionCheck.isValid(version) || version < 7) {
+        throw new Error("Invalid QR Code version");
+      }
+      let d = version << 12;
+      while (Utils.getBCHDigit(d) - G18_BCH >= 0) {
+        d ^= G18 << Utils.getBCHDigit(d) - G18_BCH;
+      }
+      return version << 12 | d;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/format-info.js
+var require_format_info = __commonJS({
+  "node_modules/qrcode/lib/core/format-info.js"(exports) {
+    var Utils = require_utils();
+    var G15 = 1 << 10 | 1 << 8 | 1 << 5 | 1 << 4 | 1 << 2 | 1 << 1 | 1 << 0;
+    var G15_MASK = 1 << 14 | 1 << 12 | 1 << 10 | 1 << 4 | 1 << 1;
+    var G15_BCH = Utils.getBCHDigit(G15);
+    exports.getEncodedBits = function getEncodedBits(errorCorrectionLevel, mask) {
+      const data = errorCorrectionLevel.bit << 3 | mask;
+      let d = data << 10;
+      while (Utils.getBCHDigit(d) - G15_BCH >= 0) {
+        d ^= G15 << Utils.getBCHDigit(d) - G15_BCH;
+      }
+      return (data << 10 | d) ^ G15_MASK;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/numeric-data.js
+var require_numeric_data = __commonJS({
+  "node_modules/qrcode/lib/core/numeric-data.js"(exports, module) {
+    var Mode2 = require_mode();
+    function NumericData(data) {
+      this.mode = Mode2.NUMERIC;
+      this.data = data.toString();
+    }
+    NumericData.getBitsLength = function getBitsLength(length) {
+      return 10 * Math.floor(length / 3) + (length % 3 ? length % 3 * 3 + 1 : 0);
+    };
+    NumericData.prototype.getLength = function getLength() {
+      return this.data.length;
+    };
+    NumericData.prototype.getBitsLength = function getBitsLength() {
+      return NumericData.getBitsLength(this.data.length);
+    };
+    NumericData.prototype.write = function write(bitBuffer) {
+      let i2, group, value;
+      for (i2 = 0; i2 + 3 <= this.data.length; i2 += 3) {
+        group = this.data.substr(i2, 3);
+        value = parseInt(group, 10);
+        bitBuffer.put(value, 10);
+      }
+      const remainingNum = this.data.length - i2;
+      if (remainingNum > 0) {
+        group = this.data.substr(i2);
+        value = parseInt(group, 10);
+        bitBuffer.put(value, remainingNum * 3 + 1);
+      }
+    };
+    module.exports = NumericData;
+  }
+});
+
+// node_modules/qrcode/lib/core/alphanumeric-data.js
+var require_alphanumeric_data = __commonJS({
+  "node_modules/qrcode/lib/core/alphanumeric-data.js"(exports, module) {
+    var Mode2 = require_mode();
+    var ALPHA_NUM_CHARS = [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "M",
+      "N",
+      "O",
+      "P",
+      "Q",
+      "R",
+      "S",
+      "T",
+      "U",
+      "V",
+      "W",
+      "X",
+      "Y",
+      "Z",
+      " ",
+      "$",
+      "%",
+      "*",
+      "+",
+      "-",
+      ".",
+      "/",
+      ":"
+    ];
+    function AlphanumericData(data) {
+      this.mode = Mode2.ALPHANUMERIC;
+      this.data = data;
+    }
+    AlphanumericData.getBitsLength = function getBitsLength(length) {
+      return 11 * Math.floor(length / 2) + 6 * (length % 2);
+    };
+    AlphanumericData.prototype.getLength = function getLength() {
+      return this.data.length;
+    };
+    AlphanumericData.prototype.getBitsLength = function getBitsLength() {
+      return AlphanumericData.getBitsLength(this.data.length);
+    };
+    AlphanumericData.prototype.write = function write(bitBuffer) {
+      let i2;
+      for (i2 = 0; i2 + 2 <= this.data.length; i2 += 2) {
+        let value = ALPHA_NUM_CHARS.indexOf(this.data[i2]) * 45;
+        value += ALPHA_NUM_CHARS.indexOf(this.data[i2 + 1]);
+        bitBuffer.put(value, 11);
+      }
+      if (this.data.length % 2) {
+        bitBuffer.put(ALPHA_NUM_CHARS.indexOf(this.data[i2]), 6);
+      }
+    };
+    module.exports = AlphanumericData;
+  }
+});
+
+// node_modules/qrcode/lib/core/byte-data.js
+var require_byte_data = __commonJS({
+  "node_modules/qrcode/lib/core/byte-data.js"(exports, module) {
+    var Mode2 = require_mode();
+    function ByteData(data) {
+      this.mode = Mode2.BYTE;
+      if (typeof data === "string") {
+        this.data = new TextEncoder().encode(data);
+      } else {
+        this.data = new Uint8Array(data);
+      }
+    }
+    ByteData.getBitsLength = function getBitsLength(length) {
+      return length * 8;
+    };
+    ByteData.prototype.getLength = function getLength() {
+      return this.data.length;
+    };
+    ByteData.prototype.getBitsLength = function getBitsLength() {
+      return ByteData.getBitsLength(this.data.length);
+    };
+    ByteData.prototype.write = function(bitBuffer) {
+      for (let i2 = 0, l = this.data.length; i2 < l; i2++) {
+        bitBuffer.put(this.data[i2], 8);
+      }
+    };
+    module.exports = ByteData;
+  }
+});
+
+// node_modules/qrcode/lib/core/kanji-data.js
+var require_kanji_data = __commonJS({
+  "node_modules/qrcode/lib/core/kanji-data.js"(exports, module) {
+    var Mode2 = require_mode();
+    var Utils = require_utils();
+    function KanjiData(data) {
+      this.mode = Mode2.KANJI;
+      this.data = data;
+    }
+    KanjiData.getBitsLength = function getBitsLength(length) {
+      return length * 13;
+    };
+    KanjiData.prototype.getLength = function getLength() {
+      return this.data.length;
+    };
+    KanjiData.prototype.getBitsLength = function getBitsLength() {
+      return KanjiData.getBitsLength(this.data.length);
+    };
+    KanjiData.prototype.write = function(bitBuffer) {
+      let i2;
+      for (i2 = 0; i2 < this.data.length; i2++) {
+        let value = Utils.toSJIS(this.data[i2]);
+        if (value >= 33088 && value <= 40956) {
+          value -= 33088;
+        } else if (value >= 57408 && value <= 60351) {
+          value -= 49472;
+        } else {
+          throw new Error(
+            "Invalid SJIS character: " + this.data[i2] + "\nMake sure your charset is UTF-8"
+          );
+        }
+        value = (value >>> 8 & 255) * 192 + (value & 255);
+        bitBuffer.put(value, 13);
+      }
+    };
+    module.exports = KanjiData;
+  }
+});
+
+// node_modules/dijkstrajs/dijkstra.js
+var require_dijkstra = __commonJS({
+  "node_modules/dijkstrajs/dijkstra.js"(exports, module) {
+    "use strict";
+    var dijkstra = {
+      single_source_shortest_paths: function(graph, s, d) {
+        var predecessors = {};
+        var costs = {};
+        costs[s] = 0;
+        var open = dijkstra.PriorityQueue.make();
+        open.push(s, 0);
+        var closest, u, v, cost_of_s_to_u, adjacent_nodes, cost_of_e, cost_of_s_to_u_plus_cost_of_e, cost_of_s_to_v, first_visit;
+        while (!open.empty()) {
+          closest = open.pop();
+          u = closest.value;
+          cost_of_s_to_u = closest.cost;
+          adjacent_nodes = graph[u] || {};
+          for (v in adjacent_nodes) {
+            if (adjacent_nodes.hasOwnProperty(v)) {
+              cost_of_e = adjacent_nodes[v];
+              cost_of_s_to_u_plus_cost_of_e = cost_of_s_to_u + cost_of_e;
+              cost_of_s_to_v = costs[v];
+              first_visit = typeof costs[v] === "undefined";
+              if (first_visit || cost_of_s_to_v > cost_of_s_to_u_plus_cost_of_e) {
+                costs[v] = cost_of_s_to_u_plus_cost_of_e;
+                open.push(v, cost_of_s_to_u_plus_cost_of_e);
+                predecessors[v] = u;
+              }
+            }
+          }
+        }
+        if (typeof d !== "undefined" && typeof costs[d] === "undefined") {
+          var msg = ["Could not find a path from ", s, " to ", d, "."].join("");
+          throw new Error(msg);
+        }
+        return predecessors;
+      },
+      extract_shortest_path_from_predecessor_list: function(predecessors, d) {
+        var nodes = [];
+        var u = d;
+        var predecessor;
+        while (u) {
+          nodes.push(u);
+          predecessor = predecessors[u];
+          u = predecessors[u];
+        }
+        nodes.reverse();
+        return nodes;
+      },
+      find_path: function(graph, s, d) {
+        var predecessors = dijkstra.single_source_shortest_paths(graph, s, d);
+        return dijkstra.extract_shortest_path_from_predecessor_list(
+          predecessors,
+          d
+        );
+      },
+      /**
+       * A very naive priority queue implementation.
+       */
+      PriorityQueue: {
+        make: function(opts) {
+          var T = dijkstra.PriorityQueue, t = {}, key;
+          opts = opts || {};
+          for (key in T) {
+            if (T.hasOwnProperty(key)) {
+              t[key] = T[key];
+            }
+          }
+          t.queue = [];
+          t.sorter = opts.sorter || T.default_sorter;
+          return t;
+        },
+        default_sorter: function(a, b) {
+          return a.cost - b.cost;
+        },
+        /**
+         * Add a new item to the queue and ensure the highest priority element
+         * is at the front of the queue.
+         */
+        push: function(value, cost) {
+          var item = { value, cost };
+          this.queue.push(item);
+          this.queue.sort(this.sorter);
+        },
+        /**
+         * Return the highest priority element in the queue.
+         */
+        pop: function() {
+          return this.queue.shift();
+        },
+        empty: function() {
+          return this.queue.length === 0;
+        }
+      }
+    };
+    if (typeof module !== "undefined") {
+      module.exports = dijkstra;
+    }
+  }
+});
+
+// node_modules/qrcode/lib/core/segments.js
+var require_segments = __commonJS({
+  "node_modules/qrcode/lib/core/segments.js"(exports) {
+    var Mode2 = require_mode();
+    var NumericData = require_numeric_data();
+    var AlphanumericData = require_alphanumeric_data();
+    var ByteData = require_byte_data();
+    var KanjiData = require_kanji_data();
+    var Regex = require_regex();
+    var Utils = require_utils();
+    var dijkstra = require_dijkstra();
+    function getStringByteLength(str) {
+      return unescape(encodeURIComponent(str)).length;
+    }
+    function getSegments(regex2, mode, str) {
+      const segments = [];
+      let result;
+      while ((result = regex2.exec(str)) !== null) {
+        segments.push({
+          data: result[0],
+          index: result.index,
+          mode,
+          length: result[0].length
+        });
+      }
+      return segments;
+    }
+    function getSegmentsFromString(dataStr) {
+      const numSegs = getSegments(Regex.NUMERIC, Mode2.NUMERIC, dataStr);
+      const alphaNumSegs = getSegments(Regex.ALPHANUMERIC, Mode2.ALPHANUMERIC, dataStr);
+      let byteSegs;
+      let kanjiSegs;
+      if (Utils.isKanjiModeEnabled()) {
+        byteSegs = getSegments(Regex.BYTE, Mode2.BYTE, dataStr);
+        kanjiSegs = getSegments(Regex.KANJI, Mode2.KANJI, dataStr);
+      } else {
+        byteSegs = getSegments(Regex.BYTE_KANJI, Mode2.BYTE, dataStr);
+        kanjiSegs = [];
+      }
+      const segs = numSegs.concat(alphaNumSegs, byteSegs, kanjiSegs);
+      return segs.sort(function(s1, s2) {
+        return s1.index - s2.index;
+      }).map(function(obj) {
+        return {
+          data: obj.data,
+          mode: obj.mode,
+          length: obj.length
+        };
+      });
+    }
+    function getSegmentBitsLength(length, mode) {
+      switch (mode) {
+        case Mode2.NUMERIC:
+          return NumericData.getBitsLength(length);
+        case Mode2.ALPHANUMERIC:
+          return AlphanumericData.getBitsLength(length);
+        case Mode2.KANJI:
+          return KanjiData.getBitsLength(length);
+        case Mode2.BYTE:
+          return ByteData.getBitsLength(length);
+      }
+    }
+    function mergeSegments(segs) {
+      return segs.reduce(function(acc, curr) {
+        const prevSeg = acc.length - 1 >= 0 ? acc[acc.length - 1] : null;
+        if (prevSeg && prevSeg.mode === curr.mode) {
+          acc[acc.length - 1].data += curr.data;
+          return acc;
+        }
+        acc.push(curr);
+        return acc;
+      }, []);
+    }
+    function buildNodes(segs) {
+      const nodes = [];
+      for (let i2 = 0; i2 < segs.length; i2++) {
+        const seg = segs[i2];
+        switch (seg.mode) {
+          case Mode2.NUMERIC:
+            nodes.push([
+              seg,
+              { data: seg.data, mode: Mode2.ALPHANUMERIC, length: seg.length },
+              { data: seg.data, mode: Mode2.BYTE, length: seg.length }
+            ]);
+            break;
+          case Mode2.ALPHANUMERIC:
+            nodes.push([
+              seg,
+              { data: seg.data, mode: Mode2.BYTE, length: seg.length }
+            ]);
+            break;
+          case Mode2.KANJI:
+            nodes.push([
+              seg,
+              { data: seg.data, mode: Mode2.BYTE, length: getStringByteLength(seg.data) }
+            ]);
+            break;
+          case Mode2.BYTE:
+            nodes.push([
+              { data: seg.data, mode: Mode2.BYTE, length: getStringByteLength(seg.data) }
+            ]);
+        }
+      }
+      return nodes;
+    }
+    function buildGraph(nodes, version) {
+      const table = {};
+      const graph = { start: {} };
+      let prevNodeIds = ["start"];
+      for (let i2 = 0; i2 < nodes.length; i2++) {
+        const nodeGroup = nodes[i2];
+        const currentNodeIds = [];
+        for (let j = 0; j < nodeGroup.length; j++) {
+          const node = nodeGroup[j];
+          const key = "" + i2 + j;
+          currentNodeIds.push(key);
+          table[key] = { node, lastCount: 0 };
+          graph[key] = {};
+          for (let n = 0; n < prevNodeIds.length; n++) {
+            const prevNodeId = prevNodeIds[n];
+            if (table[prevNodeId] && table[prevNodeId].node.mode === node.mode) {
+              graph[prevNodeId][key] = getSegmentBitsLength(table[prevNodeId].lastCount + node.length, node.mode) - getSegmentBitsLength(table[prevNodeId].lastCount, node.mode);
+              table[prevNodeId].lastCount += node.length;
+            } else {
+              if (table[prevNodeId])
+                table[prevNodeId].lastCount = node.length;
+              graph[prevNodeId][key] = getSegmentBitsLength(node.length, node.mode) + 4 + Mode2.getCharCountIndicator(node.mode, version);
+            }
+          }
+        }
+        prevNodeIds = currentNodeIds;
+      }
+      for (let n = 0; n < prevNodeIds.length; n++) {
+        graph[prevNodeIds[n]].end = 0;
+      }
+      return { map: graph, table };
+    }
+    function buildSingleSegment(data, modesHint) {
+      let mode;
+      const bestMode = Mode2.getBestModeForData(data);
+      mode = Mode2.from(modesHint, bestMode);
+      if (mode !== Mode2.BYTE && mode.bit < bestMode.bit) {
+        throw new Error('"' + data + '" cannot be encoded with mode ' + Mode2.toString(mode) + ".\n Suggested mode is: " + Mode2.toString(bestMode));
+      }
+      if (mode === Mode2.KANJI && !Utils.isKanjiModeEnabled()) {
+        mode = Mode2.BYTE;
+      }
+      switch (mode) {
+        case Mode2.NUMERIC:
+          return new NumericData(data);
+        case Mode2.ALPHANUMERIC:
+          return new AlphanumericData(data);
+        case Mode2.KANJI:
+          return new KanjiData(data);
+        case Mode2.BYTE:
+          return new ByteData(data);
+      }
+    }
+    exports.fromArray = function fromArray(array) {
+      return array.reduce(function(acc, seg) {
+        if (typeof seg === "string") {
+          acc.push(buildSingleSegment(seg, null));
+        } else if (seg.data) {
+          acc.push(buildSingleSegment(seg.data, seg.mode));
+        }
+        return acc;
+      }, []);
+    };
+    exports.fromString = function fromString(data, version) {
+      const segs = getSegmentsFromString(data, Utils.isKanjiModeEnabled());
+      const nodes = buildNodes(segs);
+      const graph = buildGraph(nodes, version);
+      const path = dijkstra.find_path(graph.map, "start", "end");
+      const optimizedSegs = [];
+      for (let i2 = 1; i2 < path.length - 1; i2++) {
+        optimizedSegs.push(graph.table[path[i2]].node);
+      }
+      return exports.fromArray(mergeSegments(optimizedSegs));
+    };
+    exports.rawSplit = function rawSplit(data) {
+      return exports.fromArray(
+        getSegmentsFromString(data, Utils.isKanjiModeEnabled())
+      );
+    };
+  }
+});
+
+// node_modules/qrcode/lib/core/qrcode.js
+var require_qrcode = __commonJS({
+  "node_modules/qrcode/lib/core/qrcode.js"(exports) {
+    var Utils = require_utils();
+    var ECLevel = require_error_correction_level();
+    var BitBuffer = require_bit_buffer();
+    var BitMatrix = require_bit_matrix();
+    var AlignmentPattern = require_alignment_pattern();
+    var FinderPattern = require_finder_pattern();
+    var MaskPattern = require_mask_pattern();
+    var ECCode = require_error_correction_code();
+    var ReedSolomonEncoder = require_reed_solomon_encoder();
+    var Version = require_version();
+    var FormatInfo = require_format_info();
+    var Mode2 = require_mode();
+    var Segments = require_segments();
+    function setupFinderPattern(matrix, version) {
+      const size = matrix.size;
+      const pos = FinderPattern.getPositions(version);
+      for (let i2 = 0; i2 < pos.length; i2++) {
+        const row = pos[i2][0];
+        const col = pos[i2][1];
+        for (let r = -1; r <= 7; r++) {
+          if (row + r <= -1 || size <= row + r)
+            continue;
+          for (let c = -1; c <= 7; c++) {
+            if (col + c <= -1 || size <= col + c)
+              continue;
+            if (r >= 0 && r <= 6 && (c === 0 || c === 6) || c >= 0 && c <= 6 && (r === 0 || r === 6) || r >= 2 && r <= 4 && c >= 2 && c <= 4) {
+              matrix.set(row + r, col + c, true, true);
+            } else {
+              matrix.set(row + r, col + c, false, true);
+            }
+          }
+        }
+      }
+    }
+    function setupTimingPattern(matrix) {
+      const size = matrix.size;
+      for (let r = 8; r < size - 8; r++) {
+        const value = r % 2 === 0;
+        matrix.set(r, 6, value, true);
+        matrix.set(6, r, value, true);
+      }
+    }
+    function setupAlignmentPattern(matrix, version) {
+      const pos = AlignmentPattern.getPositions(version);
+      for (let i2 = 0; i2 < pos.length; i2++) {
+        const row = pos[i2][0];
+        const col = pos[i2][1];
+        for (let r = -2; r <= 2; r++) {
+          for (let c = -2; c <= 2; c++) {
+            if (r === -2 || r === 2 || c === -2 || c === 2 || r === 0 && c === 0) {
+              matrix.set(row + r, col + c, true, true);
+            } else {
+              matrix.set(row + r, col + c, false, true);
+            }
+          }
+        }
+      }
+    }
+    function setupVersionInfo(matrix, version) {
+      const size = matrix.size;
+      const bits = Version.getEncodedBits(version);
+      let row, col, mod2;
+      for (let i2 = 0; i2 < 18; i2++) {
+        row = Math.floor(i2 / 3);
+        col = i2 % 3 + size - 8 - 3;
+        mod2 = (bits >> i2 & 1) === 1;
+        matrix.set(row, col, mod2, true);
+        matrix.set(col, row, mod2, true);
+      }
+    }
+    function setupFormatInfo(matrix, errorCorrectionLevel, maskPattern) {
+      const size = matrix.size;
+      const bits = FormatInfo.getEncodedBits(errorCorrectionLevel, maskPattern);
+      let i2, mod2;
+      for (i2 = 0; i2 < 15; i2++) {
+        mod2 = (bits >> i2 & 1) === 1;
+        if (i2 < 6) {
+          matrix.set(i2, 8, mod2, true);
+        } else if (i2 < 8) {
+          matrix.set(i2 + 1, 8, mod2, true);
+        } else {
+          matrix.set(size - 15 + i2, 8, mod2, true);
+        }
+        if (i2 < 8) {
+          matrix.set(8, size - i2 - 1, mod2, true);
+        } else if (i2 < 9) {
+          matrix.set(8, 15 - i2 - 1 + 1, mod2, true);
+        } else {
+          matrix.set(8, 15 - i2 - 1, mod2, true);
+        }
+      }
+      matrix.set(size - 8, 8, 1, true);
+    }
+    function setupData(matrix, data) {
+      const size = matrix.size;
+      let inc = -1;
+      let row = size - 1;
+      let bitIndex = 7;
+      let byteIndex = 0;
+      for (let col = size - 1; col > 0; col -= 2) {
+        if (col === 6)
+          col--;
+        while (true) {
+          for (let c = 0; c < 2; c++) {
+            if (!matrix.isReserved(row, col - c)) {
+              let dark = false;
+              if (byteIndex < data.length) {
+                dark = (data[byteIndex] >>> bitIndex & 1) === 1;
+              }
+              matrix.set(row, col - c, dark);
+              bitIndex--;
+              if (bitIndex === -1) {
+                byteIndex++;
+                bitIndex = 7;
+              }
+            }
+          }
+          row += inc;
+          if (row < 0 || size <= row) {
+            row -= inc;
+            inc = -inc;
+            break;
+          }
+        }
+      }
+    }
+    function createData(version, errorCorrectionLevel, segments) {
+      const buffer = new BitBuffer();
+      segments.forEach(function(data) {
+        buffer.put(data.mode.bit, 4);
+        buffer.put(data.getLength(), Mode2.getCharCountIndicator(data.mode, version));
+        data.write(buffer);
+      });
+      const totalCodewords = Utils.getSymbolTotalCodewords(version);
+      const ecTotalCodewords = ECCode.getTotalCodewordsCount(version, errorCorrectionLevel);
+      const dataTotalCodewordsBits = (totalCodewords - ecTotalCodewords) * 8;
+      if (buffer.getLengthInBits() + 4 <= dataTotalCodewordsBits) {
+        buffer.put(0, 4);
+      }
+      while (buffer.getLengthInBits() % 8 !== 0) {
+        buffer.putBit(0);
+      }
+      const remainingByte = (dataTotalCodewordsBits - buffer.getLengthInBits()) / 8;
+      for (let i2 = 0; i2 < remainingByte; i2++) {
+        buffer.put(i2 % 2 ? 17 : 236, 8);
+      }
+      return createCodewords(buffer, version, errorCorrectionLevel);
+    }
+    function createCodewords(bitBuffer, version, errorCorrectionLevel) {
+      const totalCodewords = Utils.getSymbolTotalCodewords(version);
+      const ecTotalCodewords = ECCode.getTotalCodewordsCount(version, errorCorrectionLevel);
+      const dataTotalCodewords = totalCodewords - ecTotalCodewords;
+      const ecTotalBlocks = ECCode.getBlocksCount(version, errorCorrectionLevel);
+      const blocksInGroup2 = totalCodewords % ecTotalBlocks;
+      const blocksInGroup1 = ecTotalBlocks - blocksInGroup2;
+      const totalCodewordsInGroup1 = Math.floor(totalCodewords / ecTotalBlocks);
+      const dataCodewordsInGroup1 = Math.floor(dataTotalCodewords / ecTotalBlocks);
+      const dataCodewordsInGroup2 = dataCodewordsInGroup1 + 1;
+      const ecCount = totalCodewordsInGroup1 - dataCodewordsInGroup1;
+      const rs = new ReedSolomonEncoder(ecCount);
+      let offset = 0;
+      const dcData = new Array(ecTotalBlocks);
+      const ecData = new Array(ecTotalBlocks);
+      let maxDataSize = 0;
+      const buffer = new Uint8Array(bitBuffer.buffer);
+      for (let b = 0; b < ecTotalBlocks; b++) {
+        const dataSize = b < blocksInGroup1 ? dataCodewordsInGroup1 : dataCodewordsInGroup2;
+        dcData[b] = buffer.slice(offset, offset + dataSize);
+        ecData[b] = rs.encode(dcData[b]);
+        offset += dataSize;
+        maxDataSize = Math.max(maxDataSize, dataSize);
+      }
+      const data = new Uint8Array(totalCodewords);
+      let index = 0;
+      let i2, r;
+      for (i2 = 0; i2 < maxDataSize; i2++) {
+        for (r = 0; r < ecTotalBlocks; r++) {
+          if (i2 < dcData[r].length) {
+            data[index++] = dcData[r][i2];
+          }
+        }
+      }
+      for (i2 = 0; i2 < ecCount; i2++) {
+        for (r = 0; r < ecTotalBlocks; r++) {
+          data[index++] = ecData[r][i2];
+        }
+      }
+      return data;
+    }
+    function createSymbol(data, version, errorCorrectionLevel, maskPattern) {
+      let segments;
+      if (Array.isArray(data)) {
+        segments = Segments.fromArray(data);
+      } else if (typeof data === "string") {
+        let estimatedVersion = version;
+        if (!estimatedVersion) {
+          const rawSegments = Segments.rawSplit(data);
+          estimatedVersion = Version.getBestVersionForData(rawSegments, errorCorrectionLevel);
+        }
+        segments = Segments.fromString(data, estimatedVersion || 40);
+      } else {
+        throw new Error("Invalid data");
+      }
+      const bestVersion = Version.getBestVersionForData(segments, errorCorrectionLevel);
+      if (!bestVersion) {
+        throw new Error("The amount of data is too big to be stored in a QR Code");
+      }
+      if (!version) {
+        version = bestVersion;
+      } else if (version < bestVersion) {
+        throw new Error(
+          "\nThe chosen QR Code version cannot contain this amount of data.\nMinimum version required to store current data is: " + bestVersion + ".\n"
+        );
+      }
+      const dataBits = createData(version, errorCorrectionLevel, segments);
+      const moduleCount = Utils.getSymbolSize(version);
+      const modules = new BitMatrix(moduleCount);
+      setupFinderPattern(modules, version);
+      setupTimingPattern(modules);
+      setupAlignmentPattern(modules, version);
+      setupFormatInfo(modules, errorCorrectionLevel, 0);
+      if (version >= 7) {
+        setupVersionInfo(modules, version);
+      }
+      setupData(modules, dataBits);
+      if (isNaN(maskPattern)) {
+        maskPattern = MaskPattern.getBestMask(
+          modules,
+          setupFormatInfo.bind(null, modules, errorCorrectionLevel)
+        );
+      }
+      MaskPattern.applyMask(maskPattern, modules);
+      setupFormatInfo(modules, errorCorrectionLevel, maskPattern);
+      return {
+        modules,
+        version,
+        errorCorrectionLevel,
+        maskPattern,
+        segments
+      };
+    }
+    exports.create = function create(data, options) {
+      if (typeof data === "undefined" || data === "") {
+        throw new Error("No input text");
+      }
+      let errorCorrectionLevel = ECLevel.M;
+      let version;
+      let mask;
+      if (typeof options !== "undefined") {
+        errorCorrectionLevel = ECLevel.from(options.errorCorrectionLevel, ECLevel.M);
+        version = Version.from(options.version);
+        mask = MaskPattern.from(options.maskPattern);
+        if (options.toSJISFunc) {
+          Utils.setToSJISFunction(options.toSJISFunc);
+        }
+      }
+      return createSymbol(data, version, errorCorrectionLevel, mask);
+    };
+  }
+});
+
+// node_modules/qrcode/lib/renderer/utils.js
+var require_utils2 = __commonJS({
+  "node_modules/qrcode/lib/renderer/utils.js"(exports) {
+    function hex2rgba(hex2) {
+      if (typeof hex2 === "number") {
+        hex2 = hex2.toString();
+      }
+      if (typeof hex2 !== "string") {
+        throw new Error("Color should be defined as hex string");
+      }
+      let hexCode = hex2.slice().replace("#", "").split("");
+      if (hexCode.length < 3 || hexCode.length === 5 || hexCode.length > 8) {
+        throw new Error("Invalid hex color: " + hex2);
+      }
+      if (hexCode.length === 3 || hexCode.length === 4) {
+        hexCode = Array.prototype.concat.apply([], hexCode.map(function(c) {
+          return [c, c];
+        }));
+      }
+      if (hexCode.length === 6)
+        hexCode.push("F", "F");
+      const hexValue = parseInt(hexCode.join(""), 16);
+      return {
+        r: hexValue >> 24 & 255,
+        g: hexValue >> 16 & 255,
+        b: hexValue >> 8 & 255,
+        a: hexValue & 255,
+        hex: "#" + hexCode.slice(0, 6).join("")
+      };
+    }
+    exports.getOptions = function getOptions(options) {
+      if (!options)
+        options = {};
+      if (!options.color)
+        options.color = {};
+      const margin = typeof options.margin === "undefined" || options.margin === null || options.margin < 0 ? 4 : options.margin;
+      const width = options.width && options.width >= 21 ? options.width : void 0;
+      const scale = options.scale || 4;
+      return {
+        width,
+        scale: width ? 4 : scale,
+        margin,
+        color: {
+          dark: hex2rgba(options.color.dark || "#000000ff"),
+          light: hex2rgba(options.color.light || "#ffffffff")
+        },
+        type: options.type,
+        rendererOpts: options.rendererOpts || {}
+      };
+    };
+    exports.getScale = function getScale(qrSize, opts) {
+      return opts.width && opts.width >= qrSize + opts.margin * 2 ? opts.width / (qrSize + opts.margin * 2) : opts.scale;
+    };
+    exports.getImageWidth = function getImageWidth(qrSize, opts) {
+      const scale = exports.getScale(qrSize, opts);
+      return Math.floor((qrSize + opts.margin * 2) * scale);
+    };
+    exports.qrToImageData = function qrToImageData(imgData, qr, opts) {
+      const size = qr.modules.size;
+      const data = qr.modules.data;
+      const scale = exports.getScale(size, opts);
+      const symbolSize = Math.floor((size + opts.margin * 2) * scale);
+      const scaledMargin = opts.margin * scale;
+      const palette = [opts.color.light, opts.color.dark];
+      for (let i2 = 0; i2 < symbolSize; i2++) {
+        for (let j = 0; j < symbolSize; j++) {
+          let posDst = (i2 * symbolSize + j) * 4;
+          let pxColor = opts.color.light;
+          if (i2 >= scaledMargin && j >= scaledMargin && i2 < symbolSize - scaledMargin && j < symbolSize - scaledMargin) {
+            const iSrc = Math.floor((i2 - scaledMargin) / scale);
+            const jSrc = Math.floor((j - scaledMargin) / scale);
+            pxColor = palette[data[iSrc * size + jSrc] ? 1 : 0];
+          }
+          imgData[posDst++] = pxColor.r;
+          imgData[posDst++] = pxColor.g;
+          imgData[posDst++] = pxColor.b;
+          imgData[posDst] = pxColor.a;
+        }
+      }
+    };
+  }
+});
+
+// node_modules/qrcode/lib/renderer/canvas.js
+var require_canvas = __commonJS({
+  "node_modules/qrcode/lib/renderer/canvas.js"(exports) {
+    var Utils = require_utils2();
+    function clearCanvas(ctx, canvas, size) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!canvas.style)
+        canvas.style = {};
+      canvas.height = size;
+      canvas.width = size;
+      canvas.style.height = size + "px";
+      canvas.style.width = size + "px";
+    }
+    function getCanvasElement() {
+      try {
+        return document.createElement("canvas");
+      } catch (e) {
+        throw new Error("You need to specify a canvas element");
+      }
+    }
+    exports.render = function render2(qrData, canvas, options) {
+      let opts = options;
+      let canvasEl = canvas;
+      if (typeof opts === "undefined" && (!canvas || !canvas.getContext)) {
+        opts = canvas;
+        canvas = void 0;
+      }
+      if (!canvas) {
+        canvasEl = getCanvasElement();
+      }
+      opts = Utils.getOptions(opts);
+      const size = Utils.getImageWidth(qrData.modules.size, opts);
+      const ctx = canvasEl.getContext("2d");
+      const image = ctx.createImageData(size, size);
+      Utils.qrToImageData(image.data, qrData, opts);
+      clearCanvas(ctx, canvasEl, size);
+      ctx.putImageData(image, 0, 0);
+      return canvasEl;
+    };
+    exports.renderToDataURL = function renderToDataURL(qrData, canvas, options) {
+      let opts = options;
+      if (typeof opts === "undefined" && (!canvas || !canvas.getContext)) {
+        opts = canvas;
+        canvas = void 0;
+      }
+      if (!opts)
+        opts = {};
+      const canvasEl = exports.render(qrData, canvas, opts);
+      const type = opts.type || "image/png";
+      const rendererOpts = opts.rendererOpts || {};
+      return canvasEl.toDataURL(type, rendererOpts.quality);
+    };
+  }
+});
+
+// node_modules/qrcode/lib/renderer/svg-tag.js
+var require_svg_tag = __commonJS({
+  "node_modules/qrcode/lib/renderer/svg-tag.js"(exports) {
+    var Utils = require_utils2();
+    function getColorAttrib(color, attrib) {
+      const alpha = color.a / 255;
+      const str = attrib + '="' + color.hex + '"';
+      return alpha < 1 ? str + " " + attrib + '-opacity="' + alpha.toFixed(2).slice(1) + '"' : str;
+    }
+    function svgCmd(cmd, x, y) {
+      let str = cmd + x;
+      if (typeof y !== "undefined")
+        str += " " + y;
+      return str;
+    }
+    function qrToPath(data, size, margin) {
+      let path = "";
+      let moveBy = 0;
+      let newRow = false;
+      let lineLength = 0;
+      for (let i2 = 0; i2 < data.length; i2++) {
+        const col = Math.floor(i2 % size);
+        const row = Math.floor(i2 / size);
+        if (!col && !newRow)
+          newRow = true;
+        if (data[i2]) {
+          lineLength++;
+          if (!(i2 > 0 && col > 0 && data[i2 - 1])) {
+            path += newRow ? svgCmd("M", col + margin, 0.5 + row + margin) : svgCmd("m", moveBy, 0);
+            moveBy = 0;
+            newRow = false;
+          }
+          if (!(col + 1 < size && data[i2 + 1])) {
+            path += svgCmd("h", lineLength);
+            lineLength = 0;
+          }
+        } else {
+          moveBy++;
+        }
+      }
+      return path;
+    }
+    exports.render = function render2(qrData, options, cb) {
+      const opts = Utils.getOptions(options);
+      const size = qrData.modules.size;
+      const data = qrData.modules.data;
+      const qrcodesize = size + opts.margin * 2;
+      const bg = !opts.color.light.a ? "" : "<path " + getColorAttrib(opts.color.light, "fill") + ' d="M0 0h' + qrcodesize + "v" + qrcodesize + 'H0z"/>';
+      const path = "<path " + getColorAttrib(opts.color.dark, "stroke") + ' d="' + qrToPath(data, size, opts.margin) + '"/>';
+      const viewBox = 'viewBox="0 0 ' + qrcodesize + " " + qrcodesize + '"';
+      const width = !opts.width ? "" : 'width="' + opts.width + '" height="' + opts.width + '" ';
+      const svgTag = '<svg xmlns="http://www.w3.org/2000/svg" ' + width + viewBox + ' shape-rendering="crispEdges">' + bg + path + "</svg>\n";
+      if (typeof cb === "function") {
+        cb(null, svgTag);
+      }
+      return svgTag;
+    };
+  }
+});
+
+// node_modules/qrcode/lib/browser.js
+var require_browser = __commonJS({
+  "node_modules/qrcode/lib/browser.js"(exports) {
+    var canPromise = require_can_promise();
+    var QRCode2 = require_qrcode();
+    var CanvasRenderer = require_canvas();
+    var SvgRenderer = require_svg_tag();
+    function renderCanvas(renderFunc, canvas, text, opts, cb) {
+      const args = [].slice.call(arguments, 1);
+      const argsNum = args.length;
+      const isLastArgCb = typeof args[argsNum - 1] === "function";
+      if (!isLastArgCb && !canPromise()) {
+        throw new Error("Callback required as last argument");
+      }
+      if (isLastArgCb) {
+        if (argsNum < 2) {
+          throw new Error("Too few arguments provided");
+        }
+        if (argsNum === 2) {
+          cb = text;
+          text = canvas;
+          canvas = opts = void 0;
+        } else if (argsNum === 3) {
+          if (canvas.getContext && typeof cb === "undefined") {
+            cb = opts;
+            opts = void 0;
+          } else {
+            cb = opts;
+            opts = text;
+            text = canvas;
+            canvas = void 0;
+          }
+        }
+      } else {
+        if (argsNum < 1) {
+          throw new Error("Too few arguments provided");
+        }
+        if (argsNum === 1) {
+          text = canvas;
+          canvas = opts = void 0;
+        } else if (argsNum === 2 && !canvas.getContext) {
+          opts = text;
+          text = canvas;
+          canvas = void 0;
+        }
+        return new Promise(function(resolve, reject) {
+          try {
+            const data = QRCode2.create(text, opts);
+            resolve(renderFunc(data, canvas, opts));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+      try {
+        const data = QRCode2.create(text, opts);
+        cb(null, renderFunc(data, canvas, opts));
+      } catch (e) {
+        cb(e);
+      }
+    }
+    exports.create = QRCode2.create;
+    exports.toCanvas = renderCanvas.bind(null, CanvasRenderer.render);
+    exports.toDataURL = renderCanvas.bind(null, CanvasRenderer.renderToDataURL);
+    exports.toString = renderCanvas.bind(null, function(data, _, opts) {
+      return SvgRenderer.render(data, opts);
+    });
+  }
+});
 
 // node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function number(n) {
@@ -6654,6 +8794,7 @@ async function validateEvent2(event, url, method, body) {
 }
 
 // src/popup.js
+var import_qrcode = __toESM(require_browser(), 1);
 function makeBrowser() {
   if (globalThis.browser)
     return globalThis.browser;
@@ -6712,6 +8853,9 @@ var previewEl = document.getElementById("preview");
 var previewContentEl = document.getElementById("previewContent");
 var clearPreviewBtn = document.getElementById("clearPreview");
 var warningEl = document.getElementById("upload-warning");
+var showQrBtn = document.getElementById("show-qr");
+var settingsBtn = document.getElementById("open-settings");
+var dmToggleBtn = document.getElementById("dm-toggle");
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
   for (let i2 = 0; i2 < attempts; i2++) {
@@ -6746,6 +8890,9 @@ if (isPopout) {
   popoutBtn.addEventListener("click", popout);
 }
 clearPreviewBtn.addEventListener("click", clearPreview);
+showQrBtn?.addEventListener("click", showQrDialog);
+settingsBtn?.addEventListener("click", openSettings);
+dmToggleBtn?.addEventListener("click", toggleDmMode);
 document.getElementById("dismiss-warning")?.addEventListener("click", () => {
   warningEl.classList.add("hidden");
   localStorage.setItem("pushstr_upload_warn_dismissed", "1");
@@ -6807,6 +8954,7 @@ async function init() {
 function render() {
   renderContacts();
   renderHistory();
+  updateDmToggle();
   requestAnimationFrame(() => {
     historyEl.scrollTop = historyEl.scrollHeight;
   });
@@ -6879,13 +9027,21 @@ function renderHistory() {
     const bubble = document.createElement("div");
     bubble.className = "bubble " + (m.direction === "out" ? "out" : "in");
     const senderPubkey = m.direction === "out" ? m.to || selectedContact || state.lastRecipient : m.from || state.pubkey;
-    const actions = renderBubbleContent(bubble, m.content, senderPubkey, m.direction === "out", m.id);
+    const renderResult = renderBubbleContent(bubble, m.content, senderPubkey, m.direction === "out", m.id);
+    const actions = renderResult?.actions;
     const metaRow = document.createElement("div");
     metaRow.className = "meta-row";
     const meta = document.createElement("div");
     meta.className = "meta external";
     meta.textContent = friendlyTime(m.created_at);
     metaRow.appendChild(meta);
+    const dmKind = normalizeDmKind(m);
+    const dmBadge = buildDmBadge(dmKind);
+    if (dmBadge)
+      metaRow.appendChild(dmBadge);
+    if (renderResult?.hasMedia) {
+      metaRow.appendChild(buildLockBadge(renderResult.mediaEncrypted !== false));
+    }
     if (m.direction !== "out") {
       const copyBtn = document.createElement("button");
       copyBtn.className = "copy-btn";
@@ -6998,7 +9154,16 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
       img.style.maxWidth = "180px";
       img.style.maxHeight = "180px";
       img.style.display = "block";
+      makeZoomableImage(img, cached);
       container.appendChild(img);
+    } else if (mime.startsWith("video")) {
+      container.appendChild(buildVideoPlayer(cached));
+    } else if (mime.startsWith("audio")) {
+      const audio = document.createElement("audio");
+      audio.src = cached;
+      audio.controls = true;
+      audio.className = "audio-player";
+      container.appendChild(audio);
     } else {
       const info = document.createElement("div");
       info.textContent = media.filename || "Attachment";
@@ -7070,6 +9235,106 @@ function renderContainerMessage(container, message, color = "#9ca3af") {
   msgEl.textContent = message;
   container.appendChild(msgEl);
 }
+function buildVideoPlayer(url) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "media-video";
+  const video = document.createElement("video");
+  video.src = url;
+  video.playsInline = true;
+  video.preload = "metadata";
+  const overlay = document.createElement("div");
+  overlay.className = "video-overlay";
+  const controls = document.createElement("div");
+  controls.className = "video-controls";
+  const backBtn = document.createElement("button");
+  backBtn.textContent = "\u27F2";
+  backBtn.title = "Back 10s";
+  const playBtn = document.createElement("button");
+  playBtn.textContent = "\u25B6";
+  const forwardBtn = document.createElement("button");
+  forwardBtn.textContent = "\u27F3";
+  forwardBtn.title = "Forward 10s";
+  const scrubRow = document.createElement("div");
+  scrubRow.className = "video-scrub";
+  const scrubber = document.createElement("input");
+  scrubber.type = "range";
+  scrubber.min = "0";
+  scrubber.max = "1";
+  scrubber.step = "0.01";
+  scrubber.value = "0";
+  const syncScrub = () => {
+    if (!video.duration)
+      return;
+    scrubber.value = String(video.currentTime / video.duration);
+    playBtn.textContent = video.paused ? "\u25B6" : "\u275A\u275A";
+  };
+  let hideTimer = null;
+  const setControlsVisible = (visible) => {
+    if (visible) {
+      overlay.classList.remove("video-hidden");
+      scrubRow.classList.remove("video-hidden");
+    } else {
+      overlay.classList.add("video-hidden");
+      scrubRow.classList.add("video-hidden");
+    }
+  };
+  const scheduleHide = () => {
+    if (hideTimer)
+      clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!video.paused)
+        setControlsVisible(false);
+    }, 2e3);
+  };
+  backBtn.addEventListener("click", () => {
+    video.currentTime = Math.max(0, (video.currentTime || 0) - 10);
+  });
+  forwardBtn.addEventListener("click", () => {
+    if (!video.duration)
+      return;
+    video.currentTime = Math.min(video.duration, (video.currentTime || 0) + 10);
+  });
+  playBtn.addEventListener("click", () => {
+    if (video.paused)
+      video.play();
+    else
+      video.pause();
+  });
+  scrubber.addEventListener("input", () => {
+    if (!video.duration)
+      return;
+    video.currentTime = Number(scrubber.value) * video.duration;
+  });
+  video.addEventListener("timeupdate", syncScrub);
+  video.addEventListener("play", () => {
+    syncScrub();
+    scheduleHide();
+  });
+  video.addEventListener("pause", () => {
+    syncScrub();
+    setControlsVisible(true);
+  });
+  video.addEventListener("click", () => {
+    const currentlyHidden = overlay.classList.contains("video-hidden");
+    setControlsVisible(currentlyHidden);
+    if (!video.paused && currentlyHidden)
+      scheduleHide();
+    if (!video.paused && !currentlyHidden)
+      scheduleHide();
+  });
+  controls.addEventListener("click", (event) => event.stopPropagation());
+  scrubRow.addEventListener("click", (event) => event.stopPropagation());
+  controls.appendChild(backBtn);
+  controls.appendChild(playBtn);
+  controls.appendChild(forwardBtn);
+  overlay.appendChild(controls);
+  scrubRow.appendChild(scrubber);
+  wrapper.appendChild(video);
+  wrapper.appendChild(overlay);
+  wrapper.appendChild(scrubRow);
+  setControlsVisible(true);
+  return wrapper;
+}
 function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadCtrl) {
   container.replaceChildren();
   const mime = cachedData.mime || media.mime || fragMeta.mime;
@@ -7079,7 +9344,16 @@ function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadC
     img.style.maxWidth = "180px";
     img.style.maxHeight = "180px";
     img.style.display = "block";
+    makeZoomableImage(img, cachedData.blobUrl);
     container.appendChild(img);
+  } else if (mime && mime.startsWith("video")) {
+    container.appendChild(buildVideoPlayer(cachedData.blobUrl));
+  } else if (mime && mime.startsWith("audio")) {
+    const audio = document.createElement("audio");
+    audio.src = cachedData.blobUrl;
+    audio.controls = true;
+    audio.className = "audio-player";
+    container.appendChild(audio);
   } else {
     const info = document.createElement("div");
     info.textContent = cachedData.filename || media.filename || "Attachment";
@@ -7222,7 +9496,7 @@ async function send() {
         } catch (_) {
         }
       }
-      const payload = JSON.stringify({ media: res });
+      const payload = buildPushstrAttachmentPayload(content, res);
       await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content: payload });
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
@@ -7255,23 +9529,48 @@ async function refreshState() {
 function toNpub(pk) {
   if (!pk)
     return "";
-  if (pk.startsWith("npub"))
-    return pk;
+  const cleaned = stripNostrPrefix(pk);
+  if (cleaned.startsWith("npub"))
+    return cleaned;
   try {
-    const decoded = nip19_exports.decode(pk);
+    const decoded = nip19_exports.decode(cleaned);
     if (decoded.type === "nprofile" && decoded.data?.pubkey) {
       return nip19_exports.npubEncode(decoded.data.pubkey);
     }
     if (decoded.type === "npub" && typeof decoded.data === "string") {
-      return pk;
+      return cleaned;
     }
   } catch (_) {
   }
   try {
-    return nip19_exports.npubEncode(pk);
+    return nip19_exports.npubEncode(cleaned);
   } catch (_) {
     return pk;
   }
+}
+function stripNostrPrefix(value) {
+  if (!value)
+    return value;
+  if (value.startsWith("nostr://"))
+    return value.slice(8);
+  if (value.startsWith("nostr:"))
+    return value.slice(6);
+  return value;
+}
+var PUSHSTR_MEDIA_START = "[pushstr:media]";
+var PUSHSTR_MEDIA_END = "[/pushstr:media]";
+function extractPushstrMedia(raw) {
+  const startIdx = raw.indexOf(PUSHSTR_MEDIA_START);
+  if (startIdx === -1) {
+    return { text: raw, mediaJson: null };
+  }
+  const contentStart = startIdx + PUSHSTR_MEDIA_START.length;
+  const endIdx = raw.indexOf(PUSHSTR_MEDIA_END, contentStart);
+  const mediaJson = (endIdx === -1 ? raw.slice(contentStart) : raw.slice(contentStart, endIdx)).trim();
+  const before = raw.slice(0, startIdx);
+  const after = endIdx === -1 ? "" : raw.slice(endIdx + PUSHSTR_MEDIA_END.length);
+  const cleaned = (before + after).trim();
+  return { text: cleaned, mediaJson: mediaJson || null };
 }
 function short(pk) {
   const npub = toNpub(pk);
@@ -7284,7 +9583,7 @@ function short(pk) {
 function normalizePubkeyInput(input) {
   if (!input)
     throw new Error("Missing pubkey");
-  const trimmed = input.trim();
+  const trimmed = stripNostrPrefix(input.trim());
   try {
     const decoded = nip19_exports.decode(trimmed);
     if (decoded.type === "npub" && typeof decoded.data === "string")
@@ -7295,7 +9594,7 @@ function normalizePubkeyInput(input) {
   }
   if (/^[0-9a-fA-F]{64}$/.test(trimmed))
     return trimmed.toLowerCase();
-  throw new Error("Enter a valid npub or hex pubkey");
+  throw new Error("Enter a valid npub, nprofile, or hex pubkey");
 }
 function status(msg) {
   if (msg)
@@ -7338,13 +9637,87 @@ function showModal(title, contentNode) {
     ok.focus();
   });
 }
+function showInfoModal(title, contentNode) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  const dialog = document.createElement("div");
+  dialog.className = "modal-dialog";
+  const header = document.createElement("div");
+  header.className = "modal-header";
+  header.textContent = title;
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  body.appendChild(contentNode);
+  const footer = document.createElement("div");
+  footer.className = "modal-footer";
+  const close = document.createElement("button");
+  close.textContent = "Close";
+  const closeModal = () => overlay.remove();
+  close.addEventListener("click", closeModal);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay)
+      closeModal();
+  });
+  footer.appendChild(close);
+  dialog.appendChild(header);
+  dialog.appendChild(body);
+  dialog.appendChild(footer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  close.focus();
+}
+async function showQrDialog() {
+  const pubkey = state?.pubkey;
+  if (!pubkey) {
+    status("No pubkey available");
+    return;
+  }
+  const npub = toNpub(pubkey);
+  const uri = `nostr:${npub}`;
+  const wrapper = document.createElement("div");
+  wrapper.className = "qr-wrapper";
+  const canvas = document.createElement("canvas");
+  try {
+    await import_qrcode.default.toCanvas(canvas, uri, {
+      width: 200,
+      margin: 1,
+      color: { dark: "#0f172a", light: "#ffffff" }
+    });
+  } catch (err) {
+    console.error("[pushstr][popup] QR render failed", err);
+    status("QR render failed");
+    return;
+  }
+  const label = document.createElement("div");
+  label.className = "qr-label";
+  label.textContent = "Scan to add";
+  const text = document.createElement("div");
+  text.className = "qr-text";
+  text.textContent = npub;
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "qr-copy";
+  copyBtn.textContent = "Copy";
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(uri);
+      flashCopyButton(copyBtn);
+    } catch (err) {
+      prompt("nostr:", uri);
+    }
+  });
+  wrapper.appendChild(canvas);
+  wrapper.appendChild(label);
+  wrapper.appendChild(text);
+  wrapper.appendChild(copyBtn);
+  showInfoModal("Your QR", wrapper);
+}
 async function showAddContactDialog() {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
       <label style="font-size:12px;color:#9ca3af;">Nickname (optional)</label>
       <input type="text" id="ac_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
-      <label style="font-size:12px;color:#9ca3af;">npub or hex pubkey</label>
+      <label style="font-size:12px;color:#9ca3af;">npub, nprofile, or hex pubkey</label>
       <input type="text" id="ac_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
     </div>
   `;
@@ -7384,6 +9757,38 @@ function popout() {
   }
   window.popoutWindow = window.open(url, "pushstr-popout", "noopener,noreferrer,width=800,height=640");
 }
+function openSettings() {
+  const url = browser.runtime.getURL("options.html");
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+function makeZoomableImage(img, url) {
+  img.style.cursor = "zoom-in";
+  img.addEventListener("click", () => showImageModal(url));
+}
+function showImageModal(url) {
+  const overlay = document.createElement("div");
+  overlay.className = "image-modal";
+  const img = document.createElement("img");
+  img.src = url;
+  let scale = 1;
+  const setScale = (next) => {
+    scale = Math.min(3, Math.max(1, next));
+    img.style.transform = `scale(${scale})`;
+    img.style.cursor = scale > 1 ? "zoom-out" : "zoom-in";
+  };
+  img.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setScale(scale > 1 ? 1 : 2);
+  });
+  img.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -0.1 : 0.1;
+    setScale(scale + delta);
+  }, { passive: false });
+  overlay.addEventListener("click", () => overlay.remove());
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
+}
 function flashCopyButton(btn) {
   if (!btn)
     return;
@@ -7396,7 +9801,11 @@ function flashCopyButton(btn) {
   }, 1800);
 }
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
-  const cleaned = stripNip18(content);
+  const result = { actions: null, hasMedia: false, mediaEncrypted: null };
+  const baseCleaned = stripNip18(content);
+  const extracted = extractPushstrMedia(baseCleaned);
+  const cleaned = extracted.text;
+  const mediaJson = extracted.mediaJson;
   const renderTextIfAny = (urlToStrip = null) => {
     let txt = cleaned;
     if (urlToStrip) {
@@ -7409,7 +9818,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         container.appendChild(target);
     }
   };
-  let jsonPart = cleaned;
+  let jsonPart = mediaJson || cleaned;
   let fragPart = "";
   if (cleaned.includes("#")) {
     const idx = cleaned.indexOf("#");
@@ -7441,16 +9850,28 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
     });
     actionHolder.appendChild(downloadCtrl.btn);
     const isEncrypted = (media.encryption === "aes-gcm" || media.cipher_sha256) && media.iv;
+    result.hasMedia = true;
+    result.mediaEncrypted = isEncrypted;
     if (isEncrypted) {
       renderEncryptedMedia(container, media, senderPubkey, fullUrl, fragMeta, downloadCtrl, isOut, messageId);
     } else {
-      if ((media.mime || "").startsWith("image")) {
+      const mime = media.mime || "";
+      if (mime.startsWith("image")) {
         const img = document.createElement("img");
         img.src = fullUrl;
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, fullUrl);
         container.appendChild(img);
+      } else if (mime.startsWith("video")) {
+        container.appendChild(buildVideoPlayer(fullUrl));
+      } else if (mime.startsWith("audio")) {
+        const audio = document.createElement("audio");
+        audio.src = fullUrl;
+        audio.controls = true;
+        audio.className = "audio-player";
+        container.appendChild(audio);
       } else {
         const info = document.createElement("div");
         info.textContent = media.filename || "Attachment";
@@ -7459,7 +9880,8 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       }
       downloadCtrl.setTarget(fullUrl, media.filename);
     }
-    return actionHolder;
+    result.actions = actionHolder;
+    return result;
   }
   if (parsed && parsed.url) {
     const fullUrl = fragPart ? `${parsed.url}#${fragPart}` : parsed.url;
@@ -7482,10 +9904,12 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, fullUrl);
         container.appendChild(img);
       }
       renderTextIfAny(fullUrl);
-      return actionHolder;
+      result.actions = actionHolder;
+      return result;
     }
     renderLink(container, fullUrl);
     renderTextIfAny(fullUrl);
@@ -7504,10 +9928,12 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, meta.url);
         container.appendChild(img);
       }
       renderTextIfAny(meta.url);
-      return actionHolder;
+      result.actions = actionHolder;
+      return result;
     }
     renderLink(container, meta.url);
     renderTextIfAny(meta.url);
@@ -7527,10 +9953,12 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
         img.style.maxWidth = "180px";
         img.style.maxHeight = "180px";
         img.style.display = "block";
+        makeZoomableImage(img, metaFromUrl.url);
         container.appendChild(img);
       }
       renderTextIfAny(metaFromUrl.url);
-      return actionHolder;
+      result.actions = actionHolder;
+      return result;
     }
     renderLink(container, urlMatch[0]);
     renderTextIfAny(urlMatch[0]);
@@ -7548,6 +9976,59 @@ function updateComposerMode() {
     attachBtn.classList.remove("hidden");
     sendBtn.classList.add("hidden");
   }
+  updateDmToggle();
+}
+function getDmModeForContact(contact) {
+  if (!contact)
+    return "nip17";
+  const modes = state.dmModes || {};
+  return modes[contact] || "nip17";
+}
+async function toggleDmMode() {
+  if (!selectedContact)
+    return;
+  const current = getDmModeForContact(selectedContact);
+  const next = current === "nip17" ? "nip04" : "nip17";
+  state.dmModes = { ...state.dmModes || {}, [selectedContact]: next };
+  updateDmToggle();
+  try {
+    await safeSend({ type: "set-dm-mode", recipient: selectedContact, mode: next });
+  } catch (err) {
+    console.error("[pushstr][popup] set-dm-mode failed", err);
+  }
+}
+function updateDmToggle() {
+  if (!dmToggleBtn)
+    return;
+  const mode = getDmModeForContact(selectedContact);
+  dmToggleBtn.classList.toggle("active", mode === "nip17");
+  dmToggleBtn.dataset.mode = mode;
+  dmToggleBtn.title = mode === "nip17" ? "NIP-17 (giftwrap)" : "NIP-04 (legacy)";
+}
+function normalizeDmKind(message) {
+  if (!message)
+    return null;
+  if (message.dm_kind === "nip04" || message.dm_kind === "nip17")
+    return message.dm_kind;
+  if (message.outerKind === 4)
+    return "nip04";
+  if (message.outerKind === 1059 || message.outerKind === 14)
+    return "nip17";
+  return null;
+}
+function buildDmBadge(kind) {
+  if (!kind)
+    return null;
+  const badge = document.createElement("span");
+  badge.className = `badge dm ${kind}`;
+  badge.textContent = kind === "nip04" ? "04" : "17";
+  return badge;
+}
+function buildLockBadge(encrypted) {
+  const badge = document.createElement("span");
+  badge.className = `badge lock ${encrypted ? "encrypted" : "unencrypted"}`;
+  badge.textContent = encrypted ? "\u{1F512}" : "\u{1F513}";
+  return badge;
 }
 function attachFile() {
   if (!isPopout) {
@@ -7593,6 +10074,21 @@ async function handleFileAttachment(file) {
     status(`Attachment failed: ${err.message}`);
     clearPreview();
   }
+}
+function buildPushstrAttachmentPayload(text, media) {
+  const filename = media.filename || "attachment";
+  const sizeLabel = typeof media.size === "number" ? formatSize(media.size) : null;
+  const attachmentLine = sizeLabel ? `Attachment: ${filename} (${sizeLabel})` : `Attachment: ${filename}`;
+  const url = media.url || "";
+  const descriptorJson = JSON.stringify({ media });
+  const lines = [];
+  if (text)
+    lines.push(text);
+  lines.push(attachmentLine);
+  if (url)
+    lines.push(url);
+  lines.push("", PUSHSTR_MEDIA_START, descriptorJson, PUSHSTR_MEDIA_END);
+  return lines.join("\n");
 }
 function showPreview(file) {
   previewEl.classList.remove("uploaded");

@@ -11792,12 +11792,15 @@ var browser = makeBrowser();
 var pool;
 var sub;
 var CryptoWasm = WasmCrypto;
+var DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://relay.primal.net",
+  "wss://nos.lol",
+  "wss://nostr.mom",
+  "wss://relay.nostr.band"
+];
 var settings = {
-  relays: [
-    "wss://relay.damus.io",
-    "wss://relay.snort.social",
-    "wss://offchain.pub"
-  ],
+  relays: [...DEFAULT_RELAYS],
   recipients: [],
   recipientsByKey: {},
   messagesByKey: {},
@@ -11847,6 +11850,7 @@ async function handleMessage(msg) {
       relays: settings.relays,
       recipients: getRecipientsForCurrent(),
       messages: messages2,
+      dmModes: getDmModesForCurrent(),
       useGiftwrap: true,
       useNip44: true,
       lastRecipient: settings.lastRecipient,
@@ -11874,6 +11878,15 @@ async function handleMessage(msg) {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
     return { ok: true };
+  }
+  if (msg.type === "set-dm-mode") {
+    const recipient = normalizePubkey(msg.recipient);
+    const mode = msg.mode === "nip04" ? "nip04" : "nip17";
+    if (!recipient)
+      return { error: "missing recipient" };
+    setDmModeForCurrent(recipient, mode);
+    await persistSettings();
+    return { ok: true, mode };
   }
   if (msg.type === "upload-blossom") {
     return uploadToBlossom(msg.data, msg.recipient, msg.mime, msg.filename);
@@ -11959,9 +11972,11 @@ async function handleMessage(msg) {
 async function loadSettings() {
   const stored = await browser.storage.local.get();
   const prevKeys = (settings.keys || []).length;
+  const prevRelays = Array.isArray(settings.relays) ? settings.relays : [];
   settings = { ...settings, ...stored };
   settings.useGiftwrap = true;
   settings.useNip44 = true;
+  settings.relays = mergeDefaultRelays(settings.relays);
   settings.recipientsByKey = settings.recipientsByKey || {};
   settings.messagesByKey = settings.messagesByKey || {};
   settings.recipients = normalizeRecipients(settings.recipients || []);
@@ -11971,9 +11986,25 @@ async function loadSettings() {
   if (settings.nsec)
     addKeyToList(settings.nsec);
   loadMessagesForCurrent(stored.messages || []);
-  if ((settings.keys || []).length !== prevKeys)
+  const relaysChanged = JSON.stringify(settings.relays) !== JSON.stringify(prevRelays);
+  if ((settings.keys || []).length !== prevKeys || relaysChanged)
     await persistSettings();
   syncRecipientsForCurrent();
+}
+function mergeDefaultRelays(relays) {
+  if (!Array.isArray(relays) || relays.length === 0)
+    return [...DEFAULT_RELAYS];
+  if (relays.length >= DEFAULT_RELAYS.length)
+    return relays;
+  const merged = [...relays];
+  for (const relay of DEFAULT_RELAYS) {
+    if (!merged.includes(relay)) {
+      merged.push(relay);
+      if (merged.length >= DEFAULT_RELAYS.length)
+        break;
+    }
+  }
+  return merged;
 }
 async function persistSettings() {
   const pub = currentPubkey();
@@ -12073,6 +12104,7 @@ async function handleGiftEvent(event) {
       return;
     const sender = targetEvent.pubkey || "unknown";
     const message = await decryptDmContent(priv, sender, targetEvent.content);
+    const dmKind = event.kind === 1059 ? "nip17" : targetEvent.kind === 4 ? "nip04" : "nip17";
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
     await ensureContact(sender);
     await recordMessage({
@@ -12083,6 +12115,7 @@ async function handleGiftEvent(event) {
       content: message,
       created_at: targetEvent.created_at || Math.floor(Date.now() / 1e3),
       outerKind: event.kind,
+      dm_kind: dmKind,
       relayFrom: settings.relays
     });
     if (message && !suppressNotifications) {
@@ -12102,20 +12135,21 @@ async function sendGift(recipient, content) {
   if (!chosen)
     throw new Error("No recipient set");
   const recipientHex = normalizePubkey(chosen);
+  const dmMode = getDmModeForRecipient(recipientHex);
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1e3);
-  const cipherText = await encryptDmContent(priv, recipientHex, content);
-  if (!settings.useGiftwrap) {
+  if (dmMode === "nip04") {
+    const cipherText2 = await nip04_exports.encrypt(priv, recipientHex, content);
     const dm = {
-      kind: 14,
+      kind: 4,
       created_at,
       tags: [["p", recipientHex]],
-      content: cipherText
+      content: cipherText2
     };
     const signedDm = finalizeEvent2(dm, priv);
     await pool.publish(settings.relays, signedDm);
-    console.info("[pushstr] sent DM kind 14 (no giftwrap)", { to: recipientHex, relays: settings.relays });
+    console.info("[pushstr] sent DM kind 4 (nip04)", { to: recipientHex, relays: settings.relays });
     await recordMessage({
       id: signedDm.id,
       direction: "out",
@@ -12123,11 +12157,13 @@ async function sendGift(recipient, content) {
       to: recipientHex,
       content,
       created_at,
-      outerKind: 14,
+      outerKind: 4,
+      dm_kind: "nip04",
       relays: settings.relays
     });
     return { ok: true, id: signedDm.id };
   }
+  const cipherText = await encryptDmContent(priv, recipientHex, content);
   const senderPubkey = getPublicKey(priv);
   const inner = {
     kind: 14,
@@ -12166,6 +12202,7 @@ async function sendGift(recipient, content) {
     content,
     created_at,
     outerKind: 1059,
+    dm_kind: "nip17",
     relays: settings.relays
   });
   return { ok: true, id: signedGift.id };
@@ -12173,10 +12210,10 @@ async function sendGift(recipient, content) {
 function notify(title, message) {
   try {
     browser.notifications.create({
-      type: 'basic',
-      iconUrl: browser.runtime.getURL('pushstr_96.png'),
+      type: "basic",
+      iconUrl: browser.runtime.getURL("pushstr_96.png"),
       title,
-      message,
+      message
     });
   } catch (err2) {
     console.warn("Notifications unavailable", err2);
@@ -12224,17 +12261,22 @@ async function focusOrOpenChat() {
 function normalizePubkey(input) {
   if (!input)
     throw new Error("Missing pubkey");
+  let normalized = input.trim();
+  if (normalized.startsWith("nostr://"))
+    normalized = normalized.slice(8);
+  else if (normalized.startsWith("nostr:"))
+    normalized = normalized.slice(6);
   try {
-    const decoded = nip19_exports.decode(input);
+    const decoded = nip19_exports.decode(normalized);
     if (decoded.type === "npub" || decoded.type === "nprofile") {
       return decoded.data.pubkey || decoded.data;
     }
   } catch (_) {
   }
-  const hex2 = input.trim();
+  const hex2 = normalized.trim();
   if (/^[0-9a-fA-F]{64}$/.test(hex2))
     return hex2.toLowerCase();
-  throw new Error("Invalid recipient pubkey (expect hex or npub...)");
+  throw new Error("Invalid recipient pubkey (expect hex, npub, or nprofile)");
 }
 function normalizeRecipientEntry(entry) {
   if (!entry)
@@ -12532,6 +12574,28 @@ function getRecipientsForCurrent() {
   if (pk)
     return settings.recipientsByKey[pk] || [];
   return settings.recipients || [];
+}
+function getDmModesForCurrent() {
+  const pk = currentPubkey();
+  settings.dmModesByKey = settings.dmModesByKey || {};
+  if (pk)
+    return settings.dmModesByKey[pk] || {};
+  return settings.dmModes || {};
+}
+function setDmModeForCurrent(recipient, mode) {
+  const pk = currentPubkey();
+  settings.dmModesByKey = settings.dmModesByKey || {};
+  if (pk) {
+    const existing = settings.dmModesByKey[pk] || {};
+    settings.dmModesByKey[pk] = { ...existing, [recipient]: mode };
+  } else {
+    settings.dmModes = settings.dmModes || {};
+    settings.dmModes[recipient] = mode;
+  }
+}
+function getDmModeForRecipient(recipient) {
+  const modes = getDmModesForCurrent();
+  return modes[recipient] || "nip17";
 }
 function setRecipientsForCurrent(list) {
   const normalized = normalizeRecipients(list);

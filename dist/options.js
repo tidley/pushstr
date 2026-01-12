@@ -8855,6 +8855,7 @@ var relayList = document.getElementById("relayList");
 var contactPub = document.getElementById("contactPub");
 var contactNick = document.getElementById("contactNick");
 var contactError = document.getElementById("contactError");
+var settingsVersion = document.getElementById("settingsVersion");
 var editTimers = /* @__PURE__ */ new WeakMap();
 var relayStatusCache = /* @__PURE__ */ new Map();
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
@@ -8958,6 +8959,14 @@ async function init() {
     }
   }
   pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
+  if (settingsVersion) {
+    try {
+      const manifest = browser.runtime.getManifest();
+      settingsVersion.textContent = `Version ${manifest?.version || "0.0.0"}`;
+    } catch (_) {
+      settingsVersion.textContent = "Version unknown";
+    }
+  }
 }
 async function loadStateFallback() {
   try {
@@ -9130,7 +9139,7 @@ function addContactFromForm() {
   }
   const normalized = normalizePubkeyInput(pubkey);
   if (!normalized) {
-    contactError.textContent = "Enter a valid npub or hex pubkey";
+    contactError.textContent = "Enter a valid npub, nprofile, or hex pubkey";
     return;
   }
   const exists4 = Array.from(contactsBody.querySelectorAll('input[type="hidden"]')).find((el) => el.value === normalized);
@@ -9292,23 +9301,33 @@ async function switchKey() {
 function toNpub(pk) {
   if (!pk)
     return "";
-  if (pk.startsWith("npub"))
-    return pk;
+  const cleaned = stripNostrPrefix(pk);
+  if (cleaned.startsWith("npub"))
+    return cleaned;
   try {
-    const decoded = nip19_exports.decode(pk);
+    const decoded = nip19_exports.decode(cleaned);
     if (decoded.type === "nprofile" && decoded.data?.pubkey) {
       return nip19_exports.npubEncode(decoded.data.pubkey);
     }
     if (decoded.type === "npub" && typeof decoded.data === "string") {
-      return pk;
+      return cleaned;
     }
   } catch (_) {
   }
   try {
-    return nip19_exports.npubEncode(pk);
+    return nip19_exports.npubEncode(cleaned);
   } catch (_) {
     return pk;
   }
+}
+function stripNostrPrefix(value) {
+  if (!value)
+    return value;
+  if (value.startsWith("nostr://"))
+    return value.slice(8);
+  if (value.startsWith("nostr:"))
+    return value.slice(6);
+  return value;
 }
 function shortKey(pk) {
   if (!pk)
@@ -9462,10 +9481,10 @@ function applyRelayStatus(dot, state) {
     dot.title = "Checking...";
 }
 function normalizePubkeyInput(input) {
-  const trimmed = input.trim();
+  const trimmed = stripNostrPrefix(input.trim());
   if (!trimmed)
     return null;
-  if (/^npub/i.test(trimmed))
+  if (/^npub/i.test(trimmed) || /^nprofile/i.test(trimmed))
     return toNpub(trimmed);
   if (/^[0-9a-fA-F]{64}$/.test(trimmed))
     return trimmed.toLowerCase();
