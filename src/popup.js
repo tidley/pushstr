@@ -1171,7 +1171,7 @@ async function showQrDialog() {
   wrapper.appendChild(label);
   wrapper.appendChild(text);
   wrapper.appendChild(copyBtn);
-  showInfoModal('Your QR', wrapper);
+  showInfoModal('Your npub', wrapper);
 }
 async function showAddContactDialog() {
   const wrapper = document.createElement('div');
