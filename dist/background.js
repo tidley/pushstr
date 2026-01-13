@@ -11826,13 +11826,17 @@ var BLOSSOM_UPLOAD_PATH = "upload";
 var suppressNotifications = true;
 var textEncoder = new TextEncoder();
 var textDecoder = new TextDecoder();
-(async () => {
-  await WasmCrypto.default();
-  await loadSettings();
-  await ensureKey();
-  await connect();
-  await setupContextMenus();
-  quietNotifications();
+var ready = (async () => {
+  try {
+    await WasmCrypto.default();
+    await loadSettings();
+    await ensureKey();
+    await connect();
+    await setupContextMenus();
+    quietNotifications();
+  } catch (err2) {
+    console.error("[pushstr][background] init failed", err2);
+  }
 })();
 browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -11847,6 +11851,7 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 async function handleMessage(msg) {
+  await ready;
   if (msg.type === "get-state") {
     syncRecipientsForCurrent();
     console.log("[pushstr][background] get-state: returning", messages2.length, "messages");

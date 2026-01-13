@@ -8943,7 +8943,7 @@ async function init() {
     status("No key");
     return;
   }
-  pubkeyEl.textContent = state.pubkey ? `${short(state.pubkey)}` : 'No key';
+  pubkeyEl.textContent = state.pubkey ? `${short(state.pubkey)}` : "No key";
   if (!selectedContact) {
     const recipients = Array.isArray(state.recipients) ? state.recipients : [];
     selectedContact = state.lastRecipient || recipients[0] && recipients[0].pubkey || null;
@@ -8967,7 +8967,10 @@ function renderContacts() {
     el.className = "contact" + (selectedContact === c.id ? " active" : "");
     el.addEventListener("click", () => {
       selectedContact = c.id;
-      browser.runtime.sendMessage({ type: "set-last-recipient", recipient: selectedContact });
+      browser.runtime.sendMessage({
+        type: "set-last-recipient",
+        recipient: selectedContact
+      });
       render();
     });
     const avatar = document.createElement("div");
@@ -8992,10 +8995,15 @@ function renderContacts() {
     del.textContent = "\u{1F5D1}";
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const ok = confirm(`Delete conversation with ${c.label}? This removes local history only.`);
+      const ok = confirm(
+        `Delete conversation with ${c.label}? This removes local history only.`
+      );
       if (!ok)
         return;
-      await browser.runtime.sendMessage({ type: "delete-conversation", recipient: c.id });
+      await browser.runtime.sendMessage({
+        type: "delete-conversation",
+        recipient: c.id
+      });
       await refreshState();
     });
     actions.appendChild(del);
@@ -9017,9 +9025,18 @@ function renderHistory() {
     historyEl.innerHTML = "<p style='color:#555;'>Pick a contact to start chatting.</p>";
     return;
   }
-  console.log("[pushstr][popup] renderHistory: total messages:", state.messages?.length, "selected:", selectedContact);
+  console.log(
+    "[pushstr][popup] renderHistory: total messages:",
+    state.messages?.length,
+    "selected:",
+    selectedContact
+  );
   const convo = state.messages.filter((m) => otherParty(m) === selectedContact);
-  console.log("[pushstr][popup] renderHistory: filtered to", convo.length, "messages for contact");
+  console.log(
+    "[pushstr][popup] renderHistory: filtered to",
+    convo.length,
+    "messages for contact"
+  );
   convo.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
   convo.forEach((m) => {
     const row = document.createElement("div");
@@ -9027,7 +9044,13 @@ function renderHistory() {
     const bubble = document.createElement("div");
     bubble.className = "bubble " + (m.direction === "out" ? "out" : "in");
     const senderPubkey = m.direction === "out" ? m.to || selectedContact || state.lastRecipient : m.from || state.pubkey;
-    const renderResult = renderBubbleContent(bubble, m.content, senderPubkey, m.direction === "out", m.id);
+    const renderResult = renderBubbleContent(
+      bubble,
+      m.content,
+      senderPubkey,
+      m.direction === "out",
+      m.id
+    );
     const actions = renderResult?.actions;
     const metaRow = document.createElement("div");
     metaRow.className = "meta-row";
@@ -9040,7 +9063,9 @@ function renderHistory() {
     if (dmBadge)
       metaRow.appendChild(dmBadge);
     if (renderResult?.hasMedia) {
-      metaRow.appendChild(buildLockBadge(renderResult.mediaEncrypted !== false));
+      metaRow.appendChild(
+        buildLockBadge(renderResult.mediaEncrypted !== false)
+      );
     }
     if (m.direction !== "out") {
       const copyBtn = document.createElement("button");
@@ -9179,7 +9204,11 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
     displayDecryptedMedia(container, cachedBlob, media, fragMeta, downloadCtrl);
     return;
   }
-  const stored = loadPersistedMedia(cacheKey, media.mime || fragMeta.mime, media.filename);
+  const stored = loadPersistedMedia(
+    cacheKey,
+    media.mime || fragMeta.mime,
+    media.filename
+  );
   if (stored) {
     decryptedMediaCache.set(cacheKey, stored);
     displayDecryptedMedia(container, stored, media, fragMeta, downloadCtrl);
@@ -9194,14 +9223,37 @@ function renderEncryptedMedia(container, media, senderPubkey, fallbackUrl, fragM
     decryptBtn.className = "decrypt-btn";
     decryptBtn.style.cssText = "padding:8px 12px;background:#374151;border:1px solid #4b5563;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;";
     decryptBtn.title = filename;
-    decryptBtn.onclick = () => decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl);
+    decryptBtn.onclick = () => decryptAndCache(
+      container,
+      media,
+      senderPubkey,
+      cacheKey,
+      fragMeta,
+      downloadCtrl
+    );
     if (downloadCtrl) {
-      downloadCtrl.setDecryptHandler(() => decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl));
+      downloadCtrl.setDecryptHandler(
+        () => decryptAndCache(
+          container,
+          media,
+          senderPubkey,
+          cacheKey,
+          fragMeta,
+          downloadCtrl
+        )
+      );
     }
     container.appendChild(decryptBtn);
     return;
   }
-  decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl);
+  decryptAndCache(
+    container,
+    media,
+    senderPubkey,
+    cacheKey,
+    fragMeta,
+    downloadCtrl
+  );
 }
 async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMeta, downloadCtrl) {
   renderContainerMessage(container, "Decrypting attachment\u2026", "#9ca3af");
@@ -9213,13 +9265,24 @@ async function decryptAndCache(container, media, senderPubkey, cacheKey, fragMet
     });
     if (!res || res.error || !res.base64) {
       const errMsg = res?.error || "unknown error";
-      renderContainerMessage(container, `Failed to decrypt: ${errMsg}`, "#ef4444");
+      renderContainerMessage(
+        container,
+        `Failed to decrypt: ${errMsg}`,
+        "#ef4444"
+      );
       return;
     }
     const bytes4 = b64ToBytes(res.base64);
-    const blob = new Blob([bytes4], { type: res.mime || media.mime || "application/octet-stream" });
+    const blob = new Blob([bytes4], {
+      type: res.mime || media.mime || "application/octet-stream"
+    });
     const blobUrl = URL.createObjectURL(blob);
-    const cached = { blobUrl, mime: res.mime || media.mime, filename: media.filename, base64: res.base64 };
+    const cached = {
+      blobUrl,
+      mime: res.mime || media.mime,
+      filename: media.filename,
+      base64: res.base64
+    };
     decryptedMediaCache.set(cacheKey, cached);
     persistDecryptedMedia(cacheKey, res.base64, cached.mime, cached.filename);
     displayDecryptedMedia(container, cached, media, fragMeta, downloadCtrl);
@@ -9251,10 +9314,16 @@ function buildVideoPlayer(url) {
   backBtn.title = "Back 10s";
   const playBtn = document.createElement("button");
   playBtn.classList.add("video-play");
-  const playIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const playIcon = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "svg"
+  );
   playIcon.setAttribute("viewBox", "0 0 24 24");
   playIcon.setAttribute("aria-hidden", "true");
-  const playPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  const playPath = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "path"
+  );
   playPath.setAttribute("d", "M8 5v14l11-7z");
   playIcon.appendChild(playPath);
   playBtn.appendChild(playIcon);
@@ -9372,7 +9441,10 @@ function displayDecryptedMedia(container, cachedData, media, fragMeta, downloadC
     container.appendChild(info);
   }
   if (downloadCtrl)
-    downloadCtrl.setTarget(cachedData.blobUrl, cachedData.filename || media.filename);
+    downloadCtrl.setTarget(
+      cachedData.blobUrl,
+      cachedData.filename || media.filename
+    );
 }
 function b64ToBytes(b64) {
   const bin = atob(b64);
@@ -9393,7 +9465,11 @@ function blobToDataUrl(blob) {
 function persistDecryptedMedia(cacheKey, base642, mime, filename) {
   if (!cacheKey || !base642)
     return;
-  const payload = { b64: base642, mime: mime || "application/octet-stream", filename: filename || "" };
+  const payload = {
+    b64: base642,
+    mime: mime || "application/octet-stream",
+    filename: filename || ""
+  };
   try {
     localStorage.setItem(`pushstr_media_${cacheKey}`, JSON.stringify(payload));
   } catch (_) {
@@ -9413,7 +9489,11 @@ function loadPersistedMedia(cacheKey, fallbackMime, fallbackFilename) {
     const mime = data.mime || fallbackMime || "application/octet-stream";
     const blob = new Blob([bytes4], { type: mime });
     const blobUrl = URL.createObjectURL(blob);
-    return { blobUrl, mime, filename: data.filename || fallbackFilename || "attachment" };
+    return {
+      blobUrl,
+      mime,
+      filename: data.filename || fallbackFilename || "attachment"
+    };
   } catch (_) {
     return null;
   }
@@ -9435,10 +9515,22 @@ function filenameFromUrl(url, mime) {
 function buildContacts() {
   const counts = {};
   const recips = Array.isArray(state.recipients) ? state.recipients : [];
-  recips.forEach((r) => counts[r.pubkey] = counts[r.pubkey] || { id: r.pubkey, last: 0, snippet: "", nickname: r.nickname });
+  recips.forEach(
+    (r) => counts[r.pubkey] = counts[r.pubkey] || {
+      id: r.pubkey,
+      last: 0,
+      snippet: "",
+      nickname: r.nickname
+    }
+  );
   (state.messages || []).forEach((m) => {
     const other = otherParty(m);
-    const entry = counts[other] || { id: other, last: 0, snippet: "", nickname: "" };
+    const entry = counts[other] || {
+      id: other,
+      last: 0,
+      snippet: "",
+      nickname: ""
+    };
     entry.last = Math.max(entry.last, m.created_at || 0);
     entry.snippet = truncateSnippet(stripNip18(m.content || ""));
     counts[other] = entry;
@@ -9537,7 +9629,11 @@ async function send() {
 async function refreshState() {
   try {
     const newState = await browser.runtime.sendMessage({ type: "get-state" });
-    console.log("[pushstr][popup] refreshState got state:", newState?.messages?.length, "messages");
+    console.log(
+      "[pushstr][popup] refreshState got state:",
+      newState?.messages?.length,
+      "messages"
+    );
     if (newState) {
       state = newState;
       render();
@@ -9733,7 +9829,7 @@ async function showQrDialog() {
   wrapper.appendChild(label);
   wrapper.appendChild(text);
   wrapper.appendChild(copyBtn);
-  showInfoModal("Your QR", wrapper);
+  showInfoModal("Your npub", wrapper);
 }
 async function showAddContactDialog() {
   const wrapper = document.createElement("div");
@@ -9766,7 +9862,10 @@ async function showAddContactDialog() {
   try {
     await browser.runtime.sendMessage({ type: "save-settings", recipients });
     selectedContact = normalized;
-    await browser.runtime.sendMessage({ type: "set-last-recipient", recipient: normalized });
+    await browser.runtime.sendMessage({
+      type: "set-last-recipient",
+      recipient: normalized
+    });
     await refreshState();
   } catch (err) {
     status("Add contact failed");
@@ -9779,7 +9878,11 @@ function popout() {
     existing.focus();
     return;
   }
-  window.popoutWindow = window.open(url, "pushstr-popout", "noopener,noreferrer,width=800,height=640");
+  window.popoutWindow = window.open(
+    url,
+    "pushstr-popout",
+    "noopener,noreferrer,width=800,height=640"
+  );
 }
 function openSettings() {
   const url = browser.runtime.getURL("options.html");
@@ -9804,11 +9907,15 @@ function showImageModal(url) {
     event.stopPropagation();
     setScale(scale > 1 ? 1 : 2);
   });
-  img.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -0.1 : 0.1;
-    setScale(scale + delta);
-  }, { passive: false });
+  img.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -0.1 : 0.1;
+      setScale(scale + delta);
+    },
+    { passive: false }
+  );
   overlay.addEventListener("click", () => overlay.remove());
   overlay.appendChild(img);
   document.body.appendChild(overlay);
@@ -9868,16 +9975,31 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
     const fullUrl = fragPart ? `${media.url}#${fragPart}` : media.url;
     const actionHolder = document.createElement("div");
     actionHolder.className = "actions-col";
-    const downloadCtrl = createDownloadButton(null, media.mime || fragMeta.mime, media.size || fragMeta.size, media.sha256 || fragMeta.sha256, {
-      ...fragMeta,
-      filename: media.filename
-    });
+    const downloadCtrl = createDownloadButton(
+      null,
+      media.mime || fragMeta.mime,
+      media.size || fragMeta.size,
+      media.sha256 || fragMeta.sha256,
+      {
+        ...fragMeta,
+        filename: media.filename
+      }
+    );
     actionHolder.appendChild(downloadCtrl.btn);
     const isEncrypted = (media.encryption === "aes-gcm" || media.cipher_sha256) && media.iv;
     result.hasMedia = true;
     result.mediaEncrypted = isEncrypted;
     if (isEncrypted) {
-      renderEncryptedMedia(container, media, senderPubkey, fullUrl, fragMeta, downloadCtrl, isOut, messageId);
+      renderEncryptedMedia(
+        container,
+        media,
+        senderPubkey,
+        fullUrl,
+        fragMeta,
+        downloadCtrl,
+        isOut,
+        messageId
+      );
     } else {
       const mime = media.mime || "";
       if (mime.startsWith("image")) {
@@ -9920,7 +10042,13 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
     if (isBlossomLink(fullUrl, meta2)) {
       const actionHolder = document.createElement("div");
       actionHolder.className = "actions-col";
-      const dl = createDownloadButton(fullUrl, meta2.mime, meta2.size, meta2.sha256, meta2);
+      const dl = createDownloadButton(
+        fullUrl,
+        meta2.mime,
+        meta2.size,
+        meta2.sha256,
+        meta2
+      );
       actionHolder.appendChild(dl.btn);
       if (meta2.isImage || /\.(png|jpe?g|gif|webp)$/i.test(parsed.url)) {
         const img = document.createElement("img");
@@ -9944,7 +10072,13 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
     if (isBlossomLink(meta.url, meta)) {
       const actionHolder = document.createElement("div");
       actionHolder.className = "actions-col";
-      const dl = createDownloadButton(meta.url, meta.mime, meta.size, meta.sha256, meta);
+      const dl = createDownloadButton(
+        meta.url,
+        meta.mime,
+        meta.size,
+        meta.sha256,
+        meta
+      );
       actionHolder.appendChild(dl.btn);
       if (meta.isImage) {
         const img = document.createElement("img");
@@ -9969,7 +10103,13 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
     if (metaFromUrl && isBlossomLink(metaFromUrl.url, metaFromUrl)) {
       const actionHolder = document.createElement("div");
       actionHolder.className = "actions-col";
-      const dl = createDownloadButton(metaFromUrl.url, metaFromUrl.mime, metaFromUrl.size, metaFromUrl.sha256, metaFromUrl);
+      const dl = createDownloadButton(
+        metaFromUrl.url,
+        metaFromUrl.mime,
+        metaFromUrl.size,
+        metaFromUrl.sha256,
+        metaFromUrl
+      );
       actionHolder.appendChild(dl.btn);
       if (metaFromUrl.isImage) {
         const img = document.createElement("img");
@@ -10016,7 +10156,11 @@ async function toggleDmMode() {
   state.dmModes = { ...state.dmModes || {}, [selectedContact]: next };
   updateDmToggle();
   try {
-    await safeSend({ type: "set-dm-mode", recipient: selectedContact, mode: next });
+    await safeSend({
+      type: "set-dm-mode",
+      recipient: selectedContact,
+      mode: next
+    });
   } catch (err) {
     console.error("[pushstr][popup] set-dm-mode failed", err);
   }
@@ -10184,7 +10328,9 @@ function parseFragmentMeta(frag) {
   return { mime, size, sha256: sha2563, isImage };
 }
 function isBlossomLink(url, meta = {}) {
-  const hasMeta = Boolean(meta.sha256 || meta.mime || meta.size || meta.iv || meta.cipher_sha256);
+  const hasMeta = Boolean(
+    meta.sha256 || meta.mime || meta.size || meta.iv || meta.cipher_sha256
+  );
   if (!url)
     return false;
   try {
@@ -10221,7 +10367,10 @@ function friendlyTime(ts) {
   const todayStart = midnight(now2);
   const yesterdayStart = todayStart - 24 * 60 * 60 * 1e3;
   const dateStart = midnight(date);
-  const timePart = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const timePart = date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit"
+  });
   if (dateStart === todayStart)
     return `Today at ${timePart}`;
   if (dateStart === yesterdayStart)
