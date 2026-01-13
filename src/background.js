@@ -512,6 +512,12 @@ async function handleGiftEvent(event) {
         });
         return;
       }
+      console.info("[pushstr] giftwrap inner parsed", {
+        id: inner?.id,
+        pubkey: inner?.pubkey,
+        kind: inner?.kind,
+        tags: inner?.tags
+      });
       if (!nt.verifyEvent(inner)) {
         console.warn("[pushstr] giftwrap inner verify failed", {
           id: inner?.id,
@@ -520,6 +526,10 @@ async function handleGiftEvent(event) {
         });
         return;
       }
+      console.info("[pushstr] giftwrap inner verified", {
+        id: inner?.id,
+        kind: inner?.kind
+      });
       targetEvent = inner;
     }
     // Accept both kind 4 (old) and kind 14 (NIP-17)
@@ -552,6 +562,11 @@ async function handleGiftEvent(event) {
     }
     const sender = targetEvent.pubkey || "unknown";
     const message = await decryptDmContent(priv, sender, targetEvent.content);
+    console.info("[pushstr] dm decrypted", {
+      from: sender,
+      kind: targetEvent.kind,
+      len: message?.length || 0
+    });
     const dmKind = event.kind === 1059 ? "nip17" : (targetEvent.kind === 4 ? "nip04" : "nip17");
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
     await ensureContact(sender);
