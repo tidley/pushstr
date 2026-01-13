@@ -227,6 +227,9 @@ button:hover {
 }
 
 .topbar-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 38px;
   height: 38px;
   padding: 6px;
@@ -256,6 +259,9 @@ button:hover {
 }
 
 .footer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 38px;
   height: 38px;
   padding: 6px;
