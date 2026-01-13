@@ -2241,7 +2241,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   },
                 ),
               _buildAttachOption(
-                icon: Icons.audiotrack,
+                icon: Icons.audio_file,
                 label: 'Audio',
                 color: Colors.lightBlueAccent,
                 onTap: () {

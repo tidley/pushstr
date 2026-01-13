@@ -9250,7 +9250,14 @@ function buildVideoPlayer(url) {
   backBtn.textContent = "\u27F2";
   backBtn.title = "Back 10s";
   const playBtn = document.createElement("button");
-  playBtn.textContent = "\u25B6";
+  playBtn.classList.add("video-play");
+  const playIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  playIcon.setAttribute("viewBox", "0 0 24 24");
+  playIcon.setAttribute("aria-hidden", "true");
+  const playPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  playPath.setAttribute("d", "M8 5v14l11-7z");
+  playIcon.appendChild(playPath);
+  playBtn.appendChild(playIcon);
   const forwardBtn = document.createElement("button");
   forwardBtn.textContent = "\u27F3";
   forwardBtn.title = "Forward 10s";
@@ -9266,7 +9273,11 @@ function buildVideoPlayer(url) {
     if (!video.duration)
       return;
     scrubber.value = String(video.currentTime / video.duration);
-    playBtn.textContent = video.paused ? "\u25B6" : "\u275A\u275A";
+    if (video.paused) {
+      playPath.setAttribute("d", "M8 5v14l11-7z");
+    } else {
+      playPath.setAttribute("d", "M7 5h4v14H7zm6 0h4v14h-4z");
+    }
   };
   let hideTimer = null;
   const setControlsVisible = (visible) => {
@@ -9474,7 +9485,13 @@ async function send() {
   status("Sending...");
   try {
     if (content) {
-      await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content });
+      const res = await browser.runtime.sendMessage({
+        type: "send-gift",
+        recipient: selectedContact,
+        content
+      });
+      if (res && res.ok === false)
+        throw new Error(res.error || "publish failed");
     }
     if (fileToSend) {
       const arrayBuf = await fileToSend.arrayBuffer();
@@ -9497,7 +9514,14 @@ async function send() {
         }
       }
       const payload = buildPushstrAttachmentPayload(content, res);
-      await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content: payload });
+      const sendRes = await browser.runtime.sendMessage({
+        type: "send-gift",
+        recipient: selectedContact,
+        content: payload
+      });
+      if (sendRes && sendRes.ok === false) {
+        throw new Error(sendRes.error || "publish failed");
+      }
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
     messageInput.value = "";

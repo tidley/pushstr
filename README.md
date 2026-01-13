@@ -96,10 +96,10 @@ npm install
 cd wasm_crypto
 wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
 npm run patch:wasm
-# Firefox (MV2)
-npm run package
 # Chrome (MV3)
 MANIFEST_FILE=manifest.chrome.json npm run package
+# Firefox (MV2)
+npm run package
 ```
 - Output: `dist/` plus `pushstr.zip`. Load `dist/` as a temporary add-on (`about:debugging` in Firefox) or an unpacked extension (`chrome://extensions` in Chrome).
 

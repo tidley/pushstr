@@ -341,10 +341,7 @@ function __wbg_get_imports() {
         const ret = arg0.msCrypto;
         return ret;
     };
-    imports.wbg.__wbg_new_no_args_cb138f77cf6151ee = function(arg0, arg1) {
-        const ret = new Function(getStringFromWasm0(arg0, arg1));
-        return ret;
-    };
+    imports.wbg.__wbg_new_no_args_cb138f77cf6151ee = function() { throw new Error("Dynamic code evaluation is disabled in Pushstr builds."); };
     imports.wbg.__wbg_new_with_length_aa5eaf41d35235e5 = function(arg0) {
         const ret = new Uint8Array(arg0 >>> 0);
         return ret;
