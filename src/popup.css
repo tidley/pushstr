@@ -246,6 +246,35 @@ button:hover {
   border-color: var(--accent);
 }
 
+.contacts-footer {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.footer-action {
+  width: 38px;
+  height: 38px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.footer-action svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.footer-action:hover {
+  border-color: var(--accent);
+}
+
 .dm-toggle {
   width: 36px;
   height: 36px;
