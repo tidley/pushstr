@@ -662,14 +662,13 @@ async function sendGift(recipient, content) {
     return { ok: true, id: signedDm.id };
   }
 
-  // NIP-17 Giftwrap: inner DM (kind 14) signed by sender, wrapped in kind:1059 sealed with ephemeral key.
-  const cipherText = await encryptDmContent(priv, recipientHex, content);
+  // NIP-17 Giftwrap: inner DM (kind 14) plaintext, signed by sender, wrapped in kind:1059 sealed with ephemeral key.
   const senderPubkey = nt.getPublicKey(priv);
   const inner = {
     kind: 14, // NIP-17: kind 14 for private direct message
     created_at,
     tags: [["p", recipientHex]],
-    content: cipherText
+    content
   };
   const innerSigned = finalizeEvent(inner, priv);
 
@@ -843,30 +842,6 @@ async function decryptGift(priv, wrapperPub, content) {
       console.error("[pushstr] NIP-04 fallback also failed:", nip04err);
       throw err;
     }
-  }
-}
-
-async function encryptDmContent(priv, recipientPub, plaintext) {
-  // Use Rust WASM NIP-44 for cross-platform compatibility
-  try {
-    // Ensure keys are hex strings
-    const privHex = typeof priv === 'string' ? priv : bytesToHex(priv);
-    const recipientHex = typeof recipientPub === 'string' ? recipientPub : bytesToHex(recipientPub);
-
-    // Debug: log key formats
-    console.log("[pushstr] encryptDmContent keys:", {
-      privLen: privHex.length,
-      privType: typeof privHex,
-      recipientLen: recipientHex.length,
-      recipientType: typeof recipientHex,
-      recipientSample: recipientHex.substring(0, 16) + "..."
-    });
-
-    const conversationKey = CryptoWasm.nip44_get_conversation_key(privHex, recipientHex);
-    return CryptoWasm.nip44_encrypt(conversationKey, plaintext);
-  } catch (err) {
-    console.error("[pushstr] WASM NIP-44 DM encrypt failed:", err);
-    throw err;
   }
 }
 
