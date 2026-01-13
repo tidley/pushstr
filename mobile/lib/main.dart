@@ -2187,59 +2187,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-          child: GridView.count(
-            crossAxisCount: 3,
-            shrinkWrap: true,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 1.05,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _buildAttachOption(
-                icon: Icons.photo_camera,
-                label: 'Camera',
-                color: Colors.redAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _attachImageFromCamera();
-                },
-              ),
-              _buildAttachOption(
-                icon: Icons.photo_library,
-                label: 'Gallery',
-                color: Colors.lightBlueAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _attachImage();
-                },
-              ),
-              _buildAttachOption(
-                icon: Icons.videocam,
-                label: 'Video Cam',
-                color: Colors.redAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _attachVideo(ImageSource.camera);
-                },
-              ),
-              _buildAttachOption(
-                icon: Icons.video_library,
-                label: 'Video',
-                color: Colors.lightBlueAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _attachVideo(ImageSource.gallery);
-                },
-              ),
-              _buildAttachOption(
-                icon: Icons.mic,
-                label: 'Record',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showRecordAudioSheet();
-                },
-                color: Colors.redAccent,
-              ),
+            child: GridView.count(
+              crossAxisCount: 3,
+              shrinkWrap: true,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 1.05,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                _buildAttachOption(
+                  icon: Icons.photo_camera,
+                  label: 'Camera',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _attachImageFromCamera();
+                  },
+                ),
+                _buildAttachOption(
+                  icon: Icons.videocam,
+                  label: 'Video Cam',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _attachVideo(ImageSource.camera);
+                  },
+                ),
+                _buildAttachOption(
+                  icon: Icons.mic,
+                  label: 'Record',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showRecordAudioSheet();
+                  },
+                  color: Colors.redAccent,
+                ),
+                _buildAttachOption(
+                  icon: Icons.photo_library,
+                  label: 'Gallery',
+                  color: Colors.lightBlueAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _attachImage();
+                  },
+                ),
+                _buildAttachOption(
+                  icon: Icons.video_library,
+                  label: 'Video',
+                  color: Colors.lightBlueAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _attachVideo(ImageSource.gallery);
+                  },
+                ),
               _buildAttachOption(
                 icon: Icons.audiotrack,
                 label: 'Audio',
