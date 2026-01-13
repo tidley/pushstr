@@ -55,6 +55,7 @@ const browser = makeBrowser();
 let pool;
 let sub;
 let CryptoWasm = WasmCrypto; // WASM crypto module
+let activeRelays = [];
 const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://relay.primal.net",
@@ -359,18 +360,44 @@ async function connect() {
   }
 
   pool = pool || new nt.SimplePool();
+  activeRelays = await resolveRelays(settings.relays);
   const me = currentPubkey();
   // Subscribe to: 1059 (giftwrap), 14 (NIP-17 DM), 4 (legacy DM)
   const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
   const filter = { kinds, "#p": [me] };
-  sub = pool.subscribeMany(settings.relays, filter, {
+  const relayList = activeRelays.length ? activeRelays : settings.relays;
+  sub = pool.subscribeMany(relayList, filter, {
     onevent: handleGiftEvent
   });
-  console.info("[pushstr] subscribed", [filter], "relays", settings.relays);
+  console.info("[pushstr] subscribed", [filter], "relays", relayList);
 }
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveRelays(relays) {
+  if (!pool) return relays;
+  const results = await Promise.all(
+    relays.map(async (url) => {
+      try {
+        await Promise.race([
+          pool.ensureRelay(url),
+          delay(2500).then(() => {
+            throw new Error("relay connect timeout");
+          })
+        ]);
+        return url;
+      } catch (err) {
+        console.warn("[pushstr] relay failed", {
+          relay: url,
+          error: err?.message || String(err)
+        });
+        return null;
+      }
+    })
+  );
+  return results.filter(Boolean);
 }
 
 async function awaitPublishResult(result) {
@@ -391,11 +418,15 @@ async function awaitPublishResult(result) {
 }
 
 async function publishWithRetry(relays, event, label = "event") {
+  const relayList = relays && relays.length ? relays : [];
+  if (!relayList.length) {
+    return { ok: false, error: "no relays available" };
+  }
   let lastErr;
   let backoff = PUBLISH_RETRY_BASE_MS;
   for (let attempt = 1; attempt <= PUBLISH_RETRY_ATTEMPTS; attempt++) {
     try {
-      const result = pool.publish(relays, event);
+      const result = pool.publish(relayList, event);
       const info = await awaitPublishResult(result);
       if (info.failed > 0) {
         console.warn("[pushstr] publish partial failures", {
@@ -479,7 +510,8 @@ async function sendGift(recipient, content) {
       content: cipherText
     };
     const signedDm = finalizeEvent(dm, priv);
-    const pubRes = await publishWithRetry(settings.relays, signedDm, "nip04");
+    const relayList = activeRelays.length ? activeRelays : settings.relays;
+    const pubRes = await publishWithRetry(relayList, signedDm, "nip04");
     if (!pubRes.ok) {
       return { ok: false, error: pubRes.error || "publish failed" };
     }
@@ -531,7 +563,8 @@ async function sendGift(recipient, content) {
     pubkey: wrappingPub
   };
   const signedGift = finalizeEvent(giftwrap, wrappingPriv);
-  const pubRes = await publishWithRetry(settings.relays, signedGift, "giftwrap");
+  const relayList = activeRelays.length ? activeRelays : settings.relays;
+  const pubRes = await publishWithRetry(relayList, signedGift, "giftwrap");
   if (!pubRes.ok) {
     return { ok: false, error: pubRes.error || "publish failed" };
   }
