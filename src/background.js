@@ -513,10 +513,20 @@ async function handleGiftEvent(event) {
         return t[1] === me;
       }
     });
-    if (!hasRecipient) {
+    const hasOuterRecipient = event.tags?.some((t) => {
+      if (t[0] !== "p") return false;
+      try {
+        return normalizePubkey(t[1]) === me;
+      } catch (_) {
+        return t[1] === me;
+      }
+    });
+    if (!hasRecipient && !hasOuterRecipient) {
       console.warn("[pushstr] DM ignored: missing recipient tag", {
         kind: targetEvent.kind,
-        outerKind: event.kind
+        outerKind: event.kind,
+        innerTags: targetEvent.tags,
+        outerTags: event.tags
       });
       return;
     }
