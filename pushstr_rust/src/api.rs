@@ -63,6 +63,8 @@ pub struct MediaDescriptor {
 
 // Blossom server configuration
 const BLOSSOM_SERVER: &str = "https://blossom.primal.net";
+const PUBLISH_RETRY_ATTEMPTS: usize = 3;
+const PUBLISH_RETRY_BASE_MS: u64 = 400;
 const BLOSSOM_UPLOAD_PATH: &str = "upload";
 
 fn parse_pubkey(input: &str) -> Result<PublicKey> {
@@ -613,9 +615,29 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
         let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
         let event_id = gift.id.to_hex();
         eprintln!("[dm] Sending giftwrap id={}", event_id);
-        match client.send_event(&gift).await {
-            Ok(_) => eprintln!("[dm] Giftwrap sent id={}", event_id),
-            Err(e) => eprintln!("[dm] Giftwrap send failed id={} err={}", event_id, e),
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&gift).await {
+                Ok(_) => {
+                    eprintln!("[dm] Giftwrap sent id={}", event_id);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[dm] Giftwrap send failed id={} attempt={} err={}",
+                        event_id, attempt, last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
         }
         Ok(event_id)
     })
@@ -660,9 +682,29 @@ pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String>
         let gift = builder.sign_with_keys(&wrapper_keys)?;
         let event_id = gift.id.to_hex();
         eprintln!("[dm] Sending legacy giftwrap id={}", event_id);
-        match client.send_event(&gift).await {
-            Ok(_) => eprintln!("[dm] Legacy giftwrap sent id={}", event_id),
-            Err(e) => eprintln!("[dm] Legacy giftwrap send failed id={} err={}", event_id, e),
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&gift).await {
+                Ok(_) => {
+                    eprintln!("[dm] Legacy giftwrap sent id={}", event_id);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[dm] Legacy giftwrap send failed id={} attempt={} err={}",
+                        event_id, attempt, last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
         }
         Ok(event_id)
     })
@@ -768,9 +810,29 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
         let event_id = event.id;
         let event_id_hex = event_id.to_hex();
         eprintln!("[dm] Sending nip04 id={}", event_id_hex);
-        match client.send_event(&event).await {
-            Ok(_) => eprintln!("[dm] NIP-04 sent id={}", event_id_hex),
-            Err(e) => eprintln!("[dm] NIP-04 send failed id={} err={}", event_id_hex, e),
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&event).await {
+                Ok(_) => {
+                    eprintln!("[dm] NIP-04 sent id={}", event_id_hex);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[dm] NIP-04 send failed id={} attempt={} err={}",
+                        event_id_hex, attempt, last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
         }
 
         eprintln!("✉️ Sent NIP-04 DM (kind 4): {}", event_id);

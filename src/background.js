@@ -78,6 +78,8 @@ const MESSAGE_LIMIT = 200;
 let messageIds = new Set();
 let contextMenuReady = false;
 const BLOSSOM_SERVER = "https://blossom.primal.net";
+const PUBLISH_RETRY_ATTEMPTS = 3;
+const PUBLISH_RETRY_BASE_MS = 400;
 const BLOSSOM_UPLOAD_PATH = "upload";
 let suppressNotifications = true;
 
@@ -367,6 +369,57 @@ async function connect() {
   console.info("[pushstr] subscribed", [filter], "relays", settings.relays);
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function awaitPublishResult(result) {
+  if (Array.isArray(result)) {
+    const settled = await Promise.allSettled(result);
+    const ok = settled.some((entry) => entry.status === "fulfilled");
+    if (!ok) {
+      const reason = settled.find((entry) => entry.status === "rejected")?.reason;
+      throw reason || new Error("publish failed");
+    }
+    return {
+      ok: true,
+      failed: settled.filter((entry) => entry.status === "rejected").length
+    };
+  }
+  await result;
+  return { ok: true, failed: 0 };
+}
+
+async function publishWithRetry(relays, event, label = "event") {
+  let lastErr;
+  let backoff = PUBLISH_RETRY_BASE_MS;
+  for (let attempt = 1; attempt <= PUBLISH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const result = pool.publish(relays, event);
+      const info = await awaitPublishResult(result);
+      if (info.failed > 0) {
+        console.warn("[pushstr] publish partial failures", {
+          label,
+          failed: info.failed
+        });
+      }
+      return { ok: true };
+    } catch (err) {
+      lastErr = err;
+      console.warn("[pushstr] publish attempt failed", {
+        label,
+        attempt,
+        error: err?.message || String(err)
+      });
+      if (attempt < PUBLISH_RETRY_ATTEMPTS) {
+        await delay(backoff);
+        backoff *= 2;
+      }
+    }
+  }
+  return { ok: false, error: lastErr?.message || String(lastErr) };
+}
+
 async function handleGiftEvent(event) {
   try {
     const priv = currentPrivkeyHex();
@@ -426,7 +479,10 @@ async function sendGift(recipient, content) {
       content: cipherText
     };
     const signedDm = finalizeEvent(dm, priv);
-    await pool.publish(settings.relays, signedDm);
+    const pubRes = await publishWithRetry(settings.relays, signedDm, "nip04");
+    if (!pubRes.ok) {
+      return { ok: false, error: pubRes.error || "publish failed" };
+    }
     console.info("[pushstr] sent DM kind 4 (nip04)", { to: recipientHex, relays: settings.relays });
     await recordMessage({
       id: signedDm.id,
@@ -475,7 +531,10 @@ async function sendGift(recipient, content) {
     pubkey: wrappingPub
   };
   const signedGift = finalizeEvent(giftwrap, wrappingPriv);
-  await pool.publish(settings.relays, signedGift);
+  const pubRes = await publishWithRetry(settings.relays, signedGift, "giftwrap");
+  if (!pubRes.ok) {
+    return { ok: false, error: pubRes.error || "publish failed" };
+  }
   console.info("[pushstr] sent giftwrap kind 1059", { to: recipientHex, relays: settings.relays });
   await recordMessage({
     id: signedGift.id,

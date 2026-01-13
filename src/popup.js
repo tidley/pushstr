@@ -716,7 +716,12 @@ async function send() {
   status("Sending...");
   try {
     if (content) {
-      await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content });
+      const res = await browser.runtime.sendMessage({
+        type: "send-gift",
+        recipient: selectedContact,
+        content
+      });
+      if (res && res.ok === false) throw new Error(res.error || "publish failed");
     }
     if (fileToSend) {
       const arrayBuf = await fileToSend.arrayBuffer();
@@ -740,7 +745,14 @@ async function send() {
         }
       }
       const payload = buildPushstrAttachmentPayload(content, res);
-      await browser.runtime.sendMessage({ type: "send-gift", recipient: selectedContact, content: payload });
+      const sendRes = await browser.runtime.sendMessage({
+        type: "send-gift",
+        recipient: selectedContact,
+        content: payload
+      });
+      if (sendRes && sendRes.ok === false) {
+        throw new Error(sendRes.error || "publish failed");
+      }
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
     messageInput.value = "";
