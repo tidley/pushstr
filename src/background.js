@@ -880,13 +880,25 @@ async function decryptDmContent(priv, senderPub, cipher) {
     }
   }
   if (!cipher) return "";
+  const rawCipher = String(cipher);
+  const trimmedCipher = rawCipher.replace(/^"+|"+$/g, "");
+  const base64Like = /^[A-Za-z0-9+/=]+$/.test(trimmedCipher);
+  if (trimmedCipher.length < 16 && !trimmedCipher.includes("?iv=")) {
+    console.info("[pushstr] dm content looks plaintext, skipping decrypt", {
+      len: trimmedCipher.length
+    });
+    return trimmedCipher;
+  }
+  if (!base64Like && !trimmedCipher.includes("?iv=")) {
+    console.info("[pushstr] dm content not base64, treating as plaintext");
+    return trimmedCipher;
+  }
 
   // Debug logging
   console.log("[pushstr] decryptDmContent - cipher type:", typeof cipher, "length:", cipher?.length, "first 50 chars:", cipher?.substring(0, 50));
 
   const variants = [];
-  const trimmed = (cipher || "").replace(/^"+|"+$/g, "");
-  variants.push(trimmed);
+  variants.push(trimmedCipher);
 
   // REMOVED: atob(trimmed) - this creates binary data that breaks NIP-04 bech32 decoder
   // NIP-04 expects base64 string input, not decoded binary
@@ -924,7 +936,7 @@ async function decryptDmContent(priv, senderPub, cipher) {
   // Fallback to NIP-04 for old messages - only try with base64 string
   try {
     console.log("[pushstr] Trying NIP-04 with original cipher (base64 string)");
-    return await nt.nip04.decrypt(priv, senderPub, trimmed);
+    return await nt.nip04.decrypt(priv, senderPub, trimmedCipher);
   } catch (err) {
     console.error("[pushstr] NIP-04 decrypt failed:", err);
     throw new Error(`All decryption methods failed. Last error: ${err.message}`);
