@@ -492,7 +492,13 @@ function buildVideoPlayer(url) {
   backBtn.title = "Back 10s";
   const playBtn = document.createElement("button");
   playBtn.classList.add("video-play");
-  playBtn.textContent = "▶";
+  const playIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  playIcon.setAttribute("viewBox", "0 0 24 24");
+  playIcon.setAttribute("aria-hidden", "true");
+  const playPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  playPath.setAttribute("d", "M8 5v14l11-7z");
+  playIcon.appendChild(playPath);
+  playBtn.appendChild(playIcon);
   const forwardBtn = document.createElement("button");
   forwardBtn.textContent = "⟳";
   forwardBtn.title = "Forward 10s";
@@ -508,7 +514,11 @@ function buildVideoPlayer(url) {
   const syncScrub = () => {
     if (!video.duration) return;
     scrubber.value = String(video.currentTime / video.duration);
-    playBtn.textContent = video.paused ? "▶" : "⏸";
+    if (video.paused) {
+      playPath.setAttribute("d", "M8 5v14l11-7z");
+    } else {
+      playPath.setAttribute("d", "M7 5h4v14H7zm6 0h4v14h-4z");
+    }
   };
 
   let hideTimer = null;

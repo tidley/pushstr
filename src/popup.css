@@ -174,8 +174,13 @@ button:hover {
 }
 
 .video-controls .video-play {
-  font-size: 15px;
-  font-family: "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 0;
+}
+
+.video-controls .video-play svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 
 .video-scrub {
