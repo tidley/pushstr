@@ -90,16 +90,20 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 // Defer bootstrapping until WASM crypto loads.
-(async () => {
-  // Initialize WASM crypto
-  // Use relative path - wasm_crypto.js will handle loading the .wasm file
-  await WasmCrypto.default();
+const ready = (async () => {
+  try {
+    // Initialize WASM crypto
+    // Use relative path - wasm_crypto.js will handle loading the .wasm file
+    await WasmCrypto.default();
 
-  await loadSettings();
-  await ensureKey();
-  await connect();
-  await setupContextMenus();
-  quietNotifications();
+    await loadSettings();
+    await ensureKey();
+    await connect();
+    await setupContextMenus();
+    quietNotifications();
+  } catch (err) {
+    console.error("[pushstr][background] init failed", err);
+  }
 })();
 
 browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -116,6 +120,7 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleMessage(msg) {
+  await ready;
   if (msg.type === "get-state") {
     syncRecipientsForCurrent();
     console.log("[pushstr][background] get-state: returning", messages.length, "messages");
