@@ -173,6 +173,11 @@ button:hover {
   line-height: 1;
 }
 
+.video-controls .video-play {
+  font-size: 15px;
+  font-family: "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+}
+
 .video-scrub {
   display: flex;
   align-items: center;

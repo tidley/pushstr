@@ -491,6 +491,7 @@ function buildVideoPlayer(url) {
   backBtn.textContent = "⟲";
   backBtn.title = "Back 10s";
   const playBtn = document.createElement("button");
+  playBtn.classList.add("video-play");
   playBtn.textContent = "▶";
   const forwardBtn = document.createElement("button");
   forwardBtn.textContent = "⟳";
@@ -507,7 +508,7 @@ function buildVideoPlayer(url) {
   const syncScrub = () => {
     if (!video.duration) return;
     scrubber.value = String(video.currentTime / video.duration);
-    playBtn.textContent = video.paused ? "▶" : "❚❚";
+    playBtn.textContent = video.paused ? "▶" : "⏸";
   };
 
   let hideTimer = null;
