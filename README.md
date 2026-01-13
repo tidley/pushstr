@@ -89,15 +89,29 @@ Android and Firefox are stable - Chrome and iOS function but are a little buggy.
 ## Build & run
 ### Browser extension
 ```bash
+From %pushstr/
+
+cd .. # If in /wasm_crypto
 npm install
-# Firefox (MV2)
-npm run package
+cd wasm_crypto
+wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
+npm run patch:wasm
 # Chrome (MV3)
 MANIFEST_FILE=manifest.chrome.json npm run package
+# Firefox (MV2)
+npm run package
 ```
 - Output: `dist/` plus `pushstr.zip`. Load `dist/` as a temporary add-on (`about:debugging` in Firefox) or an unpacked extension (`chrome://extensions` in Chrome).
 
 ### Mobile app (Android/iOS)
+
+- Optional Rust rebuild from $pushstr (refresh FFI + native libs):
+```bash
+flutter_rust_bridge_codegen generate
+cd pushstr_rust
+cargo ndk -t arm64-v8a -t armeabi-v7a -o ../mobile/android/app/src/main/jniLibs build --release
+```
+
 ```bash
 cd mobile
 flutter pub get
@@ -108,13 +122,27 @@ flutter build apk --release
 # Load to connected mobile
 flutter install --use-application-binary build/app/outputs/flutter-apk/app-release.apk
 ```
-- Optional Rust rebuild (refresh FFI + native libs):
-```bash
+
+## all in one from $pushstr
+```
+cd ..
 flutter_rust_bridge_codegen generate
 cd pushstr_rust
 cargo ndk -t arm64-v8a -t armeabi-v7a -o ../mobile/android/app/src/main/jniLibs build --release
+cd ../mobile
+flutter clean
+flutter pub get
+flutter run
 ```
+
 See `mobile/QUICKSTART.md` for more detail.
+
+## Zapstore
+From project route:
+```
+~/code/zapstore publish
+```
+
 
 ## Notes
 - No cloud backups. Export your `nsec` and keep it safe.

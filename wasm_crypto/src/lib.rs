@@ -3,7 +3,8 @@ use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 use secp256k1::{XOnlyPublicKey, SecretKey, PublicKey, Secp256k1};
 use hkdf::Hkdf;
-use chacha20poly1305::{ChaCha20Poly1305, AeadInPlace, Nonce as ChaCha20Nonce, KeyInit as ChaChaKeyInit};
+use chacha20::cipher::{KeyIvInit, StreamCipher};
+use hmac::{Hmac, Mac};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use hex;
 
@@ -48,6 +49,142 @@ pub fn sha256_bytes(data: &[u8]) -> Box<[u8]> {
 
 // NIP-44 v2 Implementation
 
+type HmacSha256 = Hmac<Sha256>;
+
+fn hmac_sha256(key: &[u8; 32], parts: &[&[u8]]) -> Result<[u8; 32], JsValue> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
+        .map_err(|e| JsValue::from_str(&format!("HMAC init failed: {e}")))?;
+    for part in parts {
+        mac.update(part);
+    }
+    let result = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
+    Ok(out)
+}
+
+fn nip44_calc_padded_len(len: usize) -> usize {
+    if len <= 32 {
+        return 32;
+    }
+    let len_minus = len - 1;
+    let mut next_power = len_minus.next_power_of_two();
+    if next_power == len_minus {
+        next_power = next_power.saturating_mul(2);
+    }
+    let chunk = if next_power <= 256 { 32 } else { next_power / 8 };
+    chunk * ((len_minus / chunk) + 1)
+}
+
+fn nip44_pad(plaintext: &str) -> Result<Vec<u8>, JsValue> {
+    let unpadded = plaintext.as_bytes();
+    let unpadded_len = unpadded.len();
+    if unpadded_len == 0 {
+        return Err(JsValue::from_str("Message is empty"));
+    }
+    const MAX_PLAINTEXT: usize = 0xFFFF;
+    const EXT_MAX_PLAINTEXT: usize = 0xFFFF_FFFE;
+
+    let mut prefix = Vec::with_capacity(6);
+    if unpadded_len <= MAX_PLAINTEXT {
+        prefix.push(((unpadded_len >> 8) & 0xFF) as u8);
+        prefix.push((unpadded_len & 0xFF) as u8);
+    } else if unpadded_len <= EXT_MAX_PLAINTEXT {
+        prefix.extend_from_slice(&[0, 0]);
+        prefix.push(((unpadded_len >> 24) & 0xFF) as u8);
+        prefix.push(((unpadded_len >> 16) & 0xFF) as u8);
+        prefix.push(((unpadded_len >> 8) & 0xFF) as u8);
+        prefix.push((unpadded_len & 0xFF) as u8);
+    } else {
+        return Err(JsValue::from_str("Message is too long"));
+    }
+
+    let padded_len = nip44_calc_padded_len(unpadded_len);
+    let mut out = Vec::with_capacity(prefix.len() + padded_len);
+    out.extend_from_slice(&prefix);
+    out.extend_from_slice(unpadded);
+    out.resize(prefix.len() + padded_len, 0u8);
+    Ok(out)
+}
+
+fn nip44_unpad(padded: &[u8]) -> Result<String, JsValue> {
+    if padded.len() < 2 {
+        return Err(JsValue::from_str("Invalid padded payload"));
+    }
+    let len_pre = ((padded[0] as usize) << 8) | padded[1] as usize;
+    if len_pre == 0 {
+        if padded.len() < 6 {
+            return Err(JsValue::from_str("Invalid extended padding"));
+        }
+        let len_ext = ((padded[2] as usize) << 24)
+            | ((padded[3] as usize) << 16)
+            | ((padded[4] as usize) << 8)
+            | (padded[5] as usize);
+        if len_ext == 0 || len_ext > 0xFFFF_FFFE {
+            return Err(JsValue::from_str("Invalid size"));
+        }
+        let expected = 6 + nip44_calc_padded_len(len_ext);
+        if padded.len() != expected {
+            return Err(JsValue::from_str("Invalid padding"));
+        }
+        return String::from_utf8(padded[6..6 + len_ext].to_vec())
+            .map_err(|e| JsValue::from_str(&format!("Invalid UTF-8: {e}")));
+    }
+    if len_pre > 0xFFFF {
+        return Err(JsValue::from_str("Invalid size"));
+    }
+    let expected = 2 + nip44_calc_padded_len(len_pre);
+    if padded.len() != expected {
+        return Err(JsValue::from_str("Invalid padding"));
+    }
+    String::from_utf8(padded[2..2 + len_pre].to_vec())
+        .map_err(|e| JsValue::from_str(&format!("Invalid UTF-8: {e}")))
+}
+
+fn nip44_hmac_aad(key: &[u8; 32], message: &[u8], aad: &[u8; 32]) -> Result<[u8; 32], JsValue> {
+    hmac_sha256(key, &[aad, message])
+}
+
+struct Nip44MessageKeys {
+    chacha_key: [u8; 32],
+    chacha_nonce: [u8; 12],
+    hmac_key: [u8; 32],
+}
+
+fn nip44_fast_expand(
+    conversation_key: &[u8; 32],
+    nonce: &[u8; 32],
+    ciphertext: Option<&[u8]>,
+    mac: Option<&[u8]>,
+) -> Result<Nip44MessageKeys, JsValue> {
+    let round1 = hmac_sha256(conversation_key, &[nonce, &[1u8]])?;
+    let round2 = hmac_sha256(conversation_key, &[&round1, nonce, &[2u8]])?;
+    let round3 = hmac_sha256(conversation_key, &[&round2, nonce, &[3u8]])?;
+
+    let mut hmac_key = [0u8; 32];
+    hmac_key[0..20].copy_from_slice(&round2[12..32]);
+    hmac_key[20..32].copy_from_slice(&round3[0..12]);
+
+    if let (Some(ciphertext), Some(mac)) = (ciphertext, mac) {
+        if mac.len() != 32 {
+            return Err(JsValue::from_str("Invalid mac length"));
+        }
+        let calc = nip44_hmac_aad(&hmac_key, ciphertext, nonce)?;
+        if calc.as_ref() != mac {
+            return Err(JsValue::from_str("Invalid Mac"));
+        }
+    }
+
+    let mut chacha_nonce = [0u8; 12];
+    chacha_nonce.copy_from_slice(&round2[0..12]);
+
+    Ok(Nip44MessageKeys {
+        chacha_key: round1,
+        chacha_nonce,
+        hmac_key,
+    })
+}
+
 /// Derives the conversation key from a private key and public key using ECDH + HKDF
 /// Returns hex-encoded 32-byte conversation key
 #[wasm_bindgen]
@@ -76,12 +213,10 @@ pub fn nip44_get_conversation_key(privkey_hex: &str, pubkey_hex: &str) -> Result
     let shared_bytes = shared_point.serialize_uncompressed();
     let shared_x = &shared_bytes[1..33];
 
-    // Derive conversation key using HKDF-SHA256
-    let hkdf = Hkdf::<Sha256>::new(None, shared_x);
+    // Derive conversation key using HKDF-SHA256 extract with nip44-v2 salt
+    let (prk, _) = Hkdf::<Sha256>::extract(Some(b"nip44-v2"), shared_x);
     let mut conversation_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2", &mut conversation_key)
-        .map_err(|e| JsValue::from_str(&format!("HKDF failed: {}", e)))?;
-
+    conversation_key.copy_from_slice(&prk[..]);
     Ok(hex::encode(conversation_key))
 }
 
@@ -89,47 +224,32 @@ pub fn nip44_get_conversation_key(privkey_hex: &str, pubkey_hex: &str) -> Result
 /// Returns base64-encoded ciphertext with version prefix
 #[wasm_bindgen]
 pub fn nip44_encrypt(conversation_key_hex: &str, plaintext: &str) -> Result<String, JsValue> {
-    let plaintext_bytes = plaintext.as_bytes();
-
-    // Check size limits (1 to 65535 bytes)
-    if plaintext_bytes.is_empty() || plaintext_bytes.len() > 65535 {
-        return Err(JsValue::from_str("plaintext size must be between 1 and 65535 bytes"));
-    }
-
     // Parse conversation key
     let key_bytes = hex::decode(conversation_key_hex)
         .map_err(|e| JsValue::from_str(&format!("Invalid conversation key hex: {}", e)))?;
     if key_bytes.len() != 32 {
         return Err(JsValue::from_str("conversation key must be 32 bytes"));
     }
+    let mut conv_key = [0u8; 32];
+    conv_key.copy_from_slice(&key_bytes);
 
     // Generate random nonce (32 bytes for NIP-44 v2)
     let mut nonce = [0u8; 32];
     getrandom::getrandom(&mut nonce)
         .map_err(|e| JsValue::from_str(&format!("Failed to generate nonce: {}", e)))?;
 
-    // Derive encryption key and AAD using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(&nonce), &key_bytes);
-    let mut chacha_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-key", &mut chacha_key)
-        .map_err(|e| JsValue::from_str(&format!("HKDF chacha key failed: {}", e)))?;
-    let mut aad = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-aad", &mut aad)
-        .map_err(|e| JsValue::from_str(&format!("HKDF aad failed: {}", e)))?;
+    let keys = nip44_fast_expand(&conv_key, &nonce, None, None)?;
+    let mut buffer = nip44_pad(plaintext)?;
+    let mut cipher = chacha20::ChaCha20::new((&keys.chacha_key).into(), (&keys.chacha_nonce).into());
+    cipher.apply_keystream(&mut buffer);
+    let mac = nip44_hmac_aad(&keys.hmac_key, &buffer, &nonce)?;
 
-    // Encrypt with ChaCha20-Poly1305
-    let cipher = ChaCha20Poly1305::new(chacha_key.as_ref().into());
-    let chacha_nonce = ChaCha20Nonce::from_slice(&[0u8; 12]); // NIP-44 uses all-zero nonce
-
-    let mut buffer = plaintext_bytes.to_vec();
-    cipher.encrypt_in_place(chacha_nonce, &aad, &mut buffer)
-        .map_err(|e| JsValue::from_str(&format!("Encryption failed: {}", e)))?;
-
-    // Construct payload: version (1) || nonce (32) || ciphertext+mac
-    let mut payload = Vec::with_capacity(1 + 32 + buffer.len());
+    // Construct payload: version (1) || nonce (32) || ciphertext || mac (32)
+    let mut payload = Vec::with_capacity(1 + 32 + buffer.len() + 32);
     payload.push(0x02); // version
     payload.extend_from_slice(&nonce);
     payload.extend_from_slice(&buffer);
+    payload.extend_from_slice(&mac);
 
     Ok(BASE64.encode(&payload))
 }
@@ -149,8 +269,8 @@ pub fn nip44_decrypt(conversation_key_hex: &str, ciphertext_b64: &str) -> Result
     let payload = BASE64.decode(ciphertext_b64)
         .map_err(|e| JsValue::from_str(&format!("Invalid base64: {}", e)))?;
 
-    // Check minimum size: version (1) + nonce (32) + mac (16) = 49 bytes
-    if payload.len() < 49 {
+    // Check minimum size: version (1) + nonce (32) + mac (32)
+    if payload.len() < 65 {
         return Err(JsValue::from_str("ciphertext too short"));
     }
 
@@ -160,27 +280,18 @@ pub fn nip44_decrypt(conversation_key_hex: &str, ciphertext_b64: &str) -> Result
     }
 
     // Extract nonce and ciphertext+mac
-    let nonce = &payload[1..33];
-    let ciphertext_with_mac = &payload[33..];
+    let mut nonce = [0u8; 32];
+    nonce.copy_from_slice(&payload[1..33]);
+    let mac_offset = payload.len() - 32;
+    let ciphertext = &payload[33..mac_offset];
+    let mac = &payload[mac_offset..];
 
-    // Derive decryption key and AAD using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(nonce), &key_bytes);
-    let mut chacha_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-key", &mut chacha_key)
-        .map_err(|e| JsValue::from_str(&format!("HKDF chacha key failed: {}", e)))?;
-    let mut aad = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-aad", &mut aad)
-        .map_err(|e| JsValue::from_str(&format!("HKDF aad failed: {}", e)))?;
+    let mut conv_key = [0u8; 32];
+    conv_key.copy_from_slice(&key_bytes);
 
-    // Decrypt with ChaCha20-Poly1305
-    let cipher = ChaCha20Poly1305::new(chacha_key.as_ref().into());
-    let chacha_nonce = ChaCha20Nonce::from_slice(&[0u8; 12]); // NIP-44 uses all-zero nonce
-
-    let mut buffer = ciphertext_with_mac.to_vec();
-    cipher.decrypt_in_place(chacha_nonce, &aad, &mut buffer)
-        .map_err(|e| JsValue::from_str(&format!("Decryption failed: {}", e)))?;
-
-    // Convert to string
-    String::from_utf8(buffer)
-        .map_err(|e| JsValue::from_str(&format!("Invalid UTF-8: {}", e)))
+    let keys = nip44_fast_expand(&conv_key, &nonce, Some(ciphertext), Some(mac))?;
+    let mut buffer = ciphertext.to_vec();
+    let mut cipher = chacha20::ChaCha20::new((&keys.chacha_key).into(), (&keys.chacha_nonce).into());
+    cipher.apply_keystream(&mut buffer);
+    nip44_unpad(&buffer)
 }

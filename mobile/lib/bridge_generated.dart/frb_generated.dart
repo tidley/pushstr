@@ -60,7 +60,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1702068842;
+  int get rustContentHash => -406627982;
 
   static const kDefaultExternalLibraryLoaderConfig = ExternalLibraryLoaderConfig(
     stem: 'pushstr_rust',
@@ -99,7 +99,11 @@ abstract class RustLibApi extends BaseApi {
 
   String crateApiSendGiftDm({required String recipient, required String content, required bool useNip44});
 
+  String crateApiSendLegacyGiftDm({required String recipient, required String content});
+
   String crateApiUnwrapGift({required String giftJson, String? myNsec});
+
+  MediaDescriptor crateApiUploadMediaUnencrypted({required List<int> bytes, required String mime, String? filename});
 
   String crateApiWaitForNewDms({required BigInt timeoutSecs});
 
@@ -363,6 +367,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "send_gift_dm", argNames: ["recipient", "content", "useNip44"]);
 
   @override
+  String crateApiSendLegacyGiftDm({required String recipient, required String content}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(recipient, serializer);
+          sse_encode_String(content, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiSendLegacyGiftDmConstMeta,
+        argValues: [recipient, content],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSendLegacyGiftDmConstMeta =>
+      const TaskConstMeta(debugName: "send_legacy_gift_dm", argNames: ["recipient", "content"]);
+
+  @override
   String crateApiUnwrapGift({required String giftJson, String? myNsec}) {
     return handler.executeSync(
       SyncTask(
@@ -370,7 +395,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(giftJson, serializer);
           sse_encode_opt_String(myNsec, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiUnwrapGiftConstMeta,
@@ -384,13 +409,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "unwrap_gift", argNames: ["giftJson", "myNsec"]);
 
   @override
+  MediaDescriptor crateApiUploadMediaUnencrypted({required List<int> bytes, required String mime, String? filename}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(bytes, serializer);
+          sse_encode_String(mime, serializer);
+          sse_encode_opt_String(filename, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_media_descriptor, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiUploadMediaUnencryptedConstMeta,
+        argValues: [bytes, mime, filename],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiUploadMediaUnencryptedConstMeta =>
+      const TaskConstMeta(debugName: "upload_media_unencrypted", argNames: ["bytes", "mime", "filename"]);
+
+  @override
   String crateApiWaitForNewDms({required BigInt timeoutSecs}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_u_64(timeoutSecs, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiWaitForNewDmsConstMeta,
@@ -412,7 +459,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(innerJson, serializer);
           sse_encode_String(recipient, serializer);
           sse_encode_bool(useNip44, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiWrapGiftConstMeta,

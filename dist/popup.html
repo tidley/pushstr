@@ -1,46 +1,101 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="UTF-8" />
-  <link rel="stylesheet" href="popup.css" />
-  <title>Pushstr</title>
-</head>
-<body>
-  <main>
-    <aside id="contacts-pane">
-      <header class="topbar">
-        <a class="brand-btn" href="options.html" target="_blank" title="Settings" aria-label="Settings">
-          <div class="brand-text">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Pushstr</title>
+  </head>
+  <body>
+    <main>
+      <aside id="contacts-pane">
+        <header class="topbar">
+          <div class="title-block">
             <h1>Pushstr</h1>
             <p id="pubkey"></p>
           </div>
-          <span class="brand-cog">⚙</span>
-        </a>
-      </header>
-      <div id="contacts"></div>
-    </aside>
-    <section id="chat">
-      <button id="popout" class="icon-btn popout-float" title="Pop out" aria-label="Pop out">↗</button>
-      <div id="history"></div>
-      <div id="composer">
-        <div id="upload-warning" class="hidden">
-          <span>Attachments upload unencrypted; encrypt sensitive data yourself.</span>
-          <button id="dismiss-warning">Don’t show again</button>
+          <div class="topbar-actions">
+            <button
+              id="show-qr"
+              class="icon-btn topbar-action"
+              title="Show QR"
+              aria-label="Show QR"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M3 3h7v7H3V3zm2 2v3h3V5H5zm9-2h7v7h-7V3zm2 2v3h3V5h-3zM3 14h7v7H3v-7zm2 2v3h3v-3H5zm9 0h2v2h-2v-2zm2 2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4-4h2v6h-6v-2h4v-4z"
+                />
+              </svg>
+            </button>
+            <button
+              id="open-settings"
+              class="icon-btn topbar-action"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M19.14 12.94c.04-.3.06-.6.06-.94s-.02-.64-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.63l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.08 7.08 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 7.85a.5.5 0 0 0 .12.63l2.03 1.58c-.04.3-.06.62-.06.94s.02.64.06.94L2.82 13.5a.5.5 0 0 0-.12.63l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.58-.22 1.12-.52 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.63l-2.03-1.56zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
+                />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <div id="contacts"></div>
+      </aside>
+      <section id="chat">
+        <button
+          id="popout"
+          class="icon-btn popout-float"
+          title="Pop out"
+          aria-label="Pop out"
+        >
+          ↗
+        </button>
+        <div id="history"></div>
+        <div id="composer">
+          <div id="upload-warning" class="hidden">
+            <span
+              >Attachments upload unencrypted; encrypt sensitive data
+              yourself.</span
+            >
+            <button id="dismiss-warning">Don’t show again</button>
+          </div>
+          <div id="input-row">
+            <textarea
+              id="message"
+              rows="3"
+              placeholder="Type a message, press enter to send"
+            ></textarea>
+            <button id="attach" title="Attach file" aria-label="Attach file">
+              📎
+            </button>
+            <button id="send" class="hidden" title="Send" aria-label="Send">
+              ➤
+            </button>
+            <button
+              id="dm-toggle"
+              class="icon-btn dm-toggle"
+              title="NIP-17 (giftwrap)"
+              aria-label="Toggle DM mode"
+            >
+              🔒
+            </button>
+          </div>
+          <div id="preview">
+            <button
+              id="clearPreview"
+              title="Remove attachment"
+              aria-label="Remove attachment"
+            >
+              ✕
+            </button>
+            <div id="previewContent"></div>
+          </div>
+          <div id="upload-progress"></div>
         </div>
-        <div id="input-row">
-          <button id="attach" title="Attach file" aria-label="Attach file">📎</button>
-          <button id="send" class="hidden" title="Send" aria-label="Send">➤</button>
-          <textarea id="message" rows="3" placeholder="Type a message, press enter to send"></textarea>
-        </div>
-        <div id="preview">
-          <button id="clearPreview" title="Remove attachment" aria-label="Remove attachment">✕</button>
-          <div id="previewContent"></div>
-        </div>
-        <div id="upload-progress"></div>
-      </div>
-    </section>
-  </main>
+      </section>
+    </main>
 
-  <script type="module" src="popup.js"></script>
-</body>
+    <script type="module" src="popup.js"></script>
+  </body>
 </html>

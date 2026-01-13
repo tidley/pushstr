@@ -31,7 +31,10 @@ class SyncController {
         return;
       }
       final contacts = _loadContacts(prefs, nsec);
-      final appVisible = prefs.getBool('app_visible') ?? false;
+      final appVisibleFlag = prefs.getBool('app_visible') ?? false;
+      final appVisibleTs = prefs.getInt('app_visible_ts') ?? 0;
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final appVisible = appVisibleFlag && (nowSec - appVisibleTs) <= 30;
       final visibleContact = prefs.getString('visible_contact') ?? '';
       final lastNotifiedKey = 'last_notified_ts_$nsec';
       final lastSeenKey = 'last_seen_ts_$nsec';

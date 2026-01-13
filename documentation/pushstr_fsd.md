@@ -1,0 +1,211 @@
+# Pushstr Functional Specification Document
+
+Version: 0.6
+Last updated: 2026-01-13
+Owner: Pushstr
+
+## 1. Purpose
+Define the functional scope, behavior, and system boundaries for the Pushstr project, including the browser extension, mobile app, and Rust core.
+
+## 2. Product Summary
+Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, end-to-end encrypted direct messaging (DMs) and file sharing between devices using NIP-04 and NIP-59 giftwrap flows (NIP-44 v2 encryption), plus legacy giftwrap compatibility for older clients, without centralized servers or accounts. Users control their keys and can create multiple identities for privacy.
+
+## 3. Goals
+- Fast, private, reliable messaging across devices.
+- No central server dependency; use multiple relays for resilience.
+- Simple onboarding: generate or import keys and start messaging quickly.
+- Secure file transfer with end-to-end encryption and relay-backed transport.
+- Compatibility with other Nostr clients (e.g., Amethyst) and the Pushstr browser extension for DMs.
+
+## 4. In-Scope Components
+- Browser extension (Firefox/Chrome) for quick messaging and file sending.
+- Mobile app (Android/iOS) for messaging, contacts, and media.
+- Rust cryptography and relay client library exposed via Flutter FFI.
+- Blossom-compatible encrypted media upload and download.
+
+## 5. User Roles
+- Primary user: individual who sends and receives DMs between devices.
+- Secondary user: recipient using another Nostr client or Pushstr instance.
+
+## 6. Functional Requirements
+
+### 6.1 Onboarding & Profiles
+- Generate a new Nostr keypair (nsec/npub).
+- Import an existing nsec.
+- Display the active npub and a QR code for sharing.
+- Browser extension popup can show a QR for the active npub.
+- Support multiple profiles (disposable or long-lived).
+- Store profile-specific settings (contacts, messages, DM mode overrides).
+
+### 6.2 Contacts
+- Add a contact using npub or hex pubkey.
+- Accept nprofile inputs and `nostr:`-prefixed QR codes when adding contacts.
+- Optionally store a nickname.
+- Edit or delete contacts.
+- Copy a contact’s npub from the edit contact dialog.
+- Select an active contact for messaging.
+- Add contact via QR scan.
+
+### 6.3 Messaging
+- Send and receive text DMs.
+- Support NIP-04 (kind 4) encrypted DMs.
+- Support NIP-59 giftwrap DMs (kind 1059 with sealed rumor kind 13 and inner kind 14) using NIP-44 v2.
+- Support legacy giftwrap DMs for older clients.
+- Tag messages with their DM type (04/17) in history and UI.
+- Allow per-contact DM mode override (NIP-04 vs giftwrap) with a quick toggle in the composer.
+- Browser extension provides a NIP-04/NIP-17 toggle in the composer and displays DM mode badges per message.
+- Contact dropdown displays nickname-first labels; selected value shows nickname only when available.
+- Tap media in the message history to open full-screen image/video or in-app audio playback.
+- Display an unlocked padlock badge on messages containing unencrypted attachments.
+- Persist message history locally.
+
+### 6.4 Attachments
+- Attach images, audio, video, or arbitrary files.
+- Record inline audio clips directly in the mobile composer.
+- Encrypt files for the recipient before upload.
+- Allow optional unencrypted uploads with a visible warning indicator (useful when sending non-private data to other Nostr clients).
+- Upload encrypted content to Blossom-compatible server.
+- Transmit encrypted media descriptors in DMs.
+- For cross-client readability, include a plain URL line plus a Pushstr-only metadata block:
+  - Human section: `Attachment: <filename> (<size>)` + direct URL.
+  - Pushstr section: `[pushstr:media]` JSON descriptor `[/pushstr:media]` (filtered by Pushstr apps).
+- Render local previews for newly sent/received media.
+- Allow download of attachments from the message list.
+- Cache decrypted media locally for quick re-open; older messages can prompt decrypt-on-demand.
+- Warn users about large files (default recommended max 20MB).
+- Present attachment options in a grid picker with concise labels (e.g., Camera, Gallery, Video).
+- Browser extension renders inline audio/video players for attachments.
+
+### 6.5 Relay Handling
+- Connect to default public relays for general messaging.
+- Connect to default DM relays (popular inbox relays).
+- Publish a relay list (kind 10050) for DMs if none exists.
+- Read recipient relay list (kind 10050) when sending giftwraps.
+- Send events through all connected relays.
+- Default public relays: wss://relay.damus.io, wss://relay.primal.net, wss://nos.lol, wss://nostr.mom, wss://relay.nostr.band.
+- Relay publish uses retry/backoff; failed relays enter a short cooldown and do not raise unhandled errors in the extension.
+
+### 6.6 Sync & Background Processing (Mobile)
+- Load cached messages immediately at startup.
+- Connect to relays and fetch updates in the background without blocking the UI.
+- Fetch recent messages at startup and on manual refresh.
+- Poll for new messages while app is active.
+- Optional foreground service for Android to keep connections alive via Workmanager (not reliable).
+
+### 6.7 Sharing (Mobile)
+- Share text/media into Pushstr via system share sheet (Android).
+- Pre-fill composer with shared content.
+- Allow user to select recipient and send.
+
+### 6.8 Settings & Utilities
+- Export and back up nsec.
+- Copy message contents to clipboard.
+- Manage relay preferences in settings (editable list stored locally).
+- Display status/errors in-app.
+- Display app/extension version numbers at the bottom of settings.
+- Custom toast/notification bars.
+
+### 6.9 Logging & Diagnostics
+- Log DM send/receive state transitions.
+- Capture decrypt or parse errors for diagnostics.
+- A scroll-to-bottom indicates when a new message arrives.
+
+## 7. Data Model
+
+### 7.1 Profile
+- nsec (private key)
+- npub (public key)
+- contacts list
+- messages list
+- DM mode overrides per contact
+- giftwrap format preferences per contact
+
+### 7.2 Contact
+- pubkey (hex or npub)
+- nickname
+
+### 7.3 Message
+- id
+- from (pubkey)
+- to (pubkey)
+- created_at
+- direction (in/out)
+- kind (4 or 1059)
+- dm_kind (nip04, nip59, legacy_giftwrap)
+- content (plaintext)
+- media (optional)
+
+### 7.4 Media Descriptor
+- url
+- iv
+- sha256
+- cipher_sha256
+- size
+- mime
+- encryption (aes-gcm)
+- filename
+
+### 7.5 Giftwrap Envelope
+- Giftwrap event (kind 1059)
+- Sealed rumor (kind 13) encrypted with NIP-44 v2
+- Inner event (kind 14) signed by sender; plaintext content inside the sealed rumor
+
+## 8. Workflows
+
+### 8.1 Send Giftwrap DM
+1. Compose message for contact.
+2. Build inner kind 14 event with p-tag and alt, signed by sender.
+3. Encrypt inner event JSON into sealed event (kind 13) using NIP-44 v2.
+4. Encrypt sealed event into giftwrap (kind 1059) with ephemeral key.
+6. Publish to recipient DM relays.
+
+### 8.2 Receive Giftwrap DM
+1. Listen for kind 1059 events tagged with our pubkey.
+2. Decrypt giftwrap with NIP-44.
+3. Parse sealed event and decrypt inner event (kind 13 -> kind 14).
+4. Render message in history and update contact activity.
+
+### 8.3 Send NIP-04 DM
+1. Encrypt message with NIP-04 using recipient pubkey.
+2. Publish kind 4 event to relays.
+
+### 8.4 Attachment Flow
+1. Encrypt file using NIP-44-derived AES-GCM key.
+2. Upload encrypted bytes to Blossom server.
+3. Send media descriptor in DM.
+4. On receive, decrypt descriptor and optionally decrypt file.
+
+### 8.5 Contact Add via QR
+1. Scan QR containing npub.
+2. Normalize to hex pubkey.
+3. Add to contact list.
+
+## 9. Non-Functional Requirements
+- Security: private keys never leave device; E2E encryption.
+- Reliability: multi-relay delivery and redundancy.
+- Performance: responsive UI; avoid main-thread blocking on mobile.
+- Privacy: no analytics by default; optional telemetry disabled in manifest.
+- Portability: Android/iOS mobile app and browser extension.
+
+## 10. Dependencies
+- Flutter (mobile UI).
+- Rust + nostr-sdk (core crypto/relay client).
+- Flutter Rust Bridge (FFI).
+- Blossom server for encrypted media storage.
+- Browser extension uses wasm crypto bundle for client-side operations.
+
+## 11. Constraints & Risks
+- Relay availability and policy differences may affect delivery.
+- Background execution limits on mobile OSs can delay sync.
+- Large attachments may exceed device memory limits.
+- Cross-client NIP-59 compatibility depends on correct relay lists and encryption.
+
+## 12. Current State Notes
+- NIP-04 and NIP-59 giftwrap DMs are reliable across Pushstr, the browser extension, and Amethyst.
+- Giftwrap uses NIP-44 v2 sealed rumor; inner kind 14 content is plaintext inside the sealed payload.
+- Legacy giftwrap support remains for older clients (inner kind 14 content encrypted with NIP-44).
+- Relay defaults are aligned with Amethyst’s bootstrap inbox set; users can add/remove relays in settings.
+- Chat history now preserves scroll position and exposes a scroll-to-bottom indicator when new messages arrive.
+- Mobile/extension video viewer uses bottom controls with 10s skip buttons and a timeline scrubber that auto-hides during playback.
+- Extension styling is aligned with mobile (near-black history/composer background, compact bubbles, refined input layout).
+- Mobile toast notifications are centered and width-limited to content rather than full width.

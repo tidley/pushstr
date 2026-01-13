@@ -11792,12 +11792,16 @@ var browser = makeBrowser();
 var pool;
 var sub;
 var CryptoWasm = WasmCrypto;
+var activeRelays = [];
+var DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://relay.primal.net",
+  "wss://nos.lol",
+  "wss://nostr.mom",
+  "wss://relay.nostr.band"
+];
 var settings = {
-  relays: [
-    "wss://relay.damus.io",
-    "wss://relay.snort.social",
-    "wss://offchain.pub"
-  ],
+  relays: [...DEFAULT_RELAYS],
   recipients: [],
   recipientsByKey: {},
   messagesByKey: {},
@@ -11807,13 +11811,17 @@ var settings = {
   // default to giftwrap
   useNip44: true,
   // default to nip44 for inner/gift encryption
-  lastRecipient: null
+  lastRecipient: null,
+  relayFailures: {}
 };
 var messages2 = [];
 var MESSAGE_LIMIT = 200;
 var messageIds = /* @__PURE__ */ new Set();
 var contextMenuReady = false;
 var BLOSSOM_SERVER = "https://blossom.primal.net";
+var PUBLISH_RETRY_ATTEMPTS = 3;
+var PUBLISH_RETRY_BASE_MS = 400;
+var RELAY_COOLDOWN_MS = 10 * 60 * 1e3;
 var BLOSSOM_UPLOAD_PATH = "upload";
 var suppressNotifications = true;
 var textEncoder = new TextEncoder();
@@ -11847,6 +11855,7 @@ async function handleMessage(msg) {
       relays: settings.relays,
       recipients: getRecipientsForCurrent(),
       messages: messages2,
+      dmModes: getDmModesForCurrent(),
       useGiftwrap: true,
       useNip44: true,
       lastRecipient: settings.lastRecipient,
@@ -11874,6 +11883,15 @@ async function handleMessage(msg) {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
     return { ok: true };
+  }
+  if (msg.type === "set-dm-mode") {
+    const recipient = normalizePubkey(msg.recipient);
+    const mode = msg.mode === "nip04" ? "nip04" : "nip17";
+    if (!recipient)
+      return { error: "missing recipient" };
+    setDmModeForCurrent(recipient, mode);
+    await persistSettings();
+    return { ok: true, mode };
   }
   if (msg.type === "upload-blossom") {
     return uploadToBlossom(msg.data, msg.recipient, msg.mime, msg.filename);
@@ -11959,11 +11977,14 @@ async function handleMessage(msg) {
 async function loadSettings() {
   const stored = await browser.storage.local.get();
   const prevKeys = (settings.keys || []).length;
+  const prevRelays = Array.isArray(settings.relays) ? settings.relays : [];
   settings = { ...settings, ...stored };
   settings.useGiftwrap = true;
   settings.useNip44 = true;
+  settings.relays = mergeDefaultRelays(settings.relays);
   settings.recipientsByKey = settings.recipientsByKey || {};
   settings.messagesByKey = settings.messagesByKey || {};
+  settings.relayFailures = settings.relayFailures || {};
   settings.recipients = normalizeRecipients(settings.recipients || []);
   if (settings.lastRecipient)
     settings.lastRecipient = normalizePubkey(settings.lastRecipient);
@@ -11971,9 +11992,25 @@ async function loadSettings() {
   if (settings.nsec)
     addKeyToList(settings.nsec);
   loadMessagesForCurrent(stored.messages || []);
-  if ((settings.keys || []).length !== prevKeys)
+  const relaysChanged = JSON.stringify(settings.relays) !== JSON.stringify(prevRelays);
+  if ((settings.keys || []).length !== prevKeys || relaysChanged)
     await persistSettings();
   syncRecipientsForCurrent();
+}
+function mergeDefaultRelays(relays) {
+  if (!Array.isArray(relays) || relays.length === 0)
+    return [...DEFAULT_RELAYS];
+  if (relays.length >= DEFAULT_RELAYS.length)
+    return relays;
+  const merged = [...relays];
+  for (const relay of DEFAULT_RELAYS) {
+    if (!merged.includes(relay)) {
+      merged.push(relay);
+      if (merged.length >= DEFAULT_RELAYS.length)
+        break;
+    }
+  }
+  return merged;
 }
 async function persistSettings() {
   const pub = currentPubkey();
@@ -12046,13 +12083,126 @@ async function connect() {
     sub = null;
   }
   pool = pool || new SimplePool();
+  activeRelays = await resolveRelays(settings.relays);
   const me = currentPubkey();
   const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
   const filter = { kinds, "#p": [me] };
-  sub = pool.subscribeMany(settings.relays, filter, {
-    onevent: handleGiftEvent
+  const relayList = activeRelays.length ? activeRelays : settings.relays;
+  if (relayList.length) {
+    sub = pool.subscribeMany(relayList, filter, {
+      onevent: handleGiftEvent
+    });
+    console.info("[pushstr] subscribed", [filter], "relays", relayList);
+  } else {
+    console.warn("[pushstr] no relays available to subscribe");
+  }
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function relayFailureMap() {
+  settings.relayFailures = settings.relayFailures || {};
+  return settings.relayFailures;
+}
+function cleanupRelayFailures() {
+  const failures = relayFailureMap();
+  const now2 = Date.now();
+  let changed = false;
+  for (const [url, ts] of Object.entries(failures)) {
+    if (!ts || now2 - ts > RELAY_COOLDOWN_MS) {
+      delete failures[url];
+      changed = true;
+    }
+  }
+  if (changed) {
+    persistSettings().catch(() => {
+    });
+  }
+}
+function isRelayInCooldown(url) {
+  const ts = relayFailureMap()[url];
+  return typeof ts === "number" && Date.now() - ts < RELAY_COOLDOWN_MS;
+}
+function markRelayFailure(url) {
+  relayFailureMap()[url] = Date.now();
+  persistSettings().catch(() => {
   });
-  console.info("[pushstr] subscribed", [filter], "relays", settings.relays);
+}
+async function resolveRelays(relays) {
+  if (!pool)
+    return relays;
+  cleanupRelayFailures();
+  const candidates = relays.filter((url) => !isRelayInCooldown(url));
+  const results = await Promise.all(
+    candidates.map(async (url) => {
+      try {
+        await Promise.race([
+          pool.ensureRelay(url),
+          delay(2500).then(() => {
+            throw new Error("relay connect timeout");
+          })
+        ]);
+        return url;
+      } catch (err2) {
+        console.warn("[pushstr] relay failed", {
+          relay: url,
+          error: err2?.message || String(err2)
+        });
+        markRelayFailure(url);
+        return null;
+      }
+    })
+  );
+  return results.filter(Boolean);
+}
+async function awaitPublishResult(result) {
+  if (Array.isArray(result)) {
+    const settled = await Promise.allSettled(result);
+    const ok = settled.some((entry) => entry.status === "fulfilled");
+    if (!ok) {
+      const reason = settled.find((entry) => entry.status === "rejected")?.reason;
+      throw reason || new Error("publish failed");
+    }
+    return {
+      ok: true,
+      failed: settled.filter((entry) => entry.status === "rejected").length
+    };
+  }
+  await result;
+  return { ok: true, failed: 0 };
+}
+async function publishWithRetry(relays, event, label = "event") {
+  const relayList = relays && relays.length ? relays : [];
+  if (!relayList.length) {
+    return { ok: false, error: "no relays available" };
+  }
+  let lastErr;
+  let backoff = PUBLISH_RETRY_BASE_MS;
+  for (let attempt = 1; attempt <= PUBLISH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const result = pool.publish(relayList, event);
+      const info = await awaitPublishResult(result);
+      if (info.failed > 0) {
+        console.warn("[pushstr] publish partial failures", {
+          label,
+          failed: info.failed
+        });
+      }
+      return { ok: true };
+    } catch (err2) {
+      lastErr = err2;
+      console.warn("[pushstr] publish attempt failed", {
+        label,
+        attempt,
+        error: err2?.message || String(err2)
+      });
+      if (attempt < PUBLISH_RETRY_ATTEMPTS) {
+        await delay(backoff);
+        backoff *= 2;
+      }
+    }
+  }
+  return { ok: false, error: lastErr?.message || String(lastErr) };
 }
 async function handleGiftEvent(event) {
   try {
@@ -12062,17 +12212,110 @@ async function handleGiftEvent(event) {
     let targetEvent = event;
     if (event.kind === 1059) {
       const innerJson = await decryptGift(priv, event.pubkey, event.content);
-      const inner = JSON.parse(innerJson);
-      if (!verifyEvent(inner))
+      console.info("[pushstr] giftwrap inner raw", {
+        len: innerJson?.length || 0,
+        preview: innerJson?.slice(0, 120)
+      });
+      let inner;
+      try {
+        inner = JSON.parse(innerJson);
+      } catch (err2) {
+        console.warn("[pushstr] giftwrap inner JSON parse failed", {
+          err: err2?.message || String(err2),
+          preview: innerJson?.slice(0, 80)
+        });
         return;
-      targetEvent = inner;
+      }
+      console.info("[pushstr] giftwrap inner parsed", {
+        id: inner?.id,
+        pubkey: inner?.pubkey,
+        kind: inner?.kind,
+        tags: inner?.tags
+      });
+      if (!verifyEvent(inner)) {
+        console.warn("[pushstr] giftwrap inner verify failed", {
+          id: inner?.id,
+          pubkey: inner?.pubkey,
+          kind: inner?.kind
+        });
+        return;
+      }
+      console.info("[pushstr] giftwrap inner verified", {
+        id: inner?.id,
+        kind: inner?.kind
+      });
+      if (inner.kind === 13 && inner.content) {
+        let rumorJson;
+        try {
+          rumorJson = await decryptDmContent(priv, inner.pubkey, inner.content);
+        } catch (err2) {
+          console.warn("[pushstr] sealed rumor decrypt failed", {
+            err: err2?.message || String(err2),
+            id: inner?.id
+          });
+          return;
+        }
+        let rumor;
+        try {
+          rumor = JSON.parse(rumorJson);
+        } catch (err2) {
+          console.warn("[pushstr] sealed rumor JSON parse failed", {
+            err: err2?.message || String(err2),
+            preview: rumorJson?.slice(0, 80)
+          });
+          return;
+        }
+        console.info("[pushstr] sealed rumor parsed", {
+          kind: rumor?.kind,
+          pubkey: rumor?.pubkey,
+          tags: rumor?.tags
+        });
+        targetEvent = {
+          ...rumor,
+          pubkey: rumor?.pubkey || inner.pubkey
+        };
+      } else {
+        targetEvent = inner;
+      }
     }
     if (targetEvent.kind !== 4 && targetEvent.kind !== 14)
       return;
-    if (!targetEvent.tags.some((t) => t[0] === "p" && t[1] === currentPubkey()))
+    const me = currentPubkey();
+    const hasRecipient = targetEvent.tags.some((t) => {
+      if (t[0] !== "p")
+        return false;
+      try {
+        return normalizePubkey(t[1]) === me;
+      } catch (_) {
+        return t[1] === me;
+      }
+    });
+    const hasOuterRecipient = event.tags?.some((t) => {
+      if (t[0] !== "p")
+        return false;
+      try {
+        return normalizePubkey(t[1]) === me;
+      } catch (_) {
+        return t[1] === me;
+      }
+    });
+    if (!hasRecipient && !hasOuterRecipient) {
+      console.warn("[pushstr] DM ignored: missing recipient tag", {
+        kind: targetEvent.kind,
+        outerKind: event.kind,
+        innerTags: targetEvent.tags,
+        outerTags: event.tags
+      });
       return;
+    }
     const sender = targetEvent.pubkey || "unknown";
     const message = await decryptDmContent(priv, sender, targetEvent.content);
+    console.info("[pushstr] dm decrypted", {
+      from: sender,
+      kind: targetEvent.kind,
+      len: message?.length || 0
+    });
+    const dmKind = event.kind === 1059 ? "nip17" : targetEvent.kind === 4 ? "nip04" : "nip17";
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
     await ensureContact(sender);
     await recordMessage({
@@ -12083,6 +12326,7 @@ async function handleGiftEvent(event) {
       content: message,
       created_at: targetEvent.created_at || Math.floor(Date.now() / 1e3),
       outerKind: event.kind,
+      dm_kind: dmKind,
       relayFrom: settings.relays
     });
     if (message && !suppressNotifications) {
@@ -12102,20 +12346,25 @@ async function sendGift(recipient, content) {
   if (!chosen)
     throw new Error("No recipient set");
   const recipientHex = normalizePubkey(chosen);
+  const dmMode = getDmModeForRecipient(recipientHex);
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1e3);
-  const cipherText = await encryptDmContent(priv, recipientHex, content);
-  if (!settings.useGiftwrap) {
+  if (dmMode === "nip04") {
+    const cipherText = await nip04_exports.encrypt(priv, recipientHex, content);
     const dm = {
-      kind: 14,
+      kind: 4,
       created_at,
       tags: [["p", recipientHex]],
       content: cipherText
     };
     const signedDm = finalizeEvent2(dm, priv);
-    await pool.publish(settings.relays, signedDm);
-    console.info("[pushstr] sent DM kind 14 (no giftwrap)", { to: recipientHex, relays: settings.relays });
+    const relayList2 = activeRelays.length ? activeRelays : settings.relays;
+    const pubRes2 = await publishWithRetry(relayList2, signedDm, "nip04");
+    if (!pubRes2.ok) {
+      return { ok: false, error: pubRes2.error || "publish failed" };
+    }
+    console.info("[pushstr] sent DM kind 4 (nip04)", { to: recipientHex, relays: settings.relays });
     await recordMessage({
       id: signedDm.id,
       direction: "out",
@@ -12123,7 +12372,8 @@ async function sendGift(recipient, content) {
       to: recipientHex,
       content,
       created_at,
-      outerKind: 14,
+      outerKind: 4,
+      dm_kind: "nip04",
       relays: settings.relays
     });
     return { ok: true, id: signedDm.id };
@@ -12134,7 +12384,7 @@ async function sendGift(recipient, content) {
     // NIP-17: kind 14 for private direct message
     created_at,
     tags: [["p", recipientHex]],
-    content: cipherText
+    content
   };
   const innerSigned = finalizeEvent2(inner, priv);
   const wrappingPriv = generateSecretKey();
@@ -12156,7 +12406,11 @@ async function sendGift(recipient, content) {
     pubkey: wrappingPub
   };
   const signedGift = finalizeEvent2(giftwrap, wrappingPriv);
-  await pool.publish(settings.relays, signedGift);
+  const relayList = activeRelays.length ? activeRelays : settings.relays;
+  const pubRes = await publishWithRetry(relayList, signedGift, "giftwrap");
+  if (!pubRes.ok) {
+    return { ok: false, error: pubRes.error || "publish failed" };
+  }
   console.info("[pushstr] sent giftwrap kind 1059", { to: recipientHex, relays: settings.relays });
   await recordMessage({
     id: signedGift.id,
@@ -12166,6 +12420,7 @@ async function sendGift(recipient, content) {
     content,
     created_at,
     outerKind: 1059,
+    dm_kind: "nip17",
     relays: settings.relays
   });
   return { ok: true, id: signedGift.id };
@@ -12173,10 +12428,10 @@ async function sendGift(recipient, content) {
 function notify(title, message) {
   try {
     browser.notifications.create({
-      type: 'basic',
-      iconUrl: browser.runtime.getURL('pushstr_96.png'),
+      type: "basic",
+      iconUrl: browser.runtime.getURL("pushstr_96.png"),
       title,
-      message,
+      message
     });
   } catch (err2) {
     console.warn("Notifications unavailable", err2);
@@ -12224,17 +12479,22 @@ async function focusOrOpenChat() {
 function normalizePubkey(input) {
   if (!input)
     throw new Error("Missing pubkey");
+  let normalized = input.trim();
+  if (normalized.startsWith("nostr://"))
+    normalized = normalized.slice(8);
+  else if (normalized.startsWith("nostr:"))
+    normalized = normalized.slice(6);
   try {
-    const decoded = nip19_exports.decode(input);
+    const decoded = nip19_exports.decode(normalized);
     if (decoded.type === "npub" || decoded.type === "nprofile") {
       return decoded.data.pubkey || decoded.data;
     }
   } catch (_) {
   }
-  const hex2 = input.trim();
+  const hex2 = normalized.trim();
   if (/^[0-9a-fA-F]{64}$/.test(hex2))
     return hex2.toLowerCase();
-  throw new Error("Invalid recipient pubkey (expect hex or npub...)");
+  throw new Error("Invalid recipient pubkey (expect hex, npub, or nprofile)");
 }
 function normalizeRecipientEntry(entry) {
   if (!entry)
@@ -12283,24 +12543,6 @@ async function decryptGift(priv, wrapperPub, content) {
     }
   }
 }
-async function encryptDmContent(priv, recipientPub, plaintext) {
-  try {
-    const privHex = typeof priv === "string" ? priv : bytesToHex4(priv);
-    const recipientHex = typeof recipientPub === "string" ? recipientPub : bytesToHex4(recipientPub);
-    console.log("[pushstr] encryptDmContent keys:", {
-      privLen: privHex.length,
-      privType: typeof privHex,
-      recipientLen: recipientHex.length,
-      recipientType: typeof recipientHex,
-      recipientSample: recipientHex.substring(0, 16) + "..."
-    });
-    const conversationKey = CryptoWasm.nip44_get_conversation_key(privHex, recipientHex);
-    return CryptoWasm.nip44_encrypt(conversationKey, plaintext);
-  } catch (err2) {
-    console.error("[pushstr] WASM NIP-44 DM encrypt failed:", err2);
-    throw err2;
-  }
-}
 async function decryptDmContent(priv, senderPub, cipher) {
   if (cipher instanceof ArrayBuffer)
     cipher = new Uint8Array(cipher);
@@ -12313,10 +12555,22 @@ async function decryptDmContent(priv, senderPub, cipher) {
   }
   if (!cipher)
     return "";
+  const rawCipher = String(cipher);
+  const trimmedCipher = rawCipher.replace(/^"+|"+$/g, "");
+  const base64Like = /^[A-Za-z0-9+/=]+$/.test(trimmedCipher);
+  if (trimmedCipher.length < 16 && !trimmedCipher.includes("?iv=")) {
+    console.info("[pushstr] dm content looks plaintext, skipping decrypt", {
+      len: trimmedCipher.length
+    });
+    return trimmedCipher;
+  }
+  if (!base64Like && !trimmedCipher.includes("?iv=")) {
+    console.info("[pushstr] dm content not base64, treating as plaintext");
+    return trimmedCipher;
+  }
   console.log("[pushstr] decryptDmContent - cipher type:", typeof cipher, "length:", cipher?.length, "first 50 chars:", cipher?.substring(0, 50));
   const variants = [];
-  const trimmed = (cipher || "").replace(/^"+|"+$/g, "");
-  variants.push(trimmed);
+  variants.push(trimmedCipher);
   try {
     const privHex = typeof priv === "string" ? priv : bytesToHex4(priv);
     const senderHex = typeof senderPub === "string" ? senderPub : bytesToHex4(senderPub);
@@ -12344,7 +12598,7 @@ async function decryptDmContent(priv, senderPub, cipher) {
   console.warn("[pushstr] WASM NIP-44 dm decrypt failed, falling back to nip04");
   try {
     console.log("[pushstr] Trying NIP-04 with original cipher (base64 string)");
-    return await nip04_exports.decrypt(priv, senderPub, trimmed);
+    return await nip04_exports.decrypt(priv, senderPub, trimmedCipher);
   } catch (err2) {
     console.error("[pushstr] NIP-04 decrypt failed:", err2);
     throw new Error(`All decryption methods failed. Last error: ${err2.message}`);
@@ -12532,6 +12786,28 @@ function getRecipientsForCurrent() {
   if (pk)
     return settings.recipientsByKey[pk] || [];
   return settings.recipients || [];
+}
+function getDmModesForCurrent() {
+  const pk = currentPubkey();
+  settings.dmModesByKey = settings.dmModesByKey || {};
+  if (pk)
+    return settings.dmModesByKey[pk] || {};
+  return settings.dmModes || {};
+}
+function setDmModeForCurrent(recipient, mode) {
+  const pk = currentPubkey();
+  settings.dmModesByKey = settings.dmModesByKey || {};
+  if (pk) {
+    const existing = settings.dmModesByKey[pk] || {};
+    settings.dmModesByKey[pk] = { ...existing, [recipient]: mode };
+  } else {
+    settings.dmModes = settings.dmModes || {};
+    settings.dmModes[recipient] = mode;
+  }
+}
+function getDmModeForRecipient(recipient) {
+  const modes = getDmModesForCurrent();
+  return modes[recipient] || "nip17";
 }
 function setRecipientsForCurrent(list) {
   const normalized = normalizeRecipients(list);

@@ -4,14 +4,14 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use flutter_rust_bridge::frb;
 use nostr_sdk::nips::nip04;
+use nostr_sdk::nips::nip19::{FromBech32, Nip19};
 use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use flate2::{write::GzEncoder, read::GzDecoder, Compression};
-use std::io::{Read, Write};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::future::Future;
 use tokio::sync::Mutex;
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -19,8 +19,11 @@ use aes_gcm::{
 };
 use rand::RngCore;
 use secp256k1::{PublicKey as Secp256k1PublicKey, SecretKey as Secp256k1SecretKey, XOnlyPublicKey as Secp256k1XOnlyPublicKey, Secp256k1 as Secp256k1Context};
-use ::hkdf::Hkdf;
 use getrandom;
+use hmac::{Hmac, Mac};
+use ::hkdf::Hkdf;
+use chacha20::cipher::{KeyIvInit, StreamCipher};
+use std::collections::HashSet as StdHashSet;
 
 // Global tokio runtime for all FFI calls
 static RUNTIME: Lazy<tokio::runtime::Runtime> =
@@ -37,6 +40,14 @@ static RETURNED_EVENT_IDS_QUEUE: Lazy<StdMutex<VecDeque<String>>> =
     Lazy::new(|| StdMutex::new(VecDeque::new()));
 const RETURNED_EVENT_IDS_MAX: usize = 512;
 
+fn run_block_on<F: Future>(fut: F) -> F::Output {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fut))
+    } else {
+        RUNTIME.block_on(fut)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[frb(non_opaque)]
 pub struct MediaDescriptor {
@@ -52,10 +63,72 @@ pub struct MediaDescriptor {
 
 // Blossom server configuration
 const BLOSSOM_SERVER: &str = "https://blossom.primal.net";
+const PUBLISH_RETRY_ATTEMPTS: usize = 3;
+const PUBLISH_RETRY_BASE_MS: u64 = 400;
 const BLOSSOM_UPLOAD_PATH: &str = "upload";
 
 fn parse_pubkey(input: &str) -> Result<PublicKey> {
-    PublicKey::from_bech32(input).or_else(|_| PublicKey::from_hex(input)).context("Invalid pubkey")
+    let trimmed = input.trim();
+    let normalized = trimmed
+        .strip_prefix("nostr://")
+        .or_else(|| trimmed.strip_prefix("nostr:"))
+        .unwrap_or(trimmed);
+    if normalized.starts_with("npub") || normalized.starts_with("nprofile") {
+        let nip19 = Nip19::from_bech32(normalized)?;
+        match nip19 {
+            Nip19::Pubkey(pubkey) => Ok(pubkey),
+            Nip19::Profile(profile) => Ok(profile.public_key),
+            _ => anyhow::bail!("Unsupported NIP-19 pubkey"),
+        }
+    } else {
+        PublicKey::from_hex(normalized).context("Invalid pubkey")
+    }
+}
+
+fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
+    event
+        .tags
+        .iter()
+        .find(|t| t.kind() == TagKind::p())
+        .and_then(|t| t.content())
+        .and_then(|s| PublicKey::from_hex(s).ok())
+}
+
+fn relay_tags(event: &Event) -> Vec<String> {
+    let relay_kind = TagKind::Custom("relay".into());
+    event
+        .tags
+        .iter()
+        .filter(|t| t.kind() == relay_kind)
+        .filter_map(|t| t.content())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RumorData {
+    id: Option<String>,
+    pubkey: Option<String>,
+    created_at: Option<u64>,
+    kind: Option<u64>,
+    tags: Option<Vec<Vec<String>>>,
+    content: Option<String>,
+}
+
+struct UnwrappedGift {
+    rumor: RumorData,
+    sender_pubkey: String,
+    created_at: u64,
+    format: String,
+}
+
+fn random_timestamp_within_two_days() -> Timestamp {
+    let now = Timestamp::now();
+    let two_days_secs = 2 * 24 * 60 * 60;
+    let earliest = now.as_u64().saturating_sub(two_days_secs);
+    let span = now.as_u64().saturating_sub(earliest).max(1);
+    let random_offset = rand::random::<u64>() % span;
+    Timestamp::from(earliest + random_offset)
 }
 
 async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
@@ -70,155 +143,274 @@ async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
     ))
 }
 
+async fn ensure_recipient_dm_relays(client: &Client, recipient_pk: &PublicKey) -> Result<()> {
+    let filter = Filter::new()
+        .kind(Kind::Custom(10050))
+        .author(recipient_pk.clone())
+        .limit(1);
+    let events = client
+        .fetch_events(filter, std::time::Duration::from_secs(5))
+        .await?;
+    if let Some(event) = events.first() {
+        let relays = relay_tags(event);
+        if !relays.is_empty() {
+            eprintln!("[dm] recipient relay list detected: {:?}", relays);
+            for relay in relays {
+                let _ = client.add_relay(relay).await;
+            }
+            client.connect().await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    } else {
+        eprintln!("[dm] no recipient relay list found");
+    }
+    Ok(())
+}
+
 // Helper function to derive NIP-44 conversation key
-fn get_nip44_conversation_key(secret_key: &SecretKey, public_key: &PublicKey) -> Result<String> {
+type HmacSha256 = Hmac<Sha256>;
+
+struct Nip44MessageKeys {
+    chacha_key: [u8; 32],
+    chacha_nonce: [u8; 12],
+    hmac_key: [u8; 32],
+}
+
+fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> Result<[u8; 32]> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
+        .map_err(|e| anyhow::anyhow!("HMAC init failed: {}", e))?;
+    for part in parts {
+        mac.update(part);
+    }
+    let result = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
+    Ok(out)
+}
+
+fn nip44_calc_padded_len(len: usize) -> usize {
+    if len <= 32 {
+        return 32;
+    }
+    let len_minus = len - 1;
+    let mut next_power = len_minus.next_power_of_two();
+    if next_power == len_minus {
+        next_power = next_power.saturating_mul(2);
+    }
+    let chunk = if next_power <= 256 { 32 } else { next_power / 8 };
+    chunk * ((len_minus / chunk) + 1)
+}
+
+fn nip44_pad(plaintext: &str) -> Result<Vec<u8>> {
+    let unpadded = plaintext.as_bytes();
+    let unpadded_len = unpadded.len();
+    if unpadded_len == 0 {
+        anyhow::bail!("Message is empty");
+    }
+    const MAX_PLAINTEXT: usize = 0xFFFF;
+    const EXT_MAX_PLAINTEXT: usize = 0xFFFF_FFFE;
+
+    let mut prefix = Vec::with_capacity(6);
+    if unpadded_len <= MAX_PLAINTEXT {
+        prefix.push(((unpadded_len >> 8) & 0xFF) as u8);
+        prefix.push((unpadded_len & 0xFF) as u8);
+    } else if unpadded_len <= EXT_MAX_PLAINTEXT {
+        prefix.extend_from_slice(&[0, 0]);
+        prefix.push(((unpadded_len >> 24) & 0xFF) as u8);
+        prefix.push(((unpadded_len >> 16) & 0xFF) as u8);
+        prefix.push(((unpadded_len >> 8) & 0xFF) as u8);
+        prefix.push((unpadded_len & 0xFF) as u8);
+    } else {
+        anyhow::bail!("Message is too long ({})", unpadded_len);
+    }
+
+    let padded_len = nip44_calc_padded_len(unpadded_len);
+    let mut out = Vec::with_capacity(prefix.len() + padded_len);
+    out.extend_from_slice(&prefix);
+    out.extend_from_slice(unpadded);
+    out.resize(prefix.len() + padded_len, 0u8);
+    Ok(out)
+}
+
+fn nip44_unpad(padded: &[u8]) -> Result<String> {
+    if padded.len() < 2 {
+        anyhow::bail!("Invalid padded payload");
+    }
+    let len_pre = ((padded[0] as usize) << 8) | padded[1] as usize;
+    if len_pre == 0 {
+        if padded.len() < 6 {
+            anyhow::bail!("Invalid extended padding");
+        }
+        let len_ext = ((padded[2] as usize) << 24)
+            | ((padded[3] as usize) << 16)
+            | ((padded[4] as usize) << 8)
+            | (padded[5] as usize);
+        if len_ext == 0 || len_ext > 0xFFFF_FFFE {
+            anyhow::bail!("Invalid size {}", len_ext);
+        }
+        let expected = 6 + nip44_calc_padded_len(len_ext);
+        if padded.len() != expected {
+            anyhow::bail!("Invalid padding {} != {}", padded.len(), expected);
+        }
+        return String::from_utf8(padded[6..6 + len_ext].to_vec())
+            .map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e));
+    }
+    if len_pre > 0xFFFF {
+        anyhow::bail!("Invalid size {}", len_pre);
+    }
+    let expected = 2 + nip44_calc_padded_len(len_pre);
+    if padded.len() != expected {
+        anyhow::bail!("Invalid padding {} != {}", padded.len(), expected);
+    }
+    String::from_utf8(padded[2..2 + len_pre].to_vec())
+        .map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
+}
+
+fn nip44_hmac_aad(key: &[u8; 32], message: &[u8], aad: &[u8; 32]) -> Result<[u8; 32]> {
+    hmac_sha256(key, &[aad, message])
+}
+
+fn nip44_fast_expand(
+    conversation_key: &[u8; 32],
+    nonce: &[u8; 32],
+    ciphertext: Option<&[u8]>,
+    mac: Option<&[u8]>,
+) -> Result<Nip44MessageKeys> {
+    let round1 = hmac_sha256(conversation_key, &[nonce, &[1u8]])?;
+    let round2 = hmac_sha256(conversation_key, &[&round1, nonce, &[2u8]])?;
+    let round3 = hmac_sha256(conversation_key, &[&round2, nonce, &[3u8]])?;
+
+    let mut hmac_key = [0u8; 32];
+    hmac_key[0..20].copy_from_slice(&round2[12..32]);
+    hmac_key[20..32].copy_from_slice(&round3[0..12]);
+
+    if let (Some(ciphertext), Some(mac)) = (ciphertext, mac) {
+        if mac.len() != 32 {
+            anyhow::bail!("Invalid mac length {}", mac.len());
+        }
+        let calc = nip44_hmac_aad(&hmac_key, ciphertext, nonce)?;
+        if calc.as_ref() != mac {
+            anyhow::bail!("Invalid Mac");
+        }
+    }
+
+    let mut chacha_nonce = [0u8; 12];
+    chacha_nonce.copy_from_slice(&round2[0..12]);
+
+    Ok(Nip44MessageKeys {
+        chacha_key: round1,
+        chacha_nonce,
+        hmac_key,
+    })
+}
+
+fn get_nip44_conversation_key(secret_key: &SecretKey, public_key: &PublicKey) -> Result<[u8; 32]> {
     let secp = Secp256k1Context::new();
 
-    // Convert nostr-sdk keys to secp256k1 keys
     let secret_bytes = secret_key.secret_bytes();
     let secp_secret = Secp256k1SecretKey::from_slice(&secret_bytes)?;
 
-    // Parse x-only public key (32 bytes)
     let public_bytes = public_key.to_bytes();
     let xonly_pubkey = Secp256k1XOnlyPublicKey::from_slice(&public_bytes)?;
 
-    // Compute shared point: multiply other's pubkey by our privkey
-    let public_key_even = Secp256k1PublicKey::from_x_only_public_key(xonly_pubkey, secp256k1::Parity::Even);
+    let public_key_even =
+        Secp256k1PublicKey::from_x_only_public_key(xonly_pubkey, secp256k1::Parity::Even);
     let shared_point = public_key_even.mul_tweak(&secp, &secp_secret.into())?;
 
-    // Get x-coordinate of shared point (first 32 bytes after dropping the prefix byte)
     let shared_bytes = shared_point.serialize_uncompressed();
     let shared_x = &shared_bytes[1..33];
 
-    // Derive conversation key using HKDF-SHA256
-    let hkdf = Hkdf::<Sha256>::new(None, shared_x);
+    let (prk, _) = Hkdf::<Sha256>::extract(Some(b"nip44-v2"), shared_x);
     let mut conversation_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2", &mut conversation_key)
-        .map_err(|e| anyhow::anyhow!("HKDF failed: {}", e))?;
-
-    Ok(hex::encode(conversation_key))
+    conversation_key.copy_from_slice(&prk[..]);
+    Ok(conversation_key)
 }
 
-// Custom NIP-44 v2 encrypt that matches WASM implementation exactly
+// NIP-44 v2 encrypt compatible with Amethyst/NIP-59
 fn nip44_encrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, plaintext: &str) -> Result<String> {
-    use chacha20poly1305::{ChaCha20Poly1305 as ChaCha, KeyInit as ChaChaKeyInit, AeadInPlace};
+    let conv_key = get_nip44_conversation_key(secret_key, public_key)?;
 
-    // Get conversation key
-    let conv_key_hex = get_nip44_conversation_key(secret_key, public_key)?;
-    let conv_key = hex::decode(&conv_key_hex)?;
-
-    // Generate random 32-byte nonce
     let mut nonce = [0u8; 32];
     getrandom::getrandom(&mut nonce)?;
 
-    // Derive encryption key and AAD using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(&nonce), &conv_key);
-    let mut chacha_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-key", &mut chacha_key)
-        .map_err(|e| anyhow::anyhow!("HKDF chacha key failed: {}", e))?;
-    let mut aad = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-aad", &mut aad)
-        .map_err(|e| anyhow::anyhow!("HKDF aad failed: {}", e))?;
+    let keys = nip44_fast_expand(&conv_key, &nonce, None, None)?;
+    let mut buffer = nip44_pad(plaintext)?;
 
-    // Encrypt with ChaCha20-Poly1305
-    let cipher = ChaCha::new(chacha_key.as_ref().into());
-    let chacha_nonce = chacha20poly1305::Nonce::from_slice(&[0u8; 12]); // NIP-44 uses all-zero nonce
+    let mut cipher = chacha20::ChaCha20::new((&keys.chacha_key).into(), (&keys.chacha_nonce).into());
+    cipher.apply_keystream(&mut buffer);
 
-    let mut buffer = plaintext.as_bytes().to_vec();
-    cipher.encrypt_in_place(chacha_nonce, &aad, &mut buffer)
-        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+    let mac = nip44_hmac_aad(&keys.hmac_key, &buffer, &nonce)?;
 
-    // Construct payload: version (1) || nonce (32) || ciphertext+mac
-    let mut payload = Vec::with_capacity(1 + 32 + buffer.len());
-    payload.push(0x02); // version
+    let mut payload = Vec::with_capacity(1 + 32 + buffer.len() + 32);
+    payload.push(0x02);
     payload.extend_from_slice(&nonce);
     payload.extend_from_slice(&buffer);
+    payload.extend_from_slice(&mac);
 
     Ok(base64::engine::general_purpose::STANDARD.encode(&payload))
 }
 
-// Custom NIP-44 v2 decrypt that matches WASM implementation exactly
+// NIP-44 v2 decrypt compatible with Amethyst/NIP-59
 fn nip44_decrypt_custom(secret_key: &SecretKey, public_key: &PublicKey, ciphertext_b64: &str) -> Result<String> {
-    use chacha20poly1305::{ChaCha20Poly1305 as ChaCha, KeyInit as ChaChaKeyInit, AeadInPlace};
+    let conv_key = get_nip44_conversation_key(secret_key, public_key)?;
 
-    // Get conversation key
-    let conv_key_hex = get_nip44_conversation_key(secret_key, public_key)?;
-    let conv_key = hex::decode(&conv_key_hex)?;
-
-    // Decode base64
     let payload = base64::engine::general_purpose::STANDARD.decode(ciphertext_b64)?;
-
-    // Check minimum size: version (1) + nonce (32) + mac (16) = 49 bytes
-    if payload.len() < 49 {
+    if payload.len() < 65 {
         anyhow::bail!("ciphertext too short");
     }
-
-    // Check version
     if payload[0] != 0x02 {
         anyhow::bail!("unsupported version: {}", payload[0]);
     }
+    if payload.len() < 1 + 32 + 32 {
+        anyhow::bail!("ciphertext too short");
+    }
+    let mut nonce = [0u8; 32];
+    nonce.copy_from_slice(&payload[1..33]);
+    let mac_offset = payload.len() - 32;
+    let ciphertext = &payload[33..mac_offset];
+    let mac = &payload[mac_offset..];
 
-    // Extract nonce and ciphertext+mac
-    let nonce = &payload[1..33];
-    let ciphertext_with_mac = &payload[33..];
+    let keys = nip44_fast_expand(&conv_key, &nonce, Some(ciphertext), Some(mac))?;
+    let mut buffer = ciphertext.to_vec();
+    let mut cipher = chacha20::ChaCha20::new((&keys.chacha_key).into(), (&keys.chacha_nonce).into());
+    cipher.apply_keystream(&mut buffer);
 
-    // Derive decryption key and AAD using HKDF
-    let hkdf = Hkdf::<Sha256>::new(Some(nonce), &conv_key);
-    let mut chacha_key = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-key", &mut chacha_key)
-        .map_err(|e| anyhow::anyhow!("HKDF chacha key failed: {}", e))?;
-    let mut aad = [0u8; 32];
-    hkdf.expand(b"nip44-v2-chacha-aad", &mut aad)
-        .map_err(|e| anyhow::anyhow!("HKDF aad failed: {}", e))?;
-
-    // Decrypt with ChaCha20-Poly1305
-    let cipher = ChaCha::new(chacha_key.as_ref().into());
-    let chacha_nonce = chacha20poly1305::Nonce::from_slice(&[0u8; 12]); // NIP-44 uses all-zero nonce
-
-    let mut buffer = ciphertext_with_mac.to_vec();
-    cipher.decrypt_in_place(chacha_nonce, &aad, &mut buffer)
-        .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
-
-    String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
+    nip44_unpad(&buffer)
 }
 
-fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, _use_nip44: bool) -> Result<Event> {
-    let wrapper_keys = Keys::generate();
-    let rumor_json = serde_json::to_string(inner_event)?;
-
-    // Use custom NIP-44 for giftwrap outer encryption (matches WASM exactly)
-    let ciphertext = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &rumor_json)?;
-
-    // NIP-17: Random timestamp between now and 2 days ago
-    let now = Timestamp::now();
-    let two_days_ago = now.as_u64() - (2 * 24 * 60 * 60);
-    let random_offset = rand::random::<u64>() % (now.as_u64() - two_days_ago);
-    let random_timestamp = Timestamp::from(two_days_ago + random_offset);
-
-    // NIP-17: Expiration 24 hours after actual creation
-    let expiration = now.as_u64() + (24 * 60 * 60);
-
-    let tags = vec![
-        Tag::public_key(recipient_pk),
-        Tag::expiration(Timestamp::from(expiration)), // NIP-17: expiration tag
-    ];
-
-    let mut builder = EventBuilder::new(Kind::GiftWrap, ciphertext)
-        .custom_created_at(random_timestamp); // NIP-17: randomized timestamp
-    for tag in tags {
-        builder = builder.tag(tag);
+fn wrap_gift_event(inner_event: &Event, recipient_pk: PublicKey, keys: &Keys) -> Result<Event> {
+    // Build Rumor JSON from inner event (drop signature to match Amethyst).
+    let mut rumor_value = serde_json::to_value(inner_event)?;
+    if let serde_json::Value::Object(obj) = &mut rumor_value {
+        obj.remove("sig");
     }
+    let rumor_json = serde_json::to_string(&rumor_value)?;
+
+    // Sealed rumor (kind 13), signed by sender, encrypted to recipient.
+    let sealed_content = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &rumor_json)?;
+    let sealed_event = EventBuilder::new(Kind::Custom(13), sealed_content)
+        .custom_created_at(random_timestamp_within_two_days())
+        .sign_with_keys(&keys)?;
+
+    // Giftwrap (kind 1059), random key, encrypted to recipient.
+    let wrapper_keys = Keys::generate();
+    let sealed_json = serde_json::to_string(&sealed_event)?;
+    let gift_ciphertext = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &sealed_json)?;
+    let builder = EventBuilder::new(Kind::GiftWrap, gift_ciphertext)
+        .custom_created_at(random_timestamp_within_two_days())
+        .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]));
     let gift = builder.sign_with_keys(&wrapper_keys)?;
     Ok(gift)
 }
 
-fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<Event> {
+fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
     if gift_event.kind != Kind::GiftWrap {
         anyhow::bail!("Event is not kind 1059");
     }
 
     // Debug: Log conversation key
     let conv_key = get_nip44_conversation_key(keys.secret_key(), &gift_event.pubkey)
+        .map(|k| hex::encode(k))
         .unwrap_or_else(|_| "ERROR".to_string());
     eprintln!("[mobile] Giftwrap decrypt - myPriv: {}... wrapperPub: {}...",
         hex::encode(keys.secret_key().secret_bytes()).chars().take(8).collect::<String>(),
@@ -227,21 +419,56 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<Event> {
 
     // Try custom NIP-44 first (matches WASM exactly)
     // Fall back to NIP-04 for old messages
-    let rumor_json = nip44_decrypt_custom(keys.secret_key(), &gift_event.pubkey, &gift_event.content)
+    let decrypted = nip44_decrypt_custom(keys.secret_key(), &gift_event.pubkey, &gift_event.content)
         .or_else(|e| {
             eprintln!("[mobile] NIP-44 giftwrap decrypt failed: {}", e);
             nip04::decrypt(keys.secret_key(), &gift_event.pubkey, gift_event.content.clone())
         })?;
+    let sealed_event: Event = serde_json::from_str(&decrypted)?;
 
-    let rumor_event: Event = serde_json::from_str(&rumor_json)?;
-    Ok(rumor_event)
+    // NIP-59 sealed rumor path (kind 13). Otherwise fall back to legacy inner event.
+    if sealed_event.kind == Kind::Custom(13) {
+        let rumor_json = nip44_decrypt_custom(keys.secret_key(), &sealed_event.pubkey, &sealed_event.content)
+            .or_else(|e| {
+                eprintln!("[mobile] NIP-44 sealed decrypt failed: {}", e);
+                nip04::decrypt(keys.secret_key(), &sealed_event.pubkey, sealed_event.content.clone())
+            })?;
+        let rumor: RumorData = serde_json::from_str(&rumor_json)?;
+        let created_at = rumor.created_at.unwrap_or_else(|| sealed_event.created_at.as_u64());
+        Ok(UnwrappedGift {
+            rumor,
+            sender_pubkey: sealed_event.pubkey.to_hex(),
+            created_at,
+            format: "nip59".to_string(),
+        })
+    } else {
+        let mut event_value = serde_json::to_value(&sealed_event)?;
+        if let serde_json::Value::Object(obj) = &mut event_value {
+            obj.remove("sig");
+        }
+        let rumor: RumorData = serde_json::from_value(event_value)?;
+        let created_at = rumor.created_at.unwrap_or_else(|| sealed_event.created_at.as_u64());
+        Ok(UnwrappedGift {
+            rumor,
+            sender_pubkey: sealed_event.pubkey.to_hex(),
+            created_at,
+            format: "legacy_giftwrap".to_string(),
+        })
+    }
 }
 
 // Default relay configuration
 const RELAYS: &[&str] = &[
     "wss://relay.damus.io",
-    "wss://relay.snort.social",
-    "wss://offchain.pub",
+    "wss://relay.primal.net",
+    "wss://nos.lol",
+    "wss://nostr.mom",
+    "wss://relay.nostr.band",
+];
+const DM_RELAYS: &[&str] = &[
+    "wss://nos.lol",
+    "wss://auth.nostr1.com",
+    "wss://relay.0xchat.com",
 ];
 
 /// Initialize the Nostr service with a secret key (nsec)
@@ -249,7 +476,7 @@ const RELAYS: &[&str] = &[
 /// Returns npub
 #[frb(sync)]
 pub fn init_nostr(nsec: String) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let keys = if nsec.is_empty() {
             Keys::generate()
         } else {
@@ -258,16 +485,53 @@ pub fn init_nostr(nsec: String) -> Result<String> {
 
         let client = Client::new(keys.clone());
 
-        // Add relays
+        // Add default relays
         for relay in RELAYS {
             client.add_relay(*relay).await?;
         }
+        // Add default DM relays (popular inbox relays)
+        for relay in DM_RELAYS {
+            let _ = client.add_relay(*relay).await;
+        }
 
         client.connect().await;
-        eprintln!("🔌 Client connected to relays");
+        eprintln!("🔌 Client connected to default relays");
 
         // Wait a bit for connection to establish
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+        // Fetch NIP-17 relay list (kind 10050) and add any custom relays
+        let filter_nip17_relays = Filter::new()
+            .kind(Kind::Custom(10050))
+            .author(keys.public_key())
+            .limit(1);
+        let nip17_events = client
+            .fetch_events(filter_nip17_relays, std::time::Duration::from_secs(5))
+            .await?;
+        if let Some(event) = nip17_events.first() {
+            let relays = relay_tags(event);
+            if !relays.is_empty() {
+                eprintln!("[dm] NIP-17 relays detected: {:?}", relays);
+                for relay in relays {
+                    let _ = client.add_relay(relay).await;
+                }
+                client.connect().await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+        } else {
+            eprintln!("[dm] No NIP-17 relay list found");
+            // Publish a default NIP-17 relay list so other clients can DM us.
+            let mut builder = EventBuilder::new(Kind::Custom(10050), "");
+            for relay in DM_RELAYS {
+                builder = builder.tag(Tag::custom(TagKind::Custom("relay".into()), vec![relay.to_string()]));
+            }
+            builder = builder.tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Relay list to receive private messages".to_string()],
+            ));
+            let list_event = builder.sign_with_keys(&keys)?;
+            let _ = client.send_event(&list_event).await;
+        }
 
         // Subscribe to encrypted DMs (kind 4 - NIP-04, matching browser extension default)
         let filter_dms = Filter::new()
@@ -301,7 +565,7 @@ pub fn init_nostr(nsec: String) -> Result<String> {
 /// Get the current user's npub
 #[frb(sync)]
 pub fn get_npub() -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         let keys = keys_lock
             .as_ref()
@@ -314,7 +578,7 @@ pub fn get_npub() -> Result<String> {
 /// Get the current user's nsec (for backup purposes)
 #[frb(sync)]
 pub fn get_nsec() -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         let keys = keys_lock
             .as_ref()
@@ -334,21 +598,114 @@ pub fn generate_new_key() -> Result<String> {
 /// Send a giftwrapped DM (kind 1059 wrapping kind 4) using nip44 by default
 #[frb(sync)]
 pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let (client, keys) = get_client_and_keys().await?;
         let recipient_pk = parse_pubkey(&recipient)?;
+        let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
 
-        // Encrypt inner content with custom NIP-44 (matches WASM exactly)
-        let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
-
-        // NIP-17: Inner DM with encrypted content, signed by user - kind 14
-        let inner_event = EventBuilder::new(Kind::Custom(14), ciphertext)
-            .tag(Tag::public_key(recipient_pk))
+        // NIP-17: Inner DM with plaintext content, signed by user - kind 14
+        let inner_event = EventBuilder::new(Kind::Custom(14), content)
+            .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
+            .tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Direct message".to_string()],
+            ))
             .sign_with_keys(&keys)?;
 
-        let gift = wrap_gift_event(&inner_event, recipient_pk, use_nip44)?;
+        let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
         let event_id = gift.id.to_hex();
-        client.send_event(&gift).await?;
+        eprintln!("[dm] Sending giftwrap id={}", event_id);
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&gift).await {
+                Ok(_) => {
+                    eprintln!("[dm] Giftwrap sent id={}", event_id);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[dm] Giftwrap send failed id={} attempt={} err={}",
+                        event_id, attempt, last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
+        }
+        Ok(event_id)
+    })
+}
+
+/// Send a legacy giftwrap DM compatible with the Pushstr browser extension.
+#[frb(sync)]
+pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String> {
+    run_block_on(async {
+        let (client, keys) = get_client_and_keys().await?;
+        let recipient_pk = parse_pubkey(&recipient)?;
+        let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
+
+        // Inner DM (kind 14) with NIP-44 encrypted content
+        let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
+        let inner_event = EventBuilder::new(Kind::Custom(14), ciphertext)
+            .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
+            .tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Direct message".to_string()],
+            ))
+            .sign_with_keys(&keys)?;
+
+        // Giftwrap with random timestamp and expiration tag (matches browser extension)
+        let wrapper_keys = Keys::generate();
+        let inner_json = serde_json::to_string(&inner_event)?;
+        let sealed_content = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &inner_json)?;
+
+        let now = Timestamp::now();
+        let random_timestamp = random_timestamp_within_two_days();
+        let expiration = now.as_u64() + (24 * 60 * 60);
+        let tags = vec![
+            Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]),
+            Tag::expiration(Timestamp::from(expiration)),
+        ];
+
+        let mut builder = EventBuilder::new(Kind::GiftWrap, sealed_content)
+            .custom_created_at(random_timestamp);
+        for tag in tags {
+            builder = builder.tag(tag);
+        }
+        let gift = builder.sign_with_keys(&wrapper_keys)?;
+        let event_id = gift.id.to_hex();
+        eprintln!("[dm] Sending legacy giftwrap id={}", event_id);
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&gift).await {
+                Ok(_) => {
+                    eprintln!("[dm] Legacy giftwrap sent id={}", event_id);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[dm] Legacy giftwrap send failed id={} attempt={} err={}",
+                        event_id, attempt, last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
+        }
         Ok(event_id)
     })
 }
@@ -359,7 +716,14 @@ pub fn wrap_gift(inner_json: String, recipient: String, use_nip44: bool) -> Resu
     let inner_event: Event =
         serde_json::from_str(&inner_json).context("inner_json must be a valid Nostr event JSON")?;
     let recipient_pk = parse_pubkey(&recipient)?;
-    let gift = wrap_gift_event(&inner_event, recipient_pk, use_nip44)?;
+    let keys = {
+        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
+        guard
+            .as_ref()
+            .context("Nostr not initialized. Call init_nostr first.")?
+            .clone()
+    };
+    let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
     Ok(serde_json::to_string(&gift)?)
 }
 
@@ -372,7 +736,7 @@ pub fn unwrap_gift(gift_json: String, my_nsec: Option<String>) -> Result<String>
     let keys = if let Some(nsec) = my_nsec {
         Keys::parse(&nsec)?
     } else {
-        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
         if let Some(k) = guard.as_ref() {
             k.clone()
         } else {
@@ -380,11 +744,12 @@ pub fn unwrap_gift(gift_json: String, my_nsec: Option<String>) -> Result<String>
         }
     };
 
-    let rumor_event = unwrap_gift_event(&gift_event, &keys)?;
+    let unwrapped = unwrap_gift_event(&gift_event, &keys)?;
+    let sender_pk = PublicKey::from_hex(&unwrapped.sender_pubkey)?;
     let output = serde_json::json!({
-        "event": rumor_event,
-        "sender_npub": gift_event.pubkey.to_bech32()?,
-        "sender_hex": gift_event.pubkey.to_hex(),
+        "event": unwrapped.rumor,
+        "sender_hex": unwrapped.sender_pubkey,
+        "sender_npub": sender_pk.to_bech32()?,
         "recipient_npub": keys.public_key().to_bech32()?,
         "recipient_hex": keys.public_key().to_hex(),
     });
@@ -394,7 +759,7 @@ pub fn unwrap_gift(gift_json: String, my_nsec: Option<String>) -> Result<String>
 /// Convert npub to hex pubkey
 #[frb(sync)]
 pub fn npub_to_hex(npub: String) -> Result<String> {
-    let pubkey = PublicKey::from_bech32(&npub)?;
+    let pubkey = parse_pubkey(&npub)?;
     Ok(pubkey.to_hex())
 }
 
@@ -410,7 +775,7 @@ pub fn hex_to_npub(hex: String) -> Result<String> {
 /// Returns event ID
 #[frb(sync)]
 pub fn send_dm(recipient: String, message: String) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let client_lock = NOSTR_CLIENT.lock().await;
         let client = client_lock
             .as_ref()
@@ -443,10 +808,35 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
             .sign_with_keys(&keys)?;
 
         let event_id = event.id;
-        client.send_event(&event).await?;
+        let event_id_hex = event_id.to_hex();
+        eprintln!("[dm] Sending nip04 id={}", event_id_hex);
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&event).await {
+                Ok(_) => {
+                    eprintln!("[dm] NIP-04 sent id={}", event_id_hex);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[dm] NIP-04 send failed id={} attempt={} err={}",
+                        event_id_hex, attempt, last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
+        }
 
         eprintln!("✉️ Sent NIP-04 DM (kind 4): {}", event_id);
-        Ok(event_id.to_hex())
+        Ok(event_id_hex)
     })
 }
 
@@ -455,7 +845,7 @@ pub fn send_dm(recipient: String, message: String) -> Result<String> {
 /// Each message contains: id, from, to, content (plaintext), created_at, direction
 #[frb(sync)]
 pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let (client, keys) = get_client_and_keys().await?;
 
         let my_pubkey = keys.public_key();
@@ -474,51 +864,142 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
         let events_received = client
             .fetch_events(filter_received, std::time::Duration::from_secs(5))
             .await?;
+        eprintln!(
+            "[dm] fetch giftwraps: {} events",
+            events_received.len()
+        );
 
         let mut messages = Vec::new();
+        let mut seen_ids: StdHashSet<String> = StdHashSet::new();
 
         for event in events_received.iter() {
             match unwrap_gift_event(event, &keys) {
-                Ok(rumor) => {
-                    let direction = if rumor.pubkey == my_pubkey { "out" } else { "in" };
+                Ok(unwrapped) => {
+                    let event_id = event.id.to_hex();
+                    if !seen_ids.insert(event_id.clone()) {
+                        continue;
+                    }
+                    let sender_hex = unwrapped
+                        .rumor
+                        .pubkey
+                        .clone()
+                        .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+                    let direction = if sender_hex == my_pubkey.to_hex() { "out" } else { "in" };
+                    let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
                     let other = if direction == "out" {
-                        // recipient from p tag on rumor or gift
-                        rumor
-                            .tags
+                        tags
                             .iter()
-                            .find(|t| t.kind() == TagKind::p())
-                            .and_then(|t| t.content())
-                            .map(|s| s.to_string())
+                            .find(|t| t.first().map(|v| v == "p").unwrap_or(false))
+                            .and_then(|t| t.get(1))
+                            .cloned()
                             .unwrap_or_default()
                     } else {
-                        rumor.pubkey.to_hex()
+                        sender_hex.clone()
                     };
-
-                    // Decrypt inner content (double encryption: giftwrap + inner DM)
-                    let decrypted_content = if direction == "out" {
-                        // Outgoing: decrypt with recipient's pubkey
-                        let recipient_pk = PublicKey::from_hex(&other)?;
-                        nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &rumor.content)
-                            .unwrap_or_else(|_| rumor.content.clone())
-                    } else {
-                        // Incoming: decrypt with sender's pubkey
-                        nip44_decrypt_custom(keys.secret_key(), &rumor.pubkey, &rumor.content)
-                            .unwrap_or_else(|_| rumor.content.clone())
-                    };
+                    let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
+                    if direction == "in" && !content.is_empty() {
+                        if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
+                            content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
+                                .unwrap_or(content);
+                        }
+                    } else if direction == "out" && !content.is_empty() {
+                        if let Ok(recipient_pk) = PublicKey::from_hex(&other) {
+                            content = nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &content)
+                                .unwrap_or(content);
+                        }
+                    }
 
                     messages.push(serde_json::json!({
-                        "id": event.id.to_hex(),
-                        "from": if direction == "out" { my_pubkey.to_hex() } else { rumor.pubkey.to_hex() },
+                        "id": event_id,
+                        "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
                         "to": if direction == "out" { other } else { my_pubkey.to_hex() },
-                        "content": decrypted_content,
-                        "created_at": rumor.created_at.as_u64(),
+                        "content": content,
+                        "created_at": unwrapped.created_at,
                         "direction": direction,
+                        "kind": 1059,
+                        "dm_kind": unwrapped.format,
                     }));
                 }
                 Err(e) => {
-                    eprintln!("Failed to unwrap gift {}: {}", event.id, e);
+                    eprintln!("[dm] Failed to unwrap gift {}: {}", event.id, e);
                 }
             }
+        }
+
+        // Fetch NIP-04 encrypted DMs (kind 4)
+        let mut filter_nip04_in = Filter::new()
+            .kind(Kind::EncryptedDirectMessage)
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), my_pubkey.to_hex())
+            .limit(limit as usize);
+        let mut filter_nip04_out = Filter::new()
+            .kind(Kind::EncryptedDirectMessage)
+            .author(my_pubkey)
+            .limit(limit as usize);
+
+        if since_timestamp > 0 {
+            let since = Timestamp::from(since_timestamp);
+            filter_nip04_in = filter_nip04_in.since(since);
+            filter_nip04_out = filter_nip04_out.since(since);
+        }
+
+        let events_nip04_in = client
+            .fetch_events(filter_nip04_in, std::time::Duration::from_secs(5))
+            .await?;
+        let events_nip04_out = client
+            .fetch_events(filter_nip04_out, std::time::Duration::from_secs(5))
+            .await?;
+        eprintln!(
+            "[dm] fetch nip04: in={}, out={}",
+            events_nip04_in.len(),
+            events_nip04_out.len()
+        );
+
+        for event in events_nip04_in.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id.clone()) {
+                continue;
+            }
+            let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
+                .unwrap_or_else(|e| {
+                    eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
+                    event.content.clone()
+                });
+            messages.push(serde_json::json!({
+                "id": event_id,
+                "from": event.pubkey.to_hex(),
+                "to": my_pubkey.to_hex(),
+                "content": decrypted,
+                "created_at": event.created_at.as_u64(),
+                "direction": "in",
+                "kind": 4,
+                "dm_kind": "nip04",
+            }));
+        }
+
+        for event in events_nip04_out.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id.clone()) {
+                continue;
+            }
+            let recipient_pk = match event_p_tag_pubkey(event) {
+                Some(pk) => pk,
+                None => continue,
+            };
+            let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
+                .unwrap_or_else(|e| {
+                    eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
+                    event.content.clone()
+                });
+            messages.push(serde_json::json!({
+                "id": event_id,
+                "from": my_pubkey.to_hex(),
+                "to": recipient_pk.to_hex(),
+                "content": decrypted,
+                "created_at": event.created_at.as_u64(),
+                "direction": "out",
+                "kind": 4,
+                "dm_kind": "nip04",
+            }));
         }
 
         // Sort by timestamp
@@ -537,7 +1018,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 /// Returns new messages that haven't been returned before
 #[frb(sync)]
 pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
-    RUNTIME.block_on(async {
+    run_block_on(async {
         let (client, keys) = {
             let client_lock = NOSTR_CLIENT.lock().await;
             let keys_lock = NOSTR_KEYS.lock().await;
@@ -560,6 +1041,11 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
             let notification_timeout = tokio::time::Duration::from_secs(2);
             match tokio::time::timeout(notification_timeout, notifications.recv()).await {
                 Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
+                    eprintln!(
+                        "[dm] notif event kind={} id={}",
+                        event.kind.as_u16(),
+                        event.id.to_hex()
+                    );
                     if event.kind == Kind::GiftWrap {
                         let event_id = event.id.to_hex();
 
@@ -581,20 +1067,85 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                             }
                         }
 
-                        if let Ok(rumor) = unwrap_gift_event(&event, &keys) {
-                            // Decrypt inner content (double encryption: giftwrap + inner DM)
-                            let decrypted_content = nip44_decrypt_custom(keys.secret_key(), &rumor.pubkey, &rumor.content)
-                                .unwrap_or_else(|_| rumor.content.clone());
+                        if let Ok(unwrapped) = unwrap_gift_event(&event, &keys) {
+                            let sender_hex = unwrapped
+                                .rumor
+                                .pubkey
+                                .clone()
+                                .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+                            let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
+                            if !content.is_empty() {
+                                if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
+                                    content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
+                                        .unwrap_or_else(|e| {
+                                            eprintln!("[dm] NIP-44 inner decrypt failed {}: {}", event_id, e);
+                                            content
+                                        });
+                                }
+                            }
+                            messages.push(serde_json::json!({
+                                "id": event_id,
+                                "from": sender_hex,
+                                "to": my_pubkey.to_hex(),
+                                "content": content,
+                                "created_at": unwrapped.created_at,
+                                "direction": "in",
+                                "kind": 1059,
+                                "dm_kind": unwrapped.format,
+                            }));
+                        } else {
+                            eprintln!("[dm] Giftwrap event ignored (could not unwrap) {}", event_id);
+                        }
+                    } else if event.kind == Kind::EncryptedDirectMessage {
+                        let event_id = event.id.to_hex();
+
+                        // Check if already returned
+                        {
+                            let mut returned = RETURNED_EVENT_IDS.lock().unwrap();
+                            if returned.contains(&event_id) {
+                                continue;
+                            }
+                            returned.insert(event_id.clone());
+
+                            let mut queue = RETURNED_EVENT_IDS_QUEUE.lock().unwrap();
+                            queue.push_back(event_id.clone());
+                            while queue.len() > RETURNED_EVENT_IDS_MAX {
+                                if let Some(oldest) = queue.pop_front() {
+                                    returned.remove(&oldest);
+                                }
+                            }
+                        }
+
+                        let recipient_pk = match event_p_tag_pubkey(&event) {
+                            Some(pk) => pk,
+                            None => continue,
+                        };
+                        if recipient_pk != my_pubkey {
+                            continue;
+                        }
+
+                        let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
+                            .unwrap_or_else(|e| {
+                                eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
+                                event.content.clone()
+                            });
 
                             messages.push(serde_json::json!({
                                 "id": event_id,
-                                "from": rumor.pubkey.to_hex(),
+                                "from": event.pubkey.to_hex(),
                                 "to": my_pubkey.to_hex(),
-                                "content": decrypted_content,
-                                "created_at": rumor.created_at.as_u64(),
+                                "content": decrypted,
+                                "created_at": event.created_at.as_u64(),
                                 "direction": "in",
+                                "kind": 4,
+                                "dm_kind": "nip04",
                             }));
-                        }
+                    } else {
+                        eprintln!(
+                            "[dm] notif ignored kind={} id={}",
+                            event.kind.as_u16(),
+                            event.id.to_hex()
+                        );
                     }
                 }
                 Ok(_) => {}
@@ -621,24 +1172,16 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
     eprintln!("[encrypt_media] Parsed recipient pubkey");
 
     // Get current keys for conversation key derivation
-    let keys = RUNTIME.block_on(async {
+    let keys = run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         Ok::<Keys, anyhow::Error>(keys_lock.as_ref().context("Not initialized")?.clone())
     })?;
     eprintln!("[encrypt_media] Got current keys");
 
     // Derive shared secret using NIP-44's conversation key (32 bytes)
-    let conversation_key_hex = get_nip44_conversation_key(keys.secret_key(), &recipient_pk)
+    let key_bytes = get_nip44_conversation_key(keys.secret_key(), &recipient_pk)
         .context("Failed to derive conversation key")?;
-    eprintln!("[encrypt_media] Derived conversation key (len: {})", conversation_key_hex.len());
-
-    let key_bytes = hex::decode(&conversation_key_hex)
-        .context("Failed to decode conversation key hex")?;
-
-    if key_bytes.len() != 32 {
-        anyhow::bail!("Conversation key must be 32 bytes, got {}", key_bytes.len());
-    }
-    eprintln!("[encrypt_media] Key bytes decoded: {} bytes", key_bytes.len());
+    eprintln!("[encrypt_media] Derived conversation key (len: {})", key_bytes.len());
 
     // Generate random 12-byte IV for AES-GCM
     let mut iv = [0u8; 12];
@@ -671,6 +1214,34 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
         mime,
         size: bytes.len(),
         encryption: "aes-gcm".to_string(),
+        filename,
+    })
+}
+
+/// Upload unencrypted media to Blossom and return a descriptor.
+#[frb(sync)]
+pub fn upload_media_unencrypted(bytes: Vec<u8>, mime: String, filename: Option<String>) -> Result<MediaDescriptor> {
+    let keys = run_block_on(async {
+        let guard = NOSTR_KEYS.lock().await;
+        if let Some(k) = guard.as_ref() {
+            Ok(k.clone())
+        } else {
+            anyhow::bail!("Nostr not initialized. Call init_nostr first.")
+        }
+    })?;
+
+    let plain_hash = sha256_hex(&bytes)?;
+    let url = upload_to_blossom(&bytes, &plain_hash, &keys)
+        .context("Failed to upload to Blossom")?;
+
+    Ok(MediaDescriptor {
+        url,
+        iv: String::new(),
+        sha256: plain_hash,
+        cipher_sha256: String::new(),
+        mime,
+        size: bytes.len(),
+        encryption: "none".to_string(),
         filename,
     })
 }
@@ -741,7 +1312,7 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
     let keys = if let Some(nsec) = my_nsec {
         Keys::parse(&nsec)?
     } else {
-        let guard = RUNTIME.block_on(async { NOSTR_KEYS.lock().await });
+        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
         if let Some(k) = guard.as_ref() {
             k.clone()
         } else {
@@ -769,8 +1340,7 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
     // Decrypt based on encryption type
     let plaintext = if descriptor.encryption == "aes-gcm" {
         // Derive shared secret using NIP-44's conversation key
-        let conversation_key_hex = get_nip44_conversation_key(keys.secret_key(), &sender_pk)?;
-        let key_bytes = hex::decode(&conversation_key_hex)?;
+        let key_bytes = get_nip44_conversation_key(keys.secret_key(), &sender_pk)?;
 
         let iv_bytes = general_purpose::STANDARD.decode(&descriptor.iv)?;
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)?;
@@ -791,24 +1361,6 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
     }
 
     Ok(plaintext)
-}
-
-fn gzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(data)?;
-    let compressed = encoder.finish()?;
-    Ok(compressed)
-}
-
-fn gunzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
-    if data.len() > 2 && data[0] == 0x1f && data[1] == 0x8b {
-        let mut decoder = GzDecoder::new(data);
-        let mut out = Vec::new();
-        decoder.read_to_end(&mut out)?;
-        return Ok(out);
-    } else {
-        return Ok(data.to_vec());
-    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> Result<String> {
