@@ -498,8 +498,24 @@ async function handleGiftEvent(event) {
     let targetEvent = event;
     if (event.kind === 1059) {
       const innerJson = await decryptGift(priv, event.pubkey, event.content);
-      const inner = JSON.parse(innerJson);
-      if (!nt.verifyEvent(inner)) return;
+      let inner;
+      try {
+        inner = JSON.parse(innerJson);
+      } catch (err) {
+        console.warn("[pushstr] giftwrap inner JSON parse failed", {
+          err: err?.message || String(err),
+          preview: innerJson?.slice(0, 80)
+        });
+        return;
+      }
+      if (!nt.verifyEvent(inner)) {
+        console.warn("[pushstr] giftwrap inner verify failed", {
+          id: inner?.id,
+          pubkey: inner?.pubkey,
+          kind: inner?.kind
+        });
+        return;
+      }
       targetEvent = inner;
     }
     // Accept both kind 4 (old) and kind 14 (NIP-17)
