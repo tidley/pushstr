@@ -530,7 +530,39 @@ async function handleGiftEvent(event) {
         id: inner?.id,
         kind: inner?.kind
       });
-      targetEvent = inner;
+      if (inner.kind === 13 && inner.content) {
+        let rumorJson;
+        try {
+          rumorJson = await decryptDmContent(priv, inner.pubkey, inner.content);
+        } catch (err) {
+          console.warn("[pushstr] sealed rumor decrypt failed", {
+            err: err?.message || String(err),
+            id: inner?.id
+          });
+          return;
+        }
+        let rumor;
+        try {
+          rumor = JSON.parse(rumorJson);
+        } catch (err) {
+          console.warn("[pushstr] sealed rumor JSON parse failed", {
+            err: err?.message || String(err),
+            preview: rumorJson?.slice(0, 80)
+          });
+          return;
+        }
+        console.info("[pushstr] sealed rumor parsed", {
+          kind: rumor?.kind,
+          pubkey: rumor?.pubkey,
+          tags: rumor?.tags
+        });
+        targetEvent = {
+          ...rumor,
+          pubkey: rumor?.pubkey || inner.pubkey
+        };
+      } else {
+        targetEvent = inner;
+      }
     }
     // Accept both kind 4 (old) and kind 14 (NIP-17)
     if (targetEvent.kind !== 4 && targetEvent.kind !== 14) return;
