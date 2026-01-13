@@ -504,7 +504,22 @@ async function handleGiftEvent(event) {
     }
     // Accept both kind 4 (old) and kind 14 (NIP-17)
     if (targetEvent.kind !== 4 && targetEvent.kind !== 14) return;
-    if (!targetEvent.tags.some((t) => t[0] === "p" && t[1] === currentPubkey())) return;
+    const me = currentPubkey();
+    const hasRecipient = targetEvent.tags.some((t) => {
+      if (t[0] !== "p") return false;
+      try {
+        return normalizePubkey(t[1]) === me;
+      } catch (_) {
+        return t[1] === me;
+      }
+    });
+    if (!hasRecipient) {
+      console.warn("[pushstr] DM ignored: missing recipient tag", {
+        kind: targetEvent.kind,
+        outerKind: event.kind
+      });
+      return;
+    }
     const sender = targetEvent.pubkey || "unknown";
     const message = await decryptDmContent(priv, sender, targetEvent.content);
     const dmKind = event.kind === 1059 ? "nip17" : (targetEvent.kind === 4 ? "nip04" : "nip17");
