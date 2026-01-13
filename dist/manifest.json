@@ -1,8 +1,8 @@
 {
-  "manifest_version": 3,
-  "name": "Pushstr Gift DM",
-  "description": "Pushbullet-style notifier over Nostr DMs.",
-  "version": "0.1.0",
+  "manifest_version": 2,
+  "name": "Pushstr",
+  "description": "Secure messaging via Nostr",
+  "version": "0.0.6",
   "icons": {
     "48": "pushstr_48.png",
     "96": "pushstr_96.png",
@@ -12,16 +12,23 @@
     "storage",
     "notifications",
     "contextMenus",
+    "https://blossom.primal.net/*",
     "downloads"
   ],
-  "host_permissions": [
-    "https://blossom.primal.net/*"
-  ],
-  "background": {
-    "service_worker": "background.js",
-    "type": "module"
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pushstr@local",
+      "data_collection_permissions": {
+        "required": [
+          "personalCommunications"
+        ]
+      }
+    }
   },
-  "action": {
+  "background": {
+    "page": "background.html"
+  },
+  "browser_action": {
     "default_title": "Pushstr",
     "default_popup": "popup.html",
     "default_icon": {
@@ -30,20 +37,13 @@
       "128": "pushstr_128.png"
     }
   },
-  "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
-  "options_page": "options.html",
   "web_accessible_resources": [
-    {
-      "resources": [
-        "vendor/nostr-tools.bundle.js",
-        "wasm_crypto.js",
-        "wasm_crypto_bg.wasm"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
+    "vendor/nostr-tools.bundle.js",
+    "wasm_crypto.js",
+    "wasm_crypto_bg.wasm"
   ]
 }

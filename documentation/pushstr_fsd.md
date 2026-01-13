@@ -1,14 +1,14 @@
 # Pushstr Functional Specification Document
 
-Version: 0.6
-Last updated: 2026-01-13
+Version: 0.0.6
+Last updated: 2026-01-14
 Owner: Pushstr
 
 ## 1. Purpose
 Define the functional scope, behavior, and system boundaries for the Pushstr project, including the browser extension, mobile app, and Rust core.
 
 ## 2. Product Summary
-Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, end-to-end encrypted direct messaging (DMs) and file sharing between devices using NIP-04 and NIP-59 giftwrap flows (NIP-44 v2 encryption), plus legacy giftwrap compatibility for older clients, without centralized servers or accounts. Users control their keys and can create multiple identities for privacy.
+Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, end-to-end encrypted direct messaging (DMs) and file sharing between devices using NIP-04 and NIP-59 giftwrap flows (NIP-44 v2 encryption), plus legacy giftwrap compatibility for older clients, without centralised servers or accounts. Users control their keys and can create multiple identities for privacy.
 
 ## 3. Goals
 - Fast, private, reliable messaging across devices.
@@ -177,7 +177,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 
 ### 8.5 Contact Add via QR
 1. Scan QR containing npub.
-2. Normalize to hex pubkey.
+2. Normalise to hex pubkey.
 3. Add to contact list.
 
 ## 9. Non-Functional Requirements
@@ -199,6 +199,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Background execution limits on mobile OSs can delay sync.
 - Large attachments may exceed device memory limits.
 - Cross-client NIP-59 compatibility depends on correct relay lists and encryption.
+- Extension storage is bound to the extension ID; dev builds must load from the same folder or use a fixed manifest key to avoid new IDs.
 
 ## 12. Current State Notes
 - NIP-04 and NIP-59 giftwrap DMs are reliable across Pushstr, the browser extension, and Amethyst.
@@ -209,3 +210,4 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Mobile/extension video viewer uses bottom controls with 10s skip buttons and a timeline scrubber that auto-hides during playback.
 - Extension styling is aligned with mobile (near-black history/composer background, compact bubbles, refined input layout).
 - Mobile toast notifications are centered and width-limited to content rather than full width.
+- Extension background defers UI requests until storage and keys are initialised to prevent key mismatches.

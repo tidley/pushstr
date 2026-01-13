@@ -175,3 +175,4 @@ node_modules/
 # Rust build artefacts
 pushstr_rust/target/
 **/target/
+.readme

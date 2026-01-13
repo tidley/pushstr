@@ -3,7 +3,7 @@ description: 'Pushstr mobile app - Nostr Giftwrapped DMs and data sharing'
 
 publish_to: 'none'
 
-version: 0.0.5
+version: 0.0.6
 
 environment:
   sdk: ^3.10.1
