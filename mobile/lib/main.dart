@@ -2198,6 +2198,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildAttachOption(
                 icon: Icons.photo_camera,
                 label: 'Camera',
+                color: Colors.redAccent,
                 onTap: () {
                   Navigator.pop(ctx);
                   _attachImageFromCamera();
@@ -2206,6 +2207,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildAttachOption(
                 icon: Icons.photo_library,
                 label: 'Gallery',
+                color: Colors.lightBlueAccent,
                 onTap: () {
                   Navigator.pop(ctx);
                   _attachImage();
@@ -2214,6 +2216,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildAttachOption(
                 icon: Icons.videocam,
                 label: 'Video Cam',
+                color: Colors.redAccent,
                 onTap: () {
                   Navigator.pop(ctx);
                   _attachVideo(ImageSource.camera);
@@ -2222,6 +2225,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildAttachOption(
                 icon: Icons.video_library,
                 label: 'Video',
+                color: Colors.lightBlueAccent,
                 onTap: () {
                   Navigator.pop(ctx);
                   _attachVideo(ImageSource.gallery);
@@ -2239,6 +2243,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildAttachOption(
                 icon: Icons.audiotrack,
                 label: 'Audio',
+                color: Colors.lightBlueAccent,
                 onTap: () {
                   Navigator.pop(ctx);
                   _attachAudio();
@@ -2247,6 +2252,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _buildAttachOption(
                 icon: Icons.insert_drive_file,
                 label: 'File',
+                color: Colors.lightBlueAccent,
                 onTap: () {
                   Navigator.pop(ctx);
                   _attachFile();

@@ -72,7 +72,8 @@ let settings = {
   keys: [],
   useGiftwrap: true, // default to giftwrap
   useNip44: true, // default to nip44 for inner/gift encryption
-  lastRecipient: null
+  lastRecipient: null,
+  relayFailures: {}
 };
 let messages = [];
 const MESSAGE_LIMIT = 200;
@@ -81,6 +82,7 @@ let contextMenuReady = false;
 const BLOSSOM_SERVER = "https://blossom.primal.net";
 const PUBLISH_RETRY_ATTEMPTS = 3;
 const PUBLISH_RETRY_BASE_MS = 400;
+const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
 const BLOSSOM_UPLOAD_PATH = "upload";
 let suppressNotifications = true;
 
@@ -261,6 +263,7 @@ async function loadSettings() {
   settings.relays = mergeDefaultRelays(settings.relays);
   settings.recipientsByKey = settings.recipientsByKey || {};
   settings.messagesByKey = settings.messagesByKey || {};
+  settings.relayFailures = settings.relayFailures || {};
   settings.recipients = normalizeRecipients(settings.recipients || []);
   if (settings.lastRecipient) settings.lastRecipient = normalizePubkey(settings.lastRecipient);
   settings.keys = settings.keys || [];
@@ -366,20 +369,56 @@ async function connect() {
   const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
   const filter = { kinds, "#p": [me] };
   const relayList = activeRelays.length ? activeRelays : settings.relays;
-  sub = pool.subscribeMany(relayList, filter, {
-    onevent: handleGiftEvent
-  });
-  console.info("[pushstr] subscribed", [filter], "relays", relayList);
+  if (relayList.length) {
+    sub = pool.subscribeMany(relayList, filter, {
+      onevent: handleGiftEvent
+    });
+    console.info("[pushstr] subscribed", [filter], "relays", relayList);
+  } else {
+    console.warn("[pushstr] no relays available to subscribe");
+  }
 }
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function relayFailureMap() {
+  settings.relayFailures = settings.relayFailures || {};
+  return settings.relayFailures;
+}
+
+function cleanupRelayFailures() {
+  const failures = relayFailureMap();
+  const now = Date.now();
+  let changed = false;
+  for (const [url, ts] of Object.entries(failures)) {
+    if (!ts || now - ts > RELAY_COOLDOWN_MS) {
+      delete failures[url];
+      changed = true;
+    }
+  }
+  if (changed) {
+    persistSettings().catch(() => {});
+  }
+}
+
+function isRelayInCooldown(url) {
+  const ts = relayFailureMap()[url];
+  return typeof ts === "number" && Date.now() - ts < RELAY_COOLDOWN_MS;
+}
+
+function markRelayFailure(url) {
+  relayFailureMap()[url] = Date.now();
+  persistSettings().catch(() => {});
+}
+
 async function resolveRelays(relays) {
   if (!pool) return relays;
+  cleanupRelayFailures();
+  const candidates = relays.filter((url) => !isRelayInCooldown(url));
   const results = await Promise.all(
-    relays.map(async (url) => {
+    candidates.map(async (url) => {
       try {
         await Promise.race([
           pool.ensureRelay(url),
@@ -393,6 +432,7 @@ async function resolveRelays(relays) {
           relay: url,
           error: err?.message || String(err)
         });
+        markRelayFailure(url);
         return null;
       }
     })
