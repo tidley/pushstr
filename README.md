@@ -82,22 +82,8 @@ flutter build apk --release
 flutter install --use-application-binary build/app/outputs/flutter-apk/app-release.apk
 ```
 
-## Chrome Web Store Packaging
-The Web Store expects a ZIP (not CRX). Use the ZIP created by `npm run package`.
-
-Checklist before upload:
-- `manifest.json` is at the ZIP root
-- no `src/`, `.map`, or `node_modules` in the ZIP
-
-## Key Storage Notes (Extension)
-Extension storage is tied to the extension ID. In development:
-- Always load unpacked from the same folder, or
-- Add a fixed `key` field to `manifest.chrome.json` to keep a stable ID.
-
-For Web Store builds, remove any `key` entry; the store assigns a stable ID.
-
 ## Troubleshooting
-- If messages do not appear, verify relays and check background logs (`background.js`).
+- If messages do not appear, reload extension, verify relays and check background logs (`background.js`).
 - If giftwrap appears but content is missing, confirm inner kind 14 is plaintext (NIP-59 compatible).
 - If the extension shows a new npub after reload, the extension ID likely changed.
 
