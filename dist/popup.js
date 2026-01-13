@@ -8943,7 +8943,7 @@ async function init() {
     status("No key");
     return;
   }
-  pubkeyEl.textContent = state.pubkey ? `npub: ${short(state.pubkey)}` : "No key";
+  pubkeyEl.textContent = state.pubkey ? `${short(state.pubkey)}` : 'No key';
   if (!selectedContact) {
     const recipients = Array.isArray(state.recipients) ? state.recipients : [];
     selectedContact = state.lastRecipient || recipients[0] && recipients[0].pubkey || null;

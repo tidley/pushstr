@@ -1,7 +1,7 @@
 # Pushstr Functional Specification Document
 
-Version: 0.5
-Last updated: 2026-01-12
+Version: 0.6
+Last updated: 2026-01-13
 Owner: Pushstr
 
 ## 1. Purpose
@@ -71,6 +71,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
   - Pushstr section: `[pushstr:media]` JSON descriptor `[/pushstr:media]` (filtered by Pushstr apps).
 - Render local previews for newly sent/received media.
 - Allow download of attachments from the message list.
+- Cache decrypted media locally for quick re-open; older messages can prompt decrypt-on-demand.
 - Warn users about large files (default recommended max 20MB).
 - Present attachment options in a grid picker with concise labels (e.g., Camera, Gallery, Video).
 - Browser extension renders inline audio/video players for attachments.
@@ -82,6 +83,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Read recipient relay list (kind 10050) when sending giftwraps.
 - Send events through all connected relays.
 - Default public relays: wss://relay.damus.io, wss://relay.primal.net, wss://nos.lol, wss://nostr.mom, wss://relay.nostr.band.
+- Relay publish uses retry/backoff; failed relays enter a short cooldown and do not raise unhandled errors in the extension.
 
 ### 6.6 Sync & Background Processing (Mobile)
 - Load cached messages immediately at startup.
@@ -146,22 +148,21 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 ### 7.5 Giftwrap Envelope
 - Giftwrap event (kind 1059)
 - Sealed rumor (kind 13) encrypted with NIP-44 v2
-- Rumor/inner event (kind 14) unsigned
+- Inner event (kind 14) signed by sender; plaintext content inside the sealed rumor
 
 ## 8. Workflows
 
 ### 8.1 Send Giftwrap DM
 1. Compose message for contact.
-2. Build inner kind 14 event with p-tag and alt.
-3. Convert to rumor (unsigned JSON).
-4. Encrypt rumor into sealed event (kind 13) using NIP-44 v2.
-5. Encrypt sealed event into giftwrap (kind 1059) with ephemeral key.
+2. Build inner kind 14 event with p-tag and alt, signed by sender.
+3. Encrypt inner event JSON into sealed event (kind 13) using NIP-44 v2.
+4. Encrypt sealed event into giftwrap (kind 1059) with ephemeral key.
 6. Publish to recipient DM relays.
 
 ### 8.2 Receive Giftwrap DM
 1. Listen for kind 1059 events tagged with our pubkey.
 2. Decrypt giftwrap with NIP-44.
-3. Parse sealed event and decrypt rumor.
+3. Parse sealed event and decrypt inner event (kind 13 -> kind 14).
 4. Render message in history and update contact activity.
 
 ### 8.3 Send NIP-04 DM
@@ -200,8 +201,9 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Cross-client NIP-59 compatibility depends on correct relay lists and encryption.
 
 ## 12. Current State Notes
-- NIP-04 and NIP-59 giftwrap DMs DMs are reliable across Pushstr, the browser extension, and Amethyst.
-- Giftwrap uses NIP-44 v2 with legacy giftwrap support for older clients.
+- NIP-04 and NIP-59 giftwrap DMs are reliable across Pushstr, the browser extension, and Amethyst.
+- Giftwrap uses NIP-44 v2 sealed rumor; inner kind 14 content is plaintext inside the sealed payload.
+- Legacy giftwrap support remains for older clients (inner kind 14 content encrypted with NIP-44).
 - Relay defaults are aligned with Amethyst’s bootstrap inbox set; users can add/remove relays in settings.
 - Chat history now preserves scroll position and exposes a scroll-to-bottom indicator when new messages arrive.
 - Mobile/extension video viewer uses bottom controls with 10s skip buttons and a timeline scrubber that auto-hides during playback.
