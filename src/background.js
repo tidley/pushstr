@@ -498,6 +498,10 @@ async function handleGiftEvent(event) {
     let targetEvent = event;
     if (event.kind === 1059) {
       const innerJson = await decryptGift(priv, event.pubkey, event.content);
+      console.info("[pushstr] giftwrap inner raw", {
+        len: innerJson?.length || 0,
+        preview: innerJson?.slice(0, 120)
+      });
       let inner;
       try {
         inner = JSON.parse(innerJson);
