@@ -105,6 +105,8 @@ For Web Store builds, remove any `key` entry; the store assigns a stable ID.
 - Functional spec: `documentation/pushstr_fsd.md`
 - Mobile notes: `MOBILE_APP_GUIDE.md`, `MOBILE_APP_SUMMARY.md`
 
+---
+
 ## Images
 
 ### Desktop extension
@@ -112,3 +114,6 @@ For Web Store builds, remove any `key` entry; the store assigns a stable ID.
 
 ### Mobile app
 <img width="540" height="1200" alt="image" src="https://github.com/user-attachments/assets/01a76f36-dbf2-417e-a616-f29e90bb7596" />
+
+<img width="540" height="1200" alt="image" src="https://github.com/user-attachments/assets/fdc65467-6848-4465-9ab6-b9cfab5a815e" />
+
