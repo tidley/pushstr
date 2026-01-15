@@ -163,6 +163,18 @@ async function handleMessage(msg) {
     return { ok: true };
   }
 
+  if (msg.type === "resend-message") {
+    const payload = msg.content || msg.message?.content;
+    const recipientRaw = msg.recipient || msg.message?.to || msg.message?.recipient;
+    if (!payload || !recipientRaw) {
+      return { ok: false, error: "missing payload or recipient" };
+    }
+    const recipient = normalizePubkey(recipientRaw);
+    const dmKind = msg.dm_kind || msg.message?.dm_kind || msg.message?.outerKind;
+    const modeOverride = dmKind === "nip04" || dmKind === 4 ? "nip04" : "nip17";
+    return await sendGift(recipient, payload, modeOverride);
+  }
+
   if (msg.type === "set-dm-mode") {
     const recipient = normalizePubkey(msg.recipient);
     const mode = msg.mode === "nip04" ? "nip04" : "nip17";
@@ -627,13 +639,13 @@ async function handleGiftEvent(event) {
   }
 }
 
-async function sendGift(recipient, content) {
+async function sendGift(recipient, content, modeOverride = null) {
   const priv = currentPrivkeyHex();
   if (!priv) throw new Error("No key configured");
   const chosen = recipient || settings.lastRecipient || (settings.recipients[0] && settings.recipients[0].pubkey);
   if (!chosen) throw new Error("No recipient set");
   const recipientHex = normalizePubkey(chosen);
-  const dmMode = getDmModeForRecipient(recipientHex);
+  const dmMode = modeOverride || getDmModeForRecipient(recipientHex);
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1000);

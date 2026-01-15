@@ -607,6 +607,23 @@ main {
   animation: none;
 }
 
+.resend-btn {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: color 150ms ease, transform 120ms ease;
+}
+
+.resend-btn:hover {
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
 
 .read-more {
   margin-left: 4px;

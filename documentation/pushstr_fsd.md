@@ -75,6 +75,8 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Warn users about large files (default recommended max 20MB).
 - Present attachment options in a grid picker with concise labels (e.g., Camera, Gallery, Video).
 - Browser extension renders inline audio/video players for attachments.
+- Android saves downloaded media via DownloadManager/MediaStore into `Downloads/Pushstr` without a directory picker.
+- iOS download taps open a share sheet for “Save to Files” or other export actions.
 
 ### 6.5 Relay Handling
 - Connect to default public relays for general messaging.

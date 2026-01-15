@@ -1065,6 +1065,148 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Map<String, dynamic> _buildResendPayload(Map<String, dynamic> message) {
+    final text = (message['content'] ?? '').toString();
+    final media = message['media'];
+    String payload = text;
+    String localText = text;
+    Map<String, dynamic>? localMedia;
+
+    if (media is Map<String, dynamic>) {
+      localMedia = media;
+      if (localText.isEmpty || localText == '(attachment)') {
+        localText = '(attachment)';
+      }
+      Map<String, dynamic>? descriptor;
+      final rawDescriptor = media['descriptor'];
+      if (rawDescriptor is Map) {
+        descriptor = Map<String, dynamic>.from(rawDescriptor);
+      } else if (rawDescriptor is String) {
+        try {
+          final parsed = jsonDecode(rawDescriptor);
+          if (parsed is Map) descriptor = Map<String, dynamic>.from(parsed);
+        } catch (_) {
+          descriptor = null;
+        }
+      }
+      descriptor ??= {
+        'url': media['url'],
+        'iv': media['iv'],
+        'sha256': media['sha256'],
+        'cipher_sha256': media['cipher_sha256'],
+        'mime': media['mime'],
+        'size': media['size'],
+        'encryption': media['encryption'],
+        'filename': media['filename'],
+      };
+
+      if (descriptor['url'] != null) {
+        final descriptorJson = jsonEncode({'media': descriptor});
+        final url = descriptor['url']?.toString() ?? '';
+        final filename = descriptor['filename']?.toString() ?? 'attachment';
+        final sizeValue = descriptor['size'] is int
+            ? descriptor['size'] as int
+            : int.tryParse(descriptor['size']?.toString() ?? '');
+        final sizeLabel =
+            sizeValue != null ? _formatBytes(sizeValue) : null;
+        final attachmentLine = sizeLabel != null
+            ? 'Attachment: $filename ($sizeLabel)'
+            : 'Attachment: $filename';
+        final lines = <String>[
+          if (text.isNotEmpty && text != '(attachment)') text,
+          attachmentLine,
+          if (url.isNotEmpty) url,
+          '',
+          _pushstrMediaStart,
+          descriptorJson,
+          _pushstrMediaEnd,
+        ];
+        payload = lines.join('\n');
+      }
+    }
+
+    return {'payload': payload, 'text': localText, 'media': localMedia};
+  }
+
+  Future<void> _resendMessage(Map<String, dynamic> message) async {
+    if (nsec == null || nsec!.isEmpty) {
+      setState(() {
+        lastError = 'Missing profile key; please re-import or pick a profile.';
+      });
+      return;
+    }
+    final recipient = message['to']?.toString() ?? selectedContact;
+    if (recipient == null || recipient.isEmpty) {
+      setState(() {
+        lastError = 'Missing recipient; select a contact.';
+      });
+      return;
+    }
+
+    try {
+      final built = _buildResendPayload(message);
+      final payload = built['payload'] as String;
+      final localMedia = built['media'] as Map<String, dynamic>?;
+      final localText = built['text'] as String;
+      final dmKind = (message['dm_kind'] ?? 'nip59').toString();
+      final useLegacyDm = dmKind == 'nip04';
+      final useLegacyGiftwrap = dmKind == 'legacy_giftwrap';
+
+      final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+      _sessionMessages.add(localId);
+      final displayContent = localMedia != null
+          ? {'text': localText, 'media': localMedia}
+          : await _decodeContent(payload, npub ?? '', localId);
+      setState(() {
+        messages.add(<String, dynamic>{
+          'id': localId,
+          'from': npub ?? '',
+          'to': recipient,
+          'content': displayContent['text'],
+          'media': displayContent['media'],
+          'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          'direction': 'out',
+          'kind': useLegacyDm ? 4 : 1059,
+          'dm_kind': useLegacyDm
+              ? 'nip04'
+              : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59'),
+        });
+        lastError = null;
+      });
+
+      _scrollToBottom(force: true);
+      unawaited(_saveMessages());
+
+      if (useLegacyDm) {
+        await RustSyncWorker.sendLegacyDm(
+          recipient: recipient,
+          message: payload,
+          nsec: nsec!,
+        );
+      } else if (useLegacyGiftwrap) {
+        await RustSyncWorker.sendLegacyGiftDm(
+          recipient: recipient,
+          message: payload,
+          nsec: nsec!,
+        );
+      } else {
+        await RustSyncWorker.sendGiftDm(
+          recipient: recipient,
+          content: payload,
+          nsec: nsec!,
+          useNip44: true,
+        );
+      }
+      if (!mounted) return;
+      _showThemedToast('Resent', preferTop: true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        lastError = 'Resend failed: $e';
+      });
+    }
+  }
+
   String _normalizeContactInput(String input) {
     var trimmed = input.trim();
     if (trimmed.isEmpty) {
@@ -2615,6 +2757,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);
+        final resendBtn = isOut
+            ? IconButton(
+                icon: const Icon(Icons.refresh, size: 18),
+                tooltip: 'Resend',
+                onPressed: () => _resendMessage(m),
+              )
+            : null;
         final actions = !isOut
             ? Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2711,6 +2860,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   if (attachmentBadge != null) ...[
                     const SizedBox(width: 6),
                     attachmentBadge,
+                  ],
+                  if (resendBtn != null) ...[
+                    const SizedBox(width: 6),
+                    resendBtn,
                   ],
                 ],
               ),
@@ -3511,20 +3664,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _saveMedia(Uint8List bytes, String mime) async {
     try {
+      final ext = extensionFromMime(mime);
+      final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      if (Platform.isAndroid) {
+        final uri = await _storageChannel.invokeMethod<String>(
+          'saveToDownloads',
+          {'bytes': bytes, 'mime': mime, 'filename': filename},
+        );
+        if (!mounted) return;
+        if (uri == null) {
+          _showThemedToast('Save failed', preferTop: true);
+        } else {
+          _showThemedToast('Saved to Downloads', preferTop: true);
+        }
+        return;
+      }
+
+      if (Platform.isIOS) {
+        final file = await _writeTempMediaFile(bytes, mime);
+        final ok = await _storageChannel.invokeMethod<bool>(
+          'shareFile',
+          {'path': file.path, 'mime': mime, 'filename': filename},
+        );
+        if (!mounted) return;
+        if (ok != true) {
+          _showThemedToast('Save failed', preferTop: true);
+        }
+        return;
+      }
+
       final selectedDir = await FilePicker.platform.getDirectoryPath(
         dialogTitle: 'Choose where to save',
       );
       if (selectedDir == null) {
-        if (mounted)
+        if (mounted) {
           _showThemedToast(
             'Save cancelled',
             preferTop: true,
             duration: const Duration(milliseconds: 800),
           );
+        }
         return;
       }
-      final ext = extensionFromMime(mime);
-      final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
       final file = File('$selectedDir/$filename');
       await file.writeAsBytes(bytes);
       if (!mounted) return;

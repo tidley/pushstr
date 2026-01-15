@@ -1,8 +1,11 @@
 package com.pushstr.pushstr_mobile
 
+import android.app.DownloadManager
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -41,6 +44,16 @@ class MainActivity : FlutterActivity() {
                 "exportPrefsBackup" -> {
                     val name = call.argument<String>("name") ?: "pushstr_prefs_backup.xml"
                     result.success(exportPrefsBackup(name))
+                }
+                "saveToDownloads" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                    val filename = call.argument<String>("filename") ?: "pushstr_download"
+                    if (bytes == null) {
+                        result.error("missing_bytes", "Missing bytes", null)
+                    } else {
+                        result.success(saveToDownloads(bytes, mime, filename))
+                    }
                 }
                 "clearPrefsBackup" -> result.success(clearPrefsBackup())
                 else -> result.notImplemented()
@@ -150,6 +163,41 @@ class MainActivity : FlutterActivity() {
             }
         }
         return uri.toString()
+    }
+
+    private fun saveToDownloads(bytes: ByteArray, mime: String, filename: String): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                    put(MediaStore.Downloads.MIME_TYPE, mime)
+                    put(MediaStore.Downloads.RELATIVE_PATH, "Download")
+                }
+                val resolver = contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+                resolver.openOutputStream(uri)?.use { output ->
+                    output.write(bytes)
+                }
+                uri.toString()
+            } else {
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val file = File(dir, filename)
+                FileOutputStream(file).use { it.write(bytes) }
+                val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+                dm.addCompletedDownload(
+                    filename,
+                    filename,
+                    true,
+                    mime,
+                    file.absolutePath,
+                    file.length(),
+                    true
+                )
+                file.absolutePath
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun clearPrefsBackup(): Boolean {

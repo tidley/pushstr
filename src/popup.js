@@ -293,6 +293,27 @@ function renderHistory() {
         buildLockBadge(renderResult.mediaEncrypted !== false),
       );
     }
+    if (m.direction === 'out') {
+      const resendBtn = document.createElement('button');
+      resendBtn.className = 'resend-btn';
+      resendBtn.title = 'Resend';
+      resendBtn.textContent = '↻';
+      resendBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await safeSend({
+            type: 'resend-message',
+            recipient: m.to,
+            content: m.content,
+            dm_kind: m.dm_kind,
+          });
+          status('Resent');
+        } catch (err) {
+          status(`Resend failed: ${err?.message || err}`);
+        }
+      });
+      metaRow.appendChild(resendBtn);
+    }
     if (m.direction !== 'out') {
       const copyBtn = document.createElement('button');
       copyBtn.className = 'copy-btn';
@@ -1580,17 +1601,30 @@ function attachFile() {
 
 async function handlePaste(event) {
   const items = event.clipboardData?.items || [];
-  let handled = false;
+  const files = [];
   for (const item of items) {
     if (item.kind === 'file') {
-      event.preventDefault();
       const file = item.getAsFile();
-      if (file) await handleFileAttachment(file);
-      handled = true;
-      break;
+      if (file) files.push(file);
     }
   }
-  if (handled) return;
+  if (files.length) {
+    event.preventDefault();
+    await handleFileAttachment(files[0]);
+    return;
+  }
+  for (const item of items) {
+    if (item.kind === 'string') {
+      const data = await new Promise((resolve) => item.getAsString(resolve));
+      const trimmed = (data || '').trim();
+      if (trimmed.startsWith('data:')) {
+        event.preventDefault();
+        const file = dataUrlToFile(trimmed, 'pasted');
+        if (file) await handleFileAttachment(file);
+        return;
+      }
+    }
+  }
 }
 
 async function handleFileAttachment(file) {
@@ -1622,6 +1656,20 @@ function buildPushstrAttachmentPayload(text, media) {
   if (url) lines.push(url);
   lines.push('', PUSHSTR_MEDIA_START, descriptorJson, PUSHSTR_MEDIA_END);
   return lines.join('\n');
+}
+
+function dataUrlToFile(dataUrl, basename) {
+  try {
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+    const mime = match[1];
+    const b64 = match[2];
+    const bytes = b64ToBytes(b64);
+    const ext = mime.includes('/') ? mime.split('/')[1] : 'bin';
+    return new File([bytes], `${basename}.${ext}`, { type: mime });
+  } catch (_) {
+    return null;
+  }
 }
 
 function showPreview(file) {
