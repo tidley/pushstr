@@ -643,71 +643,10 @@ pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Resu
     })
 }
 
-/// Send a legacy giftwrap DM compatible with the Pushstr browser extension.
+/// Send a giftwrap DM using the standard NIP-59 sealed rumor path.
 #[frb(sync)]
 pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String> {
-    run_block_on(async {
-        let (client, keys) = get_client_and_keys().await?;
-        let recipient_pk = parse_pubkey(&recipient)?;
-        let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
-
-        // Inner DM (kind 14) with NIP-44 encrypted content
-        let ciphertext = nip44_encrypt_custom(keys.secret_key(), &recipient_pk, &content)?;
-        let inner_event = EventBuilder::new(Kind::Custom(14), ciphertext)
-            .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
-            .tag(Tag::custom(
-                TagKind::Custom("alt".into()),
-                vec!["Direct message".to_string()],
-            ))
-            .sign_with_keys(&keys)?;
-
-        // Giftwrap with random timestamp and expiration tag (matches browser extension)
-        let wrapper_keys = Keys::generate();
-        let inner_json = serde_json::to_string(&inner_event)?;
-        let sealed_content = nip44_encrypt_custom(wrapper_keys.secret_key(), &recipient_pk, &inner_json)?;
-
-        let now = Timestamp::now();
-        let random_timestamp = random_timestamp_within_two_days();
-        let expiration = now.as_u64() + (24 * 60 * 60);
-        let tags = vec![
-            Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]),
-            Tag::expiration(Timestamp::from(expiration)),
-        ];
-
-        let mut builder = EventBuilder::new(Kind::GiftWrap, sealed_content)
-            .custom_created_at(random_timestamp);
-        for tag in tags {
-            builder = builder.tag(tag);
-        }
-        let gift = builder.sign_with_keys(&wrapper_keys)?;
-        let event_id = gift.id.to_hex();
-        eprintln!("[dm] Sending legacy giftwrap id={}", event_id);
-        let mut last_err = None;
-        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
-            match client.send_event(&gift).await {
-                Ok(_) => {
-                    eprintln!("[dm] Legacy giftwrap sent id={}", event_id);
-                    last_err = None;
-                    break;
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                    eprintln!(
-                        "[dm] Legacy giftwrap send failed id={} attempt={} err={}",
-                        event_id, attempt, last_err.as_ref().unwrap()
-                    );
-                    if attempt < PUBLISH_RETRY_ATTEMPTS {
-                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
-                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                    }
-                }
-            }
-        }
-        if let Some(err) = last_err {
-            return Err(err.into());
-        }
-        Ok(event_id)
-    })
+    send_gift_dm(recipient, content, true)
 }
 
 /// Wrap a NIP-17 giftwrap from a provided inner event JSON
