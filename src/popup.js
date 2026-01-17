@@ -1585,10 +1585,9 @@ function buildDmBadge(kind) {
 function buildReceiptBadge(message) {
   if (!message || message.direction !== 'out') return null;
   const hasRead = message.read_at || message.read;
-  if (!hasRead) return null;
   const badge = document.createElement('span');
-  badge.className = 'badge receipt';
-  badge.textContent = 'Read';
+  badge.className = `badge receipt ${hasRead ? 'read' : 'sent'}`;
+  badge.textContent = hasRead ? 'R' : 'S';
   return badge;
 }
 

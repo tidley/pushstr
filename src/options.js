@@ -59,6 +59,7 @@ const saveBtn = document.getElementById("save");
 const copyNsecBtn = document.getElementById("export");
 const copyNpubBtn = document.getElementById("exportNpub");
 const backupProfileBtn = document.getElementById("backupProfile");
+const importProfileBtn = document.getElementById("importProfile");
 const relayInput = document.getElementById("relayInput");
 const relayError = document.getElementById("relayError");
 const relayList = document.getElementById("relayList");
@@ -102,6 +103,7 @@ document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
 copyNpubBtn.addEventListener("click", exportNpub);
 backupProfileBtn?.addEventListener("click", backupProfile);
+importProfileBtn?.addEventListener("click", importProfile);
 document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
 document.getElementById("addContact").addEventListener("click", addContactFromForm);
@@ -445,6 +447,30 @@ async function backupProfile() {
   } catch (err) {
     status(`Backup failed: ${err?.message || err}`);
   }
+}
+
+async function importProfile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      const res = await safeSend({ type: "import-profile", backup });
+      if (!res?.ok) {
+        status(res?.error || "Import failed");
+        return;
+      }
+      status("Profile imported");
+      await init();
+    } catch (err) {
+      status(`Import failed: ${err?.message || err}`);
+    }
+  };
+  input.click();
 }
 
 async function showNpubQr() {

@@ -455,6 +455,88 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+
+  String _normalizeBackupPubkey(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (trimmed.startsWith('npub') || trimmed.startsWith('nprofile')) {
+      try {
+        return api.npubToHex(npub: trimmed);
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  Future<void> _importProfileBackup() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    try {
+      final file = result.files.first;
+      final bytes = file.bytes ?? (file.path != null
+          ? await File(file.path!).readAsBytes()
+          : null);
+      if (bytes == null) {
+        _showThemedToast('Import failed: file unreadable', preferTop: true);
+        return;
+      }
+      final jsonText = utf8.decode(bytes);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map) {
+        _showThemedToast('Import failed: invalid JSON', preferTop: true);
+        return;
+      }
+      final profile = decoded['profile'];
+      if (profile is! Map || profile['nsec'] is! String) {
+        _showThemedToast('Import failed: missing nsec', preferTop: true);
+        return;
+      }
+      final nsec = (profile['nsec'] as String).trim();
+      if (nsec.isEmpty) {
+        _showThemedToast('Import failed: empty nsec', preferTop: true);
+        return;
+      }
+      final nickname = (profile['nickname'] ?? '').toString().trim();
+
+      final prefs = await SharedPreferences.getInstance();
+      final contactsKey = _contactsKeyFor(nsec);
+      final contactsJson = decoded['contacts'];
+      if (contactsJson is List) {
+        final entries = <String>[];
+        final seen = <String>{};
+        for (final entry in contactsJson) {
+          if (entry is! Map) continue;
+          final rawPubkey = entry['pubkey']?.toString() ?? '';
+          final pubkey = _normalizeBackupPubkey(rawPubkey);
+          if (pubkey.isEmpty || seen.contains(pubkey)) continue;
+          seen.add(pubkey);
+          final nick = entry['nickname']?.toString() ?? '';
+          entries.add('$nick|$pubkey');
+        }
+        if (entries.isNotEmpty) {
+          await prefs.setStringList(contactsKey, entries);
+        }
+      }
+
+      setState(() {
+        profiles.add({'nsec': nsec, 'nickname': nickname});
+        selectedProfileIndex = profiles.length - 1;
+        profileNickname = nickname;
+        nicknameCtrl.text = nickname;
+      });
+      _markDirty();
+      await _saveSettings();
+      await _refreshProfileNpubs();
+      _showThemedToast('Profile imported', preferTop: true);
+    } catch (e) {
+      _showThemedToast('Import failed: $e', preferTop: true);
+    }
+  }
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
   String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
@@ -720,7 +802,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isGiftwrap =
         dmKind == 'nip59' || dmKind == 'legacy_giftwrap' || kind == 1059;
     if (!isNip04 && !isGiftwrap) return null;
-    final iconData = isGiftwrap ? Icons.visibility_off : Icons.visibility;
+    final iconData = isGiftwrap ? Icons.lock : Icons.lock_open;
     final color = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
     final label = isGiftwrap ? '17' : '04';
     return Row(
@@ -739,7 +821,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final enabled = target.isNotEmpty;
     final mode = enabled ? _effectiveDmMode(target) : 'nip59';
     final isGiftwrap = mode != 'nip04';
-    final iconData = isGiftwrap ? Icons.visibility_off : Icons.visibility;
+    final iconData = isGiftwrap ? Icons.lock : Icons.lock_open;
 
     final activeColor = isGiftwrap
         ? const Color(0xFF22C55E)
@@ -3055,19 +3137,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget? _buildReadReceiptBadge(Map<String, dynamic> message) {
     if (message['direction'] != 'out') return null;
-    final hasRead =
-        message['read_at'] != null || message['read'] == true;
-    if (!hasRead) return null;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.done_all, size: 12, color: Color(0xFF22C55E)),
-        const SizedBox(width: 4),
-        const Text(
-          'Read',
-          style: TextStyle(fontSize: 11, color: Color(0xFF22C55E)),
-        ),
-      ],
+    final id = message['id']?.toString() ?? '';
+    final isLocal = id.startsWith('local_');
+    if (isLocal) return null;
+    final hasRead = message['read_at'] != null || message['read'] == true;
+    final color =
+        hasRead ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final tooltip = hasRead ? 'Read' : 'Sent';
+    return Tooltip(
+      message: tooltip,
+      child: Icon(Icons.visibility, size: 12, color: color),
     );
   }
 
@@ -6002,6 +6081,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: _backupCurrentProfile,
                     icon: const Icon(Icons.save_alt, size: 20),
                     label: const Text('Backup Profile (JSON)'),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _importProfileBackup,
+                    icon: const Icon(Icons.upload_file, size: 20),
+                    label: const Text('Import Profile (JSON)'),
                   ),
                 ]),
                 const SizedBox(height: 12),

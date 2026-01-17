@@ -170,6 +170,15 @@ async function handleMessage(msg) {
     return { ok: true, backup };
   }
 
+  if (msg.type === "import-profile") {
+    const backup = msg.backup;
+    if (!backup || typeof backup !== "object") {
+      return { ok: false, error: "invalid backup payload" };
+    }
+    const res = await importProfileBackup(backup);
+    return res;
+  }
+
   if (msg.type === "set-last-recipient") {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
@@ -280,6 +289,50 @@ async function handleMessage(msg) {
     return { ok: true, removed: before - messages.length };
   }
 
+  return { ok: true };
+}
+
+async function importProfileBackup(backup) {
+  const profile = backup.profile || {};
+  const nsec = profile.nsec;
+  if (!nsec || typeof nsec !== "string") {
+    return { ok: false, error: "missing nsec" };
+  }
+  settings.nsec = nsec;
+  addKeyToList(settings.nsec);
+  loadMessagesForCurrent();
+  quietNotifications();
+
+  const priv = currentPrivkeyHex();
+  const pub = priv ? nt.getPublicKey(priv) : null;
+  if (pub && profile.nickname) {
+    settings.keys = settings.keys || [];
+    settings.keys = settings.keys.map((k) =>
+      k.pubkey === pub ? { ...k, nickname: profile.nickname } : k
+    );
+  }
+
+  const contacts = Array.isArray(backup.contacts) ? backup.contacts : [];
+  if (contacts.length) {
+    setRecipientsForCurrent(
+      contacts.map((c) => ({
+        pubkey: c.pubkey,
+        nickname: c.nickname || ""
+      }))
+    );
+    if (!settings.lastRecipient && contacts[0]?.pubkey) {
+      try {
+        settings.lastRecipient = normalizePubkey(contacts[0].pubkey);
+      } catch (_) {
+        settings.lastRecipient = contacts[0].pubkey;
+      }
+    }
+  }
+
+  await persistSettings();
+  await connect();
+  await setupContextMenus();
+  syncRecipientsForCurrent();
   return { ok: true };
 }
 
