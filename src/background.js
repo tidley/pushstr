@@ -882,8 +882,9 @@ async function handleGiftEvent(event) {
     const isPushstrClient = hasPushstrClientTag(message);
     const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
+    const isGiftwrap = event.kind === 1059;
     await recordMessage({
-      id: targetEvent.id || event.id,
+      id: isGiftwrap ? event.id : (targetEvent.id || event.id),
       direction: "in",
       from: sender,
       to: currentPubkey(),
@@ -893,7 +894,7 @@ async function handleGiftEvent(event) {
       dm_kind: dmKind,
       relayFrom: settings.relays
     });
-    const receiptTargetId = targetEvent.id || event.id;
+    const receiptTargetId = isGiftwrap ? event.id : (targetEvent.id || event.id);
     if (receiptTargetId && isPushstrClient) {
       await sendReadReceipt(sender, receiptTargetId, dmKind);
     }
