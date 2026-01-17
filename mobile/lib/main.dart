@@ -3017,7 +3017,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: EdgeInsets.only(
                 left: 4,
                 right: 4,
-                bottom: isOut ? 1 : 6,
+                bottom: isOut ? 7 : 12,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
