@@ -492,10 +492,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String? _extractReadReceiptId(String content) {
-    if (!content.contains(_readReceiptKey)) return null;
-    if (!content.trimLeft().startsWith('{')) return null;
+    final cleaned = _stripPushstrClientTag(content).trimLeft();
+    if (!cleaned.contains(_readReceiptKey)) return null;
+    if (!cleaned.startsWith('{')) return null;
     try {
-      final decoded = jsonDecode(content);
+      final decoded = jsonDecode(cleaned);
       if (decoded is Map && decoded[_readReceiptKey] is String) {
         return decoded[_readReceiptKey] as String;
       }

@@ -632,10 +632,11 @@ async function publishWithRetry(relays, event, label = "event") {
 
 function parseReadReceipt(content) {
   if (!content || typeof content !== "string") return null;
-  if (!content.includes(READ_RECEIPT_KEY)) return null;
-  if (!content.trimStart().startsWith("{")) return null;
+  const cleaned = stripPushstrClientTag(content).trimStart();
+  if (!cleaned.includes(READ_RECEIPT_KEY)) return null;
+  if (!cleaned.startsWith("{")) return null;
   try {
-    const decoded = JSON.parse(content);
+    const decoded = JSON.parse(cleaned);
     if (decoded && typeof decoded === "object") {
       const receiptId = decoded[READ_RECEIPT_KEY];
       if (typeof receiptId === "string" && receiptId.length) {
