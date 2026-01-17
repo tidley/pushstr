@@ -93,6 +93,7 @@ const READ_RECEIPT_KEY = "pushstr_ack";
 const PUSHSTR_CLIENT_TAG = "[pushstr:client]";
 const BLOSSOM_UPLOAD_PATH = "upload";
 let suppressNotifications = true;
+const sendSeqByRecipient = new Map();
 let keepAliveTimer = null;
 let keepAliveRunning = false;
 const pendingReceipts = new Set();
@@ -278,6 +279,11 @@ async function handleMessage(msg) {
 
   if (msg.type === "decrypt-media") {
     return decryptMediaDescriptor(msg.descriptor, msg.senderPubkey);
+  }
+
+  if (msg.type === "ensure-connect") {
+    await connect();
+    return { ok: true };
   }
 
   if (msg.type === "delete-conversation") {
@@ -530,6 +536,25 @@ function delay(ms) {
 function relayFailureMap() {
   settings.relayFailures = settings.relayFailures || {};
   return settings.relayFailures;
+}
+
+function nextSendSeq(recipientHex) {
+  const current = sendSeqByRecipient.get(recipientHex) || 0;
+  const next = current + 1;
+  sendSeqByRecipient.set(recipientHex, next);
+  return next;
+}
+
+function extractSeqFromTags(tags) {
+  if (!Array.isArray(tags)) return null;
+  for (const tag of tags) {
+    if (!Array.isArray(tag) || tag.length < 2) continue;
+    if (tag[0] === "seq") {
+      const val = parseInt(tag[1], 10);
+      if (!Number.isNaN(val)) return val;
+    }
+  }
+  return null;
 }
 
 function cleanupRelayFailures() {
@@ -866,6 +891,7 @@ async function handleGiftEvent(event) {
       return;
     }
     const sender = targetEvent.pubkey || "unknown";
+    const seq = extractSeqFromTags(targetEvent.tags || event.tags || []);
     const message = await decryptDmContent(priv, sender, targetEvent.content);
     console.info("[pushstr] dm decrypted", {
       from: sender,
@@ -899,7 +925,8 @@ async function handleGiftEvent(event) {
       created_at: targetEvent.created_at || Math.floor(Date.now() / 1000),
       outerKind: event.kind,
       dm_kind: dmKind,
-      relayFrom: settings.relays
+      relayFrom: settings.relays,
+      seq
     });
     const receiptTargetId = isGiftwrap ? event.id : (targetEvent.id || event.id);
     if (receiptTargetId && isPushstrClient) {
@@ -925,13 +952,14 @@ async function sendGift(recipient, content, modeOverride = null) {
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1000);
   const taggedContent = appendPushstrClientTag(content);
+  const seq = nextSendSeq(recipientHex);
 
   if (dmMode === "nip04") {
     const cipherText = await nt.nip04.encrypt(priv, recipientHex, taggedContent);
     const dm = {
       kind: 4,
       created_at,
-      tags: [["p", recipientHex]],
+      tags: [["p", recipientHex], ["seq", seq.toString()]],
       content: cipherText
     };
     const signedDm = finalizeEvent(dm, priv);
@@ -950,7 +978,8 @@ async function sendGift(recipient, content, modeOverride = null) {
       created_at,
       outerKind: 4,
       dm_kind: "nip04",
-      relays: settings.relays
+      relays: settings.relays,
+      seq
     });
     return { ok: true, id: signedDm.id };
   }
@@ -962,6 +991,7 @@ async function sendGift(recipient, content, modeOverride = null) {
     created_at,
     tags: [
       ["p", recipientHex],
+      ["seq", seq.toString()],
       ["alt", "Direct message"]
     ],
     content: taggedContent
@@ -1012,7 +1042,8 @@ async function sendGift(recipient, content, modeOverride = null) {
     created_at,
     outerKind: 1059,
     dm_kind: "nip17",
-    relays: settings.relays
+    relays: settings.relays,
+    seq
   });
   return { ok: true, id: signedGift.id };
 }

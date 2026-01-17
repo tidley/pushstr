@@ -9,7 +9,7 @@ use nostr_sdk::prelude::*;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex, Once};
 use std::future::Future;
 use tokio::sync::{Mutex, Notify, oneshot};
@@ -39,6 +39,8 @@ static RETURNED_EVENT_IDS: Lazy<StdMutex<HashSet<String>>> =
 static RETURNED_EVENT_IDS_QUEUE: Lazy<StdMutex<VecDeque<String>>> =
     Lazy::new(|| StdMutex::new(VecDeque::new()));
 const RETURNED_EVENT_IDS_MAX: usize = 512;
+static SEND_SEQ_BY_RECIPIENT: Lazy<StdMutex<HashMap<String, u64>>> =
+    Lazy::new(|| StdMutex::new(HashMap::new()));
 
 static SEND_QUEUE: Lazy<Mutex<VecDeque<SendRequest>>> =
     Lazy::new(|| Mutex::new(VecDeque::new()));
@@ -184,6 +186,11 @@ fn parse_read_receipt_id(content: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn is_read_receipt_content(content: &str) -> bool {
+    let stripped = strip_pushstr_client_tag(content);
+    parse_read_receipt_id(&stripped).is_some()
+}
+
 fn normalize_message_content(raw: &str) -> (String, bool, Option<String>) {
     let is_pushstr_client = raw.contains(PUSHSTR_CLIENT_TAG);
     let stripped = strip_pushstr_client_tag(raw);
@@ -200,6 +207,38 @@ fn relay_tags(event: &Event) -> Vec<String> {
         .filter_map(|t| t.content())
         .map(|s| s.to_string())
         .collect()
+}
+
+fn next_send_seq(recipient_hex: &str) -> u64 {
+    let mut map = SEND_SEQ_BY_RECIPIENT.lock().unwrap();
+    let entry = map.entry(recipient_hex.to_string()).or_insert(0);
+    *entry += 1;
+    *entry
+}
+
+fn seq_from_tag_list(tags: &[Vec<String>]) -> Option<u64> {
+    for tag in tags {
+        if tag.len() >= 2 && tag[0] == "seq" {
+            if let Ok(val) = tag[1].parse::<u64>() {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
+fn seq_from_event_tags(tags: &[Tag]) -> Option<u64> {
+    let seq_kind = TagKind::Custom("seq".into());
+    for tag in tags {
+        if tag.kind() == seq_kind {
+            if let Some(val) = tag.content() {
+                if let Ok(seq) = val.parse::<u64>() {
+                    return Some(seq);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -702,8 +741,18 @@ async fn send_gift_dm_direct(
     let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
 
     // NIP-17: Inner DM with plaintext content, signed by user - kind 14
-    let inner_event = EventBuilder::new(Kind::Custom(14), content)
-        .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
+    let seq = if is_read_receipt_content(&content) {
+        None
+    } else {
+        Some(next_send_seq(&recipient_pk.to_hex()))
+    };
+    let mut inner_builder = EventBuilder::new(Kind::Custom(14), content)
+        .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]));
+    if let Some(seq) = seq {
+        inner_builder = inner_builder
+            .tag(Tag::custom(TagKind::Custom("seq".into()), vec![seq.to_string()]));
+    }
+    let inner_event = inner_builder
         .tag(Tag::custom(
             TagKind::Custom("alt".into()),
             vec!["Direct message".to_string()],
@@ -861,10 +910,18 @@ async fn send_dm_direct(recipient: String, message: String) -> Result<String> {
         &message,
     )?;
 
+    let seq = if is_read_receipt_content(&message) {
+        None
+    } else {
+        Some(next_send_seq(&recipient_pubkey.to_hex()))
+    };
     // Build event manually (kind 4 encrypted DM)
-    let event = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_content)
-        .tag(Tag::public_key(recipient_pubkey))
-        .sign_with_keys(&keys)?;
+    let mut builder = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_content)
+        .tag(Tag::public_key(recipient_pubkey));
+    if let Some(seq) = seq {
+        builder = builder.tag(Tag::custom(TagKind::Custom("seq".into()), vec![seq.to_string()]));
+    }
+    let event = builder.sign_with_keys(&keys)?;
 
     let event_id = event.id;
     let event_id_hex = event_id.to_hex();
@@ -962,6 +1019,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     } else {
                         sender_hex.clone()
                     };
+                    let seq = seq_from_tag_list(&tags);
                     let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
                     if direction == "in" && !content.is_empty() {
                         if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
@@ -988,6 +1046,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                         "dm_kind": unwrapped.format,
                         "pushstr_client": pushstr_client,
                         "receipt_for": receipt_for,
+                        "seq": seq,
                     }));
                 }
                 Err(e) => {
@@ -1034,6 +1093,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
                     event.content.clone()
                 });
+            let seq = seq_from_event_tags(&event.tags);
             let (cleaned, pushstr_client, receipt_for) =
                 normalize_message_content(&decrypted);
             messages.push(serde_json::json!({
@@ -1047,6 +1107,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                 "dm_kind": "nip04",
                 "pushstr_client": pushstr_client,
                 "receipt_for": receipt_for,
+                "seq": seq,
             }));
         }
 
@@ -1064,6 +1125,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
                     event.content.clone()
                 });
+            let seq = seq_from_event_tags(&event.tags);
             let (cleaned, pushstr_client, receipt_for) =
                 normalize_message_content(&decrypted);
             messages.push(serde_json::json!({
@@ -1077,6 +1139,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                 "dm_kind": "nip04",
                 "pushstr_client": pushstr_client,
                 "receipt_for": receipt_for,
+                "seq": seq,
             }));
         }
 
@@ -1151,6 +1214,8 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 .pubkey
                                 .clone()
                                 .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+                            let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
+                            let seq = seq_from_tag_list(&tags);
                             let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
                             if !content.is_empty() {
                                 if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
@@ -1174,6 +1239,7 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 "dm_kind": unwrapped.format,
                                 "pushstr_client": pushstr_client,
                                 "receipt_for": receipt_for,
+                                "seq": seq,
                             }));
                         } else {
                             eprintln!("[dm] Giftwrap event ignored (could not unwrap) {}", event_id);
@@ -1213,6 +1279,7 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                             });
                         let (cleaned, pushstr_client, receipt_for) =
                             normalize_message_content(&decrypted);
+                        let seq = seq_from_event_tags(&event.tags);
                         messages.push(serde_json::json!({
                             "id": event_id,
                             "from": event.pubkey.to_hex(),
@@ -1224,6 +1291,7 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                             "dm_kind": "nip04",
                             "pushstr_client": pushstr_client,
                             "receipt_for": receipt_for,
+                            "seq": seq,
                         }));
                     } else {
                         eprintln!(

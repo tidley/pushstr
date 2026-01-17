@@ -223,6 +223,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, double> _holdProgressHome = {};
   final Set<String> _pendingReceipts = {};
   final Set<String> _sentReceipts = {};
+  final Map<String, int> _missingFetchTs = {};
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 4000;
@@ -657,6 +658,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (raw is double) return raw.round();
     if (raw is String) return int.tryParse(raw) ?? 0;
     return 0;
+  }
+
+  int? _messageSeq(Map<String, dynamic> message) {
+    final raw = message['seq'];
+    if (raw is int) return raw;
+    if (raw is double) return raw.round();
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
+  void _requestMissingMessages(String contact) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final last = _missingFetchTs[contact] ?? 0;
+    if (now - last < 30000) return;
+    _missingFetchTs[contact] = now;
+    unawaited(_fetchMessages());
   }
 
   void _updateDmModesFromMessages(List<Map<String, dynamic>> incoming) {
@@ -2897,16 +2914,68 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   (m['direction'] == 'in' && m['from'] == selectedContact),
             )
             .toList()
-          ..sort(
-            (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
-          );
+          ..sort((a, b) {
+            final aTime = a['created_at'] ?? 0;
+            final bTime = b['created_at'] ?? 0;
+            final timeCmp = aTime.compareTo(bTime);
+            if (timeCmp != 0) return timeCmp;
+            final aSeq = _messageSeq(a);
+            final bSeq = _messageSeq(b);
+            if (aSeq != null && bSeq != null) {
+              return aSeq.compareTo(bSeq);
+            }
+            return 0;
+          });
+
+    final display = <Map<String, dynamic>>[];
+    int? lastIncomingSeq;
+    for (final m in convo) {
+      if (m['direction'] == 'in' && m['from'] == selectedContact) {
+        final seq = _messageSeq(m);
+        if (seq != null && lastIncomingSeq != null && seq > lastIncomingSeq + 1) {
+          display.add({
+            'direction': 'gap',
+            'missing_from': lastIncomingSeq + 1,
+            'missing_to': seq - 1,
+          });
+          _requestMissingMessages(selectedContact!);
+        }
+        if (seq != null) {
+          lastIncomingSeq = seq;
+        }
+      }
+      display.add(m);
+    }
 
     final listView = ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(12),
-      itemCount: convo.length,
+      itemCount: display.length,
       itemBuilder: (context, idx) {
-        final m = convo[idx];
+        final m = display[idx];
+        if (m['direction'] == 'gap') {
+          final from = m['missing_from'];
+          final to = m['missing_to'];
+          final label = from == to
+              ? 'Missing message (seq $from)'
+              : 'Missing messages (seq $from-$to)';
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              ),
+            ),
+          );
+        }
         final align = m['direction'] == 'out'
             ? Alignment.centerRight
             : Alignment.centerLeft;

@@ -513,6 +513,14 @@ main {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
+.bubble.gap {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  align-self: flex-start;
+  font-size: 11px;
+}
+
 .bubble .meta {
   font-size: 10px;
   color: var(--muted);

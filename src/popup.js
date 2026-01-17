@@ -263,7 +263,7 @@ function renderHistory() {
     selectedContact,
   );
   pruneOptimisticMessages();
-  const convo = [...state.messages, ...optimisticMessages].filter(
+  let convo = [...state.messages, ...optimisticMessages].filter(
     (m) => otherParty(m) === selectedContact,
   );
   console.log(
@@ -271,8 +271,53 @@ function renderHistory() {
     convo.length,
     'messages for contact',
   );
-  convo.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-  convo.forEach((m) => {
+  convo.sort((a, b) => {
+    const aTime = a.created_at || 0;
+    const bTime = b.created_at || 0;
+    if (aTime !== bTime) return aTime - bTime;
+    const aSeq = messageSeq(a);
+    const bSeq = messageSeq(b);
+    if (aSeq != null && bSeq != null && aSeq !== bSeq) {
+      return aSeq - bSeq;
+    }
+    return 0;
+  });
+
+  const display = [];
+  let lastIncomingSeq = null;
+  for (const m of convo) {
+    if (m.direction === 'in' && m.from === selectedContact) {
+      const seq = messageSeq(m);
+      if (seq != null && lastIncomingSeq != null && seq > lastIncomingSeq + 1) {
+        display.push({
+          direction: 'gap',
+          missing_from: lastIncomingSeq + 1,
+          missing_to: seq - 1,
+        });
+        browser.runtime.sendMessage({ type: 'ensure-connect' }).catch(() => {});
+      }
+      if (seq != null) lastIncomingSeq = seq;
+    }
+    display.push(m);
+  }
+
+  display.forEach((m) => {
+    if (m.direction === 'gap') {
+      const from = m.missing_from;
+      const to = m.missing_to;
+      const label =
+        from === to
+          ? `Missing message (seq ${from})`
+          : `Missing messages (seq ${from}-${to})`;
+      const row = document.createElement('div');
+      row.className = 'msg-row gap';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble gap';
+      bubble.textContent = label;
+      row.appendChild(bubble);
+      historyEl.appendChild(row);
+      return;
+    }
     const row = document.createElement('div');
     row.className = 'msg-row ' + (m.direction === 'out' ? 'out' : 'in');
     const bubble = document.createElement('div');
@@ -853,6 +898,16 @@ function otherParty(m) {
   return m.direction === 'out' ? m.to : m.from;
 }
 
+function messageSeq(m) {
+  const raw = m?.seq;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'string') {
+    const parsed = parseInt(raw, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
 function addOptimisticMessage({ content, recipient }) {
   if (!recipient || !content) return null;
   const taggedContent = appendPushstrClientTag(content);
@@ -938,6 +993,9 @@ async function send() {
     status('Nothing to send');
     return;
   }
+  const originalContent = messageInput.value;
+  messageInput.value = '';
+  updateComposerMode();
   status('Sending...');
   try {
     if (content) {
@@ -995,13 +1053,16 @@ async function send() {
       markOptimisticSent(optimistic?.id);
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
-    messageInput.value = '';
     pendingFile = null;
     clearPreview(!!fileToSend);
     updateComposerMode();
     await refreshState();
     status('Sent');
   } catch (err) {
+    if (!messageInput.value) {
+      messageInput.value = originalContent;
+      updateComposerMode();
+    }
     status('Failed: ' + err.message);
   }
 }

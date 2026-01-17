@@ -140,7 +140,9 @@ class RustSyncWorker {
     if (!await _mutex.tryAcquire()) return;
     try {
       // ignore: avoid_print
-      print('[dm] sendLegacyGiftDm start recipient=${recipient.substring(0, 8)}');
+      print(
+        '[dm] sendLegacyGiftDm start recipient=${recipient.substring(0, 8)}',
+      );
       final eventId = await Isolate.run(() async {
         try {
           await RustLib.init();
@@ -160,8 +162,6 @@ class RustSyncWorker {
       _mutex.release();
     }
   }
-
-}
 }
 
 class _AsyncMutex {
