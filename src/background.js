@@ -860,10 +860,6 @@ async function handleGiftEvent(event) {
       });
       return;
     }
-    const candidateId = targetEvent.id || event.id;
-    if (candidateId && messageIds.has(candidateId)) {
-      return;
-    }
     const sender = targetEvent.pubkey || "unknown";
     const message = await decryptDmContent(priv, sender, targetEvent.content);
     console.info("[pushstr] dm decrypted", {
@@ -883,6 +879,12 @@ async function handleGiftEvent(event) {
     const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
     const isGiftwrap = event.kind === 1059;
+    const primaryId = isGiftwrap ? event.id : (targetEvent.id || event.id);
+    if ((primaryId && messageIds.has(primaryId)) ||
+        (targetEvent.id && messageIds.has(targetEvent.id)) ||
+        (event.id && messageIds.has(event.id))) {
+      return;
+    }
     await recordMessage({
       id: isGiftwrap ? event.id : (targetEvent.id || event.id),
       direction: "in",

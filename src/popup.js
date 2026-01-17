@@ -90,6 +90,7 @@ let state = { messages: [], recipients: [], pubkey: null };
 let selectedContact = null;
 let pendingFile = null;
 const localPreviewCache = {};
+let optimisticMessages = [];
 // Session cache for decrypted media (blob URLs)
 const decryptedMediaCache = new Map();
 // Track messages received in current session
@@ -261,7 +262,10 @@ function renderHistory() {
     'selected:',
     selectedContact,
   );
-  const convo = state.messages.filter((m) => otherParty(m) === selectedContact);
+  pruneOptimisticMessages();
+  const convo = [...state.messages, ...optimisticMessages].filter(
+    (m) => otherParty(m) === selectedContact,
+  );
   console.log(
     '[pushstr][popup] renderHistory: filtered to',
     convo.length,
@@ -849,6 +853,40 @@ function otherParty(m) {
   return m.direction === 'out' ? m.to : m.from;
 }
 
+function addOptimisticMessage({ content, recipient }) {
+  if (!recipient || !content) return null;
+  const msg = {
+    id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    direction: 'out',
+    from: state.pubkey,
+    to: recipient,
+    content,
+    created_at: Math.floor(Date.now() / 1000),
+  };
+  optimisticMessages.push(msg);
+  render();
+  return msg;
+}
+
+function removeOptimisticMessage(id) {
+  if (!id) return;
+  optimisticMessages = optimisticMessages.filter((m) => m.id !== id);
+  render();
+}
+
+function pruneOptimisticMessages() {
+  if (!optimisticMessages.length) return;
+  optimisticMessages = optimisticMessages.filter((opt) => {
+    return !state.messages.some((m) => {
+      if (m.direction !== 'out') return false;
+      if (m.to !== opt.to) return false;
+      if (m.content !== opt.content) return false;
+      const delta = Math.abs((m.created_at || 0) - (opt.created_at || 0));
+      return delta <= 120;
+    });
+  });
+}
+
 async function loadStateFallback() {
   try {
     const stored = await browser.storage.local.get();
@@ -886,13 +924,19 @@ async function send() {
   status('Sending...');
   try {
     if (content) {
+      const optimistic = addOptimisticMessage({
+        content,
+        recipient: selectedContact,
+      });
       const res = await browser.runtime.sendMessage({
         type: 'send-gift',
         recipient: selectedContact,
         content,
       });
-      if (res && res.ok === false)
+      if (res && res.ok === false) {
+        removeOptimisticMessage(optimistic?.id);
         throw new Error(res.error || 'publish failed');
+      }
     }
     if (fileToSend) {
       const arrayBuf = await fileToSend.arrayBuffer();
@@ -917,12 +961,17 @@ async function send() {
         }
       }
       const payload = buildPushstrAttachmentPayload(content, res);
+      const optimistic = addOptimisticMessage({
+        content: payload,
+        recipient: selectedContact,
+      });
       const sendRes = await browser.runtime.sendMessage({
         type: 'send-gift',
         recipient: selectedContact,
         content: payload,
       });
       if (sendRes && sendRes.ok === false) {
+        removeOptimisticMessage(optimistic?.id);
         throw new Error(sendRes.error || 'publish failed');
       }
       showUploadedPreview(res.url, res.mime || fileToSend.type);
@@ -948,6 +997,7 @@ async function refreshState() {
     );
     if (newState) {
       state = newState;
+      pruneOptimisticMessages();
       render();
     } else {
       console.warn('[pushstr][popup] refreshState: no state returned');
