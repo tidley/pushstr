@@ -191,6 +191,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   );
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   static const String _pushstrClientTag = '[pushstr:client]';
+  static const Color _historyAccentGreen = Color.fromARGB(255, 18, 113, 53);
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
@@ -743,7 +744,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         dmKind == 'nip59' || dmKind == 'legacy_giftwrap' || kind == 1059;
     if (!isNip04 && !isGiftwrap) return null;
     final iconData = isGiftwrap ? Icons.lock : Icons.lock_open;
-    final color = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final color = isGiftwrap ? _historyAccentGreen : Colors.grey.shade500;
     final label = isGiftwrap ? '17' : '04';
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -3063,7 +3064,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildScrollToBottomButton() {
-    final iconColor = _hasNewMessages ? const Color(0xFF22C55E) : Colors.grey;
+    final iconColor = _hasNewMessages ? _historyAccentGreen : Colors.grey;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -3094,12 +3095,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget? _buildReadReceiptBadge(Map<String, dynamic> message) {
     if (message['direction'] != 'out') return null;
     final hasRead = message['read_at'] != null || message['read'] == true;
-    final color = hasRead ? const Color(0xFF22C55E) : Colors.grey.shade500;
-    final tooltip = hasRead ? 'Read' : 'Sent';
+    final id = message['id']?.toString() ?? '';
+    final isLocal = id.startsWith('local_');
+    final color = hasRead ? _historyAccentGreen : Colors.grey.shade500;
+    final tooltip = hasRead
+        ? 'Read'
+        : (isLocal ? 'Sending' : 'Sent');
     return Tooltip(
       message: tooltip,
       child: Icon(
-        hasRead ? Icons.visibility : Icons.visibility_outlined,
+        hasRead
+            ? Icons.visibility
+            : (isLocal ? Icons.visibility_outlined : Icons.visibility),
         size: 12,
         color: color,
       ),

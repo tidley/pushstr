@@ -863,6 +863,7 @@ function addOptimisticMessage({ content, recipient }) {
     to: recipient,
     content: taggedContent,
     created_at: Math.floor(Date.now() / 1000),
+    local_status: 'sending',
   };
   optimisticMessages.push(msg);
   render();
@@ -873,6 +874,18 @@ function removeOptimisticMessage(id) {
   if (!id) return;
   optimisticMessages = optimisticMessages.filter((m) => m.id !== id);
   render();
+}
+
+function markOptimisticSent(id) {
+  if (!id) return;
+  let updated = false;
+  optimisticMessages = optimisticMessages.map((m) => {
+    if (m.id !== id) return m;
+    if (m.local_status === 'sent') return m;
+    updated = true;
+    return { ...m, local_status: 'sent' };
+  });
+  if (updated) render();
 }
 
 function pruneOptimisticMessages() {
@@ -940,6 +953,7 @@ async function send() {
         removeOptimisticMessage(optimistic?.id);
         throw new Error(res.error || 'publish failed');
       }
+      markOptimisticSent(optimistic?.id);
     }
     if (fileToSend) {
       const arrayBuf = await fileToSend.arrayBuffer();
@@ -977,6 +991,7 @@ async function send() {
         removeOptimisticMessage(optimistic?.id);
         throw new Error(sendRes.error || 'publish failed');
       }
+      markOptimisticSent(optimistic?.id);
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
     messageInput.value = '';
@@ -1642,10 +1657,17 @@ function buildDmBadge(kind) {
 function buildReceiptBadge(message) {
   if (!message || message.direction !== 'out') return null;
   const hasRead = message.read_at || message.read;
+  const localStatus = message.local_status;
   const badge = document.createElement('span');
-  badge.className = `badge receipt ${hasRead ? 'read' : 'sent'}`;
-  badge.textContent = hasRead ? 'R' : 'S';
-  badge.title = hasRead ? 'Read' : 'Sent';
+  if (localStatus === 'sending') {
+    badge.className = 'badge receipt sent';
+    badge.textContent = '-';
+    badge.title = 'Sending';
+  } else {
+    badge.className = `badge receipt ${hasRead ? 'read' : 'sent'}`;
+    badge.textContent = hasRead ? 'R' : 'S';
+    badge.title = hasRead ? 'Read' : 'Sent';
+  }
   return badge;
 }
 
