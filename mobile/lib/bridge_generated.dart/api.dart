@@ -28,7 +28,7 @@ String generateNewKey() => RustLib.instance.api.crateApiGenerateNewKey();
 String sendGiftDm({required String recipient, required String content, required bool useNip44}) =>
     RustLib.instance.api.crateApiSendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
 
-/// Send a legacy giftwrap DM compatible with the Pushstr browser extension.
+/// Send a giftwrap DM using the standard NIP-59 sealed rumor path.
 String sendLegacyGiftDm({required String recipient, required String content}) =>
     RustLib.instance.api.crateApiSendLegacyGiftDm(recipient: recipient, content: content);
 
