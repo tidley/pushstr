@@ -2971,7 +2971,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    margin: const EdgeInsets.only(bottom: 4),
+                    margin: EdgeInsets.only(bottom: isOut ? 2 : 4),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
                       vertical: 10,
@@ -3010,7 +3010,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 6),
+              padding: EdgeInsets.only(
+                left: 4,
+                right: 4,
+                bottom: isOut ? 2 : 6,
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
