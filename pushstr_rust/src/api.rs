@@ -10,9 +10,9 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Once};
 use std::future::Future;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify, oneshot};
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -40,12 +40,74 @@ static RETURNED_EVENT_IDS_QUEUE: Lazy<StdMutex<VecDeque<String>>> =
     Lazy::new(|| StdMutex::new(VecDeque::new()));
 const RETURNED_EVENT_IDS_MAX: usize = 512;
 
+static SEND_QUEUE: Lazy<Mutex<VecDeque<SendRequest>>> =
+    Lazy::new(|| Mutex::new(VecDeque::new()));
+static SEND_NOTIFY: Lazy<Notify> = Lazy::new(Notify::new);
+static SEND_WORKER_ONCE: Once = Once::new();
+
+#[derive(Debug)]
+enum SendKind {
+    Gift {
+        recipient: String,
+        content: String,
+        use_nip44: bool,
+    },
+    Legacy {
+        recipient: String,
+        content: String,
+    },
+}
+
+struct SendRequest {
+    kind: SendKind,
+    reply: oneshot::Sender<Result<String>>,
+}
+
 fn run_block_on<F: Future>(fut: F) -> F::Output {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         tokio::task::block_in_place(|| handle.block_on(fut))
     } else {
         RUNTIME.block_on(fut)
     }
+}
+
+fn start_send_worker() {
+    SEND_WORKER_ONCE.call_once(|| {
+        RUNTIME.spawn(async move {
+            loop {
+                let req = {
+                    let mut queue = SEND_QUEUE.lock().await;
+                    queue.pop_front()
+                };
+                if let Some(req) = req {
+                    let result = match req.kind {
+                        SendKind::Gift {
+                            recipient,
+                            content,
+                            use_nip44,
+                        } => send_gift_dm_direct(recipient, content, use_nip44).await,
+                        SendKind::Legacy { recipient, content } => {
+                            send_dm_direct(recipient, content).await
+                        }
+                    };
+                    let _ = req.reply.send(result);
+                    continue;
+                }
+                SEND_NOTIFY.notified().await;
+            }
+        });
+    });
+}
+
+async fn enqueue_send(kind: SendKind) -> Result<String> {
+    start_send_worker();
+    let (tx, rx) = oneshot::channel();
+    {
+        let mut queue = SEND_QUEUE.lock().await;
+        queue.push_back(SendRequest { kind, reply: tx });
+    }
+    SEND_NOTIFY.notify_one();
+    rx.await.context("send queue closed")?
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +128,8 @@ const BLOSSOM_SERVER: &str = "https://blossom.primal.net";
 const PUBLISH_RETRY_ATTEMPTS: usize = 3;
 const PUBLISH_RETRY_BASE_MS: u64 = 400;
 const BLOSSOM_UPLOAD_PATH: &str = "upload";
+const READ_RECEIPT_KEY: &str = "pushstr_ack";
+const PUSHSTR_CLIENT_TAG: &str = "[pushstr:client]";
 
 fn parse_pubkey(input: &str) -> Result<PublicKey> {
     let trimmed = input.trim();
@@ -92,6 +156,39 @@ fn event_p_tag_pubkey(event: &Event) -> Option<PublicKey> {
         .find(|t| t.kind() == TagKind::p())
         .and_then(|t| t.content())
         .and_then(|s| PublicKey::from_hex(s).ok())
+}
+
+fn strip_pushstr_client_tag(content: &str) -> String {
+    if !content.contains(PUSHSTR_CLIENT_TAG) {
+        return content.to_string();
+    }
+    let mut out = Vec::new();
+    for line in content.lines() {
+        if line.trim() == PUSHSTR_CLIENT_TAG {
+            continue;
+        }
+        out.push(line);
+    }
+    out.join("\n").trim().to_string()
+}
+
+fn parse_read_receipt_id(content: &str) -> Option<String> {
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with('{') || !trimmed.contains(READ_RECEIPT_KEY) {
+        return None;
+    }
+    let parsed: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    parsed
+        .get(READ_RECEIPT_KEY)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+fn normalize_message_content(raw: &str) -> (String, bool, Option<String>) {
+    let is_pushstr_client = raw.contains(PUSHSTR_CLIENT_TAG);
+    let stripped = strip_pushstr_client_tag(raw);
+    let receipt_for = parse_read_receipt_id(&stripped);
+    (stripped, is_pushstr_client, receipt_for)
 }
 
 fn relay_tags(event: &Event) -> Vec<String> {
@@ -595,52 +692,62 @@ pub fn generate_new_key() -> Result<String> {
     Ok(keys.secret_key().to_bech32()?)
 }
 
-/// Send a giftwrapped DM (kind 1059 wrapping kind 4) using nip44 by default
-#[frb(sync)]
-pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Result<String> {
-    run_block_on(async {
-        let (client, keys) = get_client_and_keys().await?;
-        let recipient_pk = parse_pubkey(&recipient)?;
-        let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
+async fn send_gift_dm_direct(
+    recipient: String,
+    content: String,
+    use_nip44: bool,
+) -> Result<String> {
+    let (client, keys) = get_client_and_keys().await?;
+    let recipient_pk = parse_pubkey(&recipient)?;
+    let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
 
-        // NIP-17: Inner DM with plaintext content, signed by user - kind 14
-        let inner_event = EventBuilder::new(Kind::Custom(14), content)
-            .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
-            .tag(Tag::custom(
-                TagKind::Custom("alt".into()),
-                vec!["Direct message".to_string()],
-            ))
-            .sign_with_keys(&keys)?;
+    // NIP-17: Inner DM with plaintext content, signed by user - kind 14
+    let inner_event = EventBuilder::new(Kind::Custom(14), content)
+        .tag(Tag::custom(TagKind::Custom("p".into()), vec![recipient_pk.to_hex()]))
+        .tag(Tag::custom(
+            TagKind::Custom("alt".into()),
+            vec!["Direct message".to_string()],
+        ))
+        .sign_with_keys(&keys)?;
 
-        let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
-        let event_id = gift.id.to_hex();
-        eprintln!("[dm] Sending giftwrap id={}", event_id);
-        let mut last_err = None;
-        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
-            match client.send_event(&gift).await {
-                Ok(_) => {
-                    eprintln!("[dm] Giftwrap sent id={}", event_id);
-                    last_err = None;
-                    break;
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                    eprintln!(
-                        "[dm] Giftwrap send failed id={} attempt={} err={}",
-                        event_id, attempt, last_err.as_ref().unwrap()
-                    );
-                    if attempt < PUBLISH_RETRY_ATTEMPTS {
-                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
-                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                    }
+    let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
+    let event_id = gift.id.to_hex();
+    eprintln!("[dm] Sending giftwrap id={}", event_id);
+    let mut last_err = None;
+    for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+        match client.send_event(&gift).await {
+            Ok(_) => {
+                eprintln!("[dm] Giftwrap sent id={}", event_id);
+                last_err = None;
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                eprintln!(
+                    "[dm] Giftwrap send failed id={} attempt={} err={}",
+                    event_id, attempt, last_err.as_ref().unwrap()
+                );
+                if attempt < PUBLISH_RETRY_ATTEMPTS {
+                    let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                 }
             }
         }
-        if let Some(err) = last_err {
-            return Err(err.into());
-        }
-        Ok(event_id)
-    })
+    }
+    if let Some(err) = last_err {
+        return Err(err.into());
+    }
+    Ok(event_id)
+}
+
+/// Send a giftwrapped DM (kind 1059 wrapping kind 4) using nip44 by default
+#[frb(sync)]
+pub fn send_gift_dm(recipient: String, content: String, use_nip44: bool) -> Result<String> {
+    run_block_on(enqueue_send(SendKind::Gift {
+        recipient,
+        content,
+        use_nip44,
+    }))
 }
 
 /// Send a giftwrap DM using the standard NIP-59 sealed rumor path.
@@ -709,74 +816,94 @@ pub fn hex_to_npub(hex: String) -> Result<String> {
     Ok(pubkey.to_bech32()?)
 }
 
+/// Derive npubs for a list of nsecs without mutating global state.
+#[frb(sync)]
+pub fn derive_npubs(nsecs: Vec<String>) -> Result<Vec<String>> {
+    let mut out = Vec::with_capacity(nsecs.len());
+    for nsec in nsecs {
+        let trimmed = nsec.trim();
+        if trimmed.is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        match Keys::parse(trimmed) {
+            Ok(keys) => out.push(keys.public_key().to_bech32()?),
+            Err(_) => out.push(String::new()),
+        }
+    }
+    Ok(out)
+}
+
+async fn send_dm_direct(recipient: String, message: String) -> Result<String> {
+    let client_lock = NOSTR_CLIENT.lock().await;
+    let client = client_lock
+        .as_ref()
+        .context("Not initialized")?
+        .clone();
+    drop(client_lock);
+
+    // Parse recipient (try npub first, then hex)
+    let recipient_pubkey = if recipient.starts_with("npub") {
+        PublicKey::from_bech32(&recipient)?
+    } else {
+        PublicKey::from_hex(&recipient)?
+    };
+
+    // Send NIP-04 encrypted DM (kind 4) - same as browser extension default
+    let keys_lock = NOSTR_KEYS.lock().await;
+    let keys = keys_lock.as_ref().context("Not initialized")?.clone();
+    drop(keys_lock);
+
+    // Encrypt with NIP-04
+    let encrypted_content = nip04::encrypt(
+        keys.secret_key(),
+        &recipient_pubkey,
+        &message,
+    )?;
+
+    // Build event manually (kind 4 encrypted DM)
+    let event = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_content)
+        .tag(Tag::public_key(recipient_pubkey))
+        .sign_with_keys(&keys)?;
+
+    let event_id = event.id;
+    let event_id_hex = event_id.to_hex();
+    eprintln!("[dm] Sending nip04 id={}", event_id_hex);
+    let mut last_err = None;
+    for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+        match client.send_event(&event).await {
+            Ok(_) => {
+                eprintln!("[dm] NIP-04 sent id={}", event_id_hex);
+                last_err = None;
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                eprintln!(
+                    "[dm] NIP-04 send failed id={} attempt={} err={}",
+                    event_id_hex, attempt, last_err.as_ref().unwrap()
+                );
+                if attempt < PUBLISH_RETRY_ATTEMPTS {
+                    let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+    if let Some(err) = last_err {
+        return Err(err.into());
+    }
+
+    eprintln!("✉️ Sent NIP-04 DM (kind 4): {}", event_id);
+    Ok(event_id_hex)
+}
+
 /// Send an encrypted DM using NIP-04 (kind 4) - matches browser extension default
 /// recipient can be npub or hex pubkey
 /// Returns event ID
 #[frb(sync)]
 pub fn send_dm(recipient: String, message: String) -> Result<String> {
-    run_block_on(async {
-        let client_lock = NOSTR_CLIENT.lock().await;
-        let client = client_lock
-            .as_ref()
-            .context("Not initialized")?
-            .clone();
-        drop(client_lock);
-
-        // Parse recipient (try npub first, then hex)
-        let recipient_pubkey = if recipient.starts_with("npub") {
-            PublicKey::from_bech32(&recipient)?
-        } else {
-            PublicKey::from_hex(&recipient)?
-        };
-
-        // Send NIP-04 encrypted DM (kind 4) - same as browser extension default
-        let keys_lock = NOSTR_KEYS.lock().await;
-        let keys = keys_lock.as_ref().context("Not initialized")?.clone();
-        drop(keys_lock);
-
-        // Encrypt with NIP-04
-        let encrypted_content = nip04::encrypt(
-            keys.secret_key(),
-            &recipient_pubkey,
-            &message,
-        )?;
-
-        // Build event manually (kind 4 encrypted DM)
-        let event = EventBuilder::new(Kind::EncryptedDirectMessage, encrypted_content)
-            .tag(Tag::public_key(recipient_pubkey))
-            .sign_with_keys(&keys)?;
-
-        let event_id = event.id;
-        let event_id_hex = event_id.to_hex();
-        eprintln!("[dm] Sending nip04 id={}", event_id_hex);
-        let mut last_err = None;
-        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
-            match client.send_event(&event).await {
-                Ok(_) => {
-                    eprintln!("[dm] NIP-04 sent id={}", event_id_hex);
-                    last_err = None;
-                    break;
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                    eprintln!(
-                        "[dm] NIP-04 send failed id={} attempt={} err={}",
-                        event_id_hex, attempt, last_err.as_ref().unwrap()
-                    );
-                    if attempt < PUBLISH_RETRY_ATTEMPTS {
-                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
-                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                    }
-                }
-            }
-        }
-        if let Some(err) = last_err {
-            return Err(err.into());
-        }
-
-        eprintln!("✉️ Sent NIP-04 DM (kind 4): {}", event_id);
-        Ok(event_id_hex)
-    })
+    run_block_on(enqueue_send(SendKind::Legacy { recipient, content: message }))
 }
 
 /// Fetch recent giftwrap DMs and return as JSON array
@@ -848,15 +975,19 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                         }
                     }
 
+                    let (cleaned, pushstr_client, receipt_for) =
+                        normalize_message_content(&content);
                     messages.push(serde_json::json!({
                         "id": event_id,
                         "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
                         "to": if direction == "out" { other } else { my_pubkey.to_hex() },
-                        "content": content,
+                        "content": cleaned,
                         "created_at": unwrapped.created_at,
                         "direction": direction,
                         "kind": 1059,
                         "dm_kind": unwrapped.format,
+                        "pushstr_client": pushstr_client,
+                        "receipt_for": receipt_for,
                     }));
                 }
                 Err(e) => {
@@ -903,15 +1034,19 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
                     event.content.clone()
                 });
+            let (cleaned, pushstr_client, receipt_for) =
+                normalize_message_content(&decrypted);
             messages.push(serde_json::json!({
                 "id": event_id,
                 "from": event.pubkey.to_hex(),
                 "to": my_pubkey.to_hex(),
-                "content": decrypted,
+                "content": cleaned,
                 "created_at": event.created_at.as_u64(),
                 "direction": "in",
                 "kind": 4,
                 "dm_kind": "nip04",
+                "pushstr_client": pushstr_client,
+                "receipt_for": receipt_for,
             }));
         }
 
@@ -929,15 +1064,19 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
                     event.content.clone()
                 });
+            let (cleaned, pushstr_client, receipt_for) =
+                normalize_message_content(&decrypted);
             messages.push(serde_json::json!({
                 "id": event_id,
                 "from": my_pubkey.to_hex(),
                 "to": recipient_pk.to_hex(),
-                "content": decrypted,
+                "content": cleaned,
                 "created_at": event.created_at.as_u64(),
                 "direction": "out",
                 "kind": 4,
                 "dm_kind": "nip04",
+                "pushstr_client": pushstr_client,
+                "receipt_for": receipt_for,
             }));
         }
 
@@ -1022,15 +1161,19 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                         });
                                 }
                             }
+                            let (cleaned, pushstr_client, receipt_for) =
+                                normalize_message_content(&content);
                             messages.push(serde_json::json!({
                                 "id": event_id,
                                 "from": sender_hex,
                                 "to": my_pubkey.to_hex(),
-                                "content": content,
+                                "content": cleaned,
                                 "created_at": unwrapped.created_at,
                                 "direction": "in",
                                 "kind": 1059,
                                 "dm_kind": unwrapped.format,
+                                "pushstr_client": pushstr_client,
+                                "receipt_for": receipt_for,
                             }));
                         } else {
                             eprintln!("[dm] Giftwrap event ignored (could not unwrap) {}", event_id);
@@ -1068,17 +1211,20 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
                                 event.content.clone()
                             });
-
-                            messages.push(serde_json::json!({
-                                "id": event_id,
-                                "from": event.pubkey.to_hex(),
-                                "to": my_pubkey.to_hex(),
-                                "content": decrypted,
-                                "created_at": event.created_at.as_u64(),
-                                "direction": "in",
-                                "kind": 4,
-                                "dm_kind": "nip04",
-                            }));
+                        let (cleaned, pushstr_client, receipt_for) =
+                            normalize_message_content(&decrypted);
+                        messages.push(serde_json::json!({
+                            "id": event_id,
+                            "from": event.pubkey.to_hex(),
+                            "to": my_pubkey.to_hex(),
+                            "content": cleaned,
+                            "created_at": event.created_at.as_u64(),
+                            "direction": "in",
+                            "kind": 4,
+                            "dm_kind": "nip04",
+                            "pushstr_client": pushstr_client,
+                            "receipt_for": receipt_for,
+                        }));
                     } else {
                         eprintln!(
                             "[dm] notif ignored kind={} id={}",

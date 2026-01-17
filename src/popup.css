@@ -462,6 +462,10 @@ main {
   width: 100%;
 }
 
+.msg-row.out {
+  margin-top: 6px;
+}
+
 .popout-float {
   position: absolute;
   top: 12px;

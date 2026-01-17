@@ -1868,13 +1868,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   ) async {
     final decoded = <Map<String, dynamic>>[];
     for (final m in msgs) {
-      final content = m['content']?.toString() ?? '';
-      final receiptId = _extractReadReceiptId(content);
-      if (receiptId != null) {
+      final receiptId = m['receipt_for']?.toString();
+      if (receiptId != null && receiptId.isNotEmpty) {
         _handleIncomingReceipt(receiptId);
         continue;
       }
-      final isPushstrClient = _containsPushstrClientTag(content);
+      final isPushstrClient = m['pushstr_client'] == true;
+      final content = m['content']?.toString() ?? '';
       final senderPubkey = m['from']?.toString() ?? npub ?? '';
       final messageId = m['id'] as String?;
       final processed = await _decodeContent(content, senderPubkey, messageId);
@@ -5072,14 +5072,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await prefs.setString('nostr_nsec', selectedNsec);
         profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
 
-        // Ensure the selected profile is active in Rust
-        try {
-          api.initNostr(nsec: selectedNsec);
-          if (selectedProfileIndex < profileNpubs.length) {
-            setState(() => currentNpub = profileNpubs[selectedProfileIndex]);
-          }
-        } catch (e) {
-          print('Failed to activate profile: $e');
+        if (selectedProfileIndex < profileNpubs.length) {
+          setState(() => currentNpub = profileNpubs[selectedProfileIndex]);
         }
       }
 
@@ -5534,38 +5528,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _refreshProfileNpubs() async {
     if (profiles.isEmpty) return;
-
-    final current =
-        (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
-        ? profiles[selectedProfileIndex]['nsec'] ?? ''
-        : '';
-
-    final npubs = <String>[];
-
-    // Compute npubs on main thread to avoid isolate state confusion
-    // Crypto operations are fast enough for a few profiles
-    for (final profile in profiles) {
-      final nsec = profile['nsec'] ?? '';
-      if (nsec.isEmpty) {
-        npubs.add('');
-        continue;
-      }
-      try {
-        final npub = api.initNostr(nsec: nsec);
-        npubs.add(npub);
-      } catch (e) {
-        print('Failed to derive npub: $e');
-        npubs.add('');
-      }
-    }
-
-    // Restore the current nsec
-    if (current.isNotEmpty) {
-      try {
-        api.initNostr(nsec: current);
-      } catch (_) {
-        // ignore restore errors
-      }
+    final nsecs = profiles
+        .map((profile) => profile['nsec'] ?? '')
+        .toList(growable: false);
+    List<String> npubs = [];
+    try {
+      npubs = api.deriveNpubs(nsecs: nsecs);
+    } catch (e) {
+      print('Failed to derive npubs: $e');
+      npubs = List.filled(nsecs.length, '');
     }
 
     // Cache the computed npubs
