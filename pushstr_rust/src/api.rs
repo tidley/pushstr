@@ -227,9 +227,9 @@ fn seq_from_tag_list(tags: &[Vec<String>]) -> Option<u64> {
     None
 }
 
-fn seq_from_event_tags(tags: &[Tag]) -> Option<u64> {
+fn seq_from_event_tags(tags: &Tags) -> Option<u64> {
     let seq_kind = TagKind::Custom("seq".into());
-    for tag in tags {
+    for tag in tags.iter() {
         if tag.kind() == seq_kind {
             if let Some(val) = tag.content() {
                 if let Ok(seq) = val.parse::<u64>() {
@@ -807,7 +807,7 @@ pub fn send_legacy_gift_dm(recipient: String, content: String) -> Result<String>
 
 /// Wrap a NIP-17 giftwrap from a provided inner event JSON
 #[frb(sync)]
-pub fn wrap_gift(inner_json: String, recipient: String, use_nip44: bool) -> Result<String> {
+pub fn wrap_gift(inner_json: String, recipient: String, _use_nip44: bool) -> Result<String> {
     let inner_event: Event =
         serde_json::from_str(&inner_json).context("inner_json must be a valid Nostr event JSON")?;
     let recipient_pk = parse_pubkey(&recipient)?;
