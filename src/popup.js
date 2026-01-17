@@ -864,6 +864,7 @@ function addOptimisticMessage({ content, recipient }) {
     content: taggedContent,
     created_at: Math.floor(Date.now() / 1000),
     local_status: 'sending',
+    dm_kind: getDmModeForContact(recipient) === 'nip04' ? 'nip04' : 'nip17',
   };
   optimisticMessages.push(msg);
   render();
@@ -1666,7 +1667,7 @@ function buildReceiptBadge(message) {
   } else {
     badge.className = `badge receipt ${hasRead ? 'read' : 'sent'}`;
     badge.textContent = hasRead ? 'R' : 'S';
-    badge.title = hasRead ? 'Read' : 'Sent';
+    badge.title = hasRead ? 'Received' : 'Sent';
   }
   return badge;
 }
