@@ -679,35 +679,44 @@ async function sendGift(recipient, content, modeOverride = null) {
     return { ok: true, id: signedDm.id };
   }
 
-  // NIP-17 Giftwrap: inner DM (kind 14) plaintext, signed by sender, wrapped in kind:1059 sealed with ephemeral key.
+  // NIP-59/NIP-17 Giftwrap: sealed rumor (kind 13) inside kind 1059.
   const senderPubkey = nt.getPublicKey(priv);
   const inner = {
-    kind: 14, // NIP-17: kind 14 for private direct message
+    kind: 14,
     created_at,
-    tags: [["p", recipientHex]],
+    tags: [
+      ["p", recipientHex],
+      ["alt", "Direct message"]
+    ],
     content
   };
   const innerSigned = finalizeEvent(inner, priv);
+  const rumor = { ...innerSigned };
+  delete rumor.sig;
+
+  const twoDaysAgo = created_at - (2 * 24 * 60 * 60);
+  const sealedTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
+  const sealedContent = await encryptGift(priv, recipientHex, JSON.stringify(rumor));
+  const sealedEvent = finalizeEvent({
+    kind: 13,
+    created_at: sealedTimestamp,
+    content: sealedContent
+  }, priv);
 
   const wrappingPriv = nt.generateSecretKey();
   const wrappingPub = nt.getPublicKey(wrappingPriv);
-  const sealedContent = await encryptGift(wrappingPriv, recipientHex, JSON.stringify(innerSigned));
+  const giftCiphertext = await encryptGift(wrappingPriv, recipientHex, JSON.stringify(sealedEvent));
 
-  // NIP-17: Random timestamp between now and 2 days ago
-  const twoDaysAgo = created_at - (2 * 24 * 60 * 60);
   const randomTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
-
-  // NIP-17: Expiration 24 hours after creation
   const expiration = created_at + (24 * 60 * 60);
-
   const giftwrap = {
     kind: 1059,
-    created_at: randomTimestamp, // NIP-17: randomized timestamp
+    created_at: randomTimestamp,
     tags: [
       ["p", recipientHex],
-      ["expiration", expiration.toString()] // NIP-17: expiration tag
+      ["expiration", expiration.toString()]
     ],
-    content: sealedContent,
+    content: giftCiphertext,
     pubkey: wrappingPub
   };
   const signedGift = finalizeEvent(giftwrap, wrappingPriv);

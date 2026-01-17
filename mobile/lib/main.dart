@@ -594,10 +594,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (dmKind == 'legacy_giftwrap') {
         _giftwrapFormats[pubkey] = 'legacy_giftwrap';
         giftwrapChanged = true;
-        if (!hasOverride && _dmModes[pubkey] != 'legacy_giftwrap') {
-          _dmModes[pubkey] = 'legacy_giftwrap';
+        if (!hasOverride && _dmModes[pubkey] != 'nip59') {
+          _dmModes[pubkey] = 'nip59';
           changed = true;
-          print('[dm] mode set legacy_giftwrap for ${pubkey.substring(0, 8)}');
+          print('[dm] legacy giftwrap observed; using nip59 for ${pubkey.substring(0, 8)}');
         }
         continue;
       }
@@ -644,16 +644,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (override == 'giftwrap') {
       final observed = _dmModes[pubkey];
       if (observed == 'legacy_giftwrap' || observed == 'nip59') {
-        return observed == 'legacy_giftwrap' ? 'legacy_giftwrap' : 'nip59';
+        return 'nip59';
       }
-      return _giftwrapFormats[pubkey] ?? 'nip59';
+      final format = _giftwrapFormats[pubkey];
+      return format == 'legacy_giftwrap' ? 'nip59' : (format ?? 'nip59');
     }
     final observed = _dmModes[pubkey];
     if (observed == 'nip04') return 'nip04';
     if (observed == 'legacy_giftwrap' || observed == 'nip59') {
-      return observed == 'legacy_giftwrap' ? 'legacy_giftwrap' : 'nip59';
+      return 'nip59';
     }
-    return _giftwrapFormats[pubkey] ?? 'nip59';
+    final format = _giftwrapFormats[pubkey];
+    return format == 'legacy_giftwrap' ? 'nip59' : (format ?? 'nip59');
   }
 
   Widget? _buildDmBadge(Map<String, dynamic> message) {
@@ -990,10 +992,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       final dmMode = _effectiveDmMode(selectedContact!);
       final useLegacyDm = dmMode == 'nip04';
-      final useLegacyGiftwrap = dmMode == 'legacy_giftwrap';
-      final modeLabel = useLegacyDm
-          ? 'nip04'
-          : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59');
+      final modeLabel = useLegacyDm ? 'nip04' : 'nip59';
       print(
         '[dm] send mode=$modeLabel to=${selectedContact!.substring(0, 8)} textLen=${text.length}',
       );
@@ -1014,9 +1013,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
           'direction': 'out',
           'kind': useLegacyDm ? 4 : 1059,
-          'dm_kind': useLegacyDm
-              ? 'nip04'
-              : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59'),
+          'dm_kind': useLegacyDm ? 'nip04' : 'nip59',
         });
         messageCtrl.clear();
         _pendingAttachment = null;
@@ -1032,12 +1029,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           try {
             if (useLegacyDm) {
               await RustSyncWorker.sendLegacyDm(
-                recipient: selectedContact!,
-                message: payload,
-                nsec: nsec!,
-              );
-            } else if (useLegacyGiftwrap) {
-              await RustSyncWorker.sendLegacyGiftDm(
                 recipient: selectedContact!,
                 message: payload,
                 nsec: nsec!,
@@ -1150,7 +1141,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final localText = built['text'] as String;
       final dmKind = (message['dm_kind'] ?? 'nip59').toString();
       final useLegacyDm = dmKind == 'nip04';
-      final useLegacyGiftwrap = dmKind == 'legacy_giftwrap';
 
       final localId = 'local_${DateTime.now().millisecondsSinceEpoch}';
       _sessionMessages.add(localId);
@@ -1167,9 +1157,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
           'direction': 'out',
           'kind': useLegacyDm ? 4 : 1059,
-          'dm_kind': useLegacyDm
-              ? 'nip04'
-              : (useLegacyGiftwrap ? 'legacy_giftwrap' : 'nip59'),
+          'dm_kind': useLegacyDm ? 'nip04' : 'nip59',
         });
         lastError = null;
       });
@@ -1179,12 +1167,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (useLegacyDm) {
         await RustSyncWorker.sendLegacyDm(
-          recipient: recipient,
-          message: payload,
-          nsec: nsec!,
-        );
-      } else if (useLegacyGiftwrap) {
-        await RustSyncWorker.sendLegacyGiftDm(
           recipient: recipient,
           message: payload,
           nsec: nsec!,
