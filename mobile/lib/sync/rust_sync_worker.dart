@@ -10,12 +10,13 @@ import '../bridge_generated.dart/frb_generated.dart';
 class RustSyncWorker {
   /// Single-flight guard so only one Rust wait runs at a time across isolates.
   static final _mutex = _AsyncMutex();
+  static final _sendMutex = _AsyncMutex();
   static const int _sendMutexRetries = 20;
   static const Duration _sendMutexDelay = Duration(milliseconds: 50);
 
   static Future<bool> _acquireSendMutex() async {
     for (var attempt = 0; attempt < _sendMutexRetries; attempt++) {
-      if (await _mutex.tryAcquire()) return true;
+      if (await _sendMutex.tryAcquire()) return true;
       await Future.delayed(_sendMutexDelay);
     }
     return false;
@@ -28,7 +29,7 @@ class RustSyncWorker {
     required Duration wait,
   }) async {
     if (nsec.isEmpty) return null;
-    if (!await _acquireSendMutex()) return null;
+    if (!await _mutex.tryAcquire()) return null;
     try {
       final seconds = wait.inSeconds.clamp(1, 3);
       return Isolate.run(() async {
@@ -53,7 +54,7 @@ class RustSyncWorker {
     int sinceTimestamp = 0,
   }) async {
     if (nsec.isEmpty) return null;
-    if (!await _acquireSendMutex()) return null;
+    if (!await _mutex.tryAcquire()) return null;
     try {
       return Isolate.run(() async {
         try {
@@ -89,7 +90,7 @@ class RustSyncWorker {
     bool useNip44 = true,
   }) async {
     if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return null;
-    if (!await _mutex.tryAcquire()) return null;
+    if (!await _acquireSendMutex()) return null;
     try {
       // ignore: avoid_print
       print('[dm] sendGiftDm start recipient=${recipient.substring(0, 8)}');
@@ -110,7 +111,7 @@ class RustSyncWorker {
       }
       return eventId;
     } finally {
-      _mutex.release();
+      _sendMutex.release();
     }
   }
 
@@ -121,7 +122,7 @@ class RustSyncWorker {
     required String nsec,
   }) async {
     if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return null;
-    if (!await _mutex.tryAcquire()) return null;
+    if (!await _acquireSendMutex()) return null;
     try {
       // ignore: avoid_print
       print('[dm] sendLegacyDm start recipient=${recipient.substring(0, 8)}');
@@ -142,7 +143,7 @@ class RustSyncWorker {
       }
       return eventId;
     } finally {
-      _mutex.release();
+      _sendMutex.release();
     }
   }
 
