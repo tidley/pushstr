@@ -8849,6 +8849,8 @@ var keyNicknameEl = document.getElementById("keyNickname");
 var saveBtn = document.getElementById("save");
 var copyNsecBtn = document.getElementById("export");
 var copyNpubBtn = document.getElementById("exportNpub");
+var backupProfileBtn = document.getElementById("backupProfile");
+var importProfileBtn = document.getElementById("importProfile");
 var relayInput = document.getElementById("relayInput");
 var relayError = document.getElementById("relayError");
 var relayList = document.getElementById("relayList");
@@ -8892,6 +8894,8 @@ document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
 copyNpubBtn.addEventListener("click", exportNpub);
+backupProfileBtn?.addEventListener("click", backupProfile);
+importProfileBtn?.addEventListener("click", importProfile);
 document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
 document.getElementById("addContact").addEventListener("click", addContactFromForm);
@@ -9204,6 +9208,53 @@ async function exportNpub() {
     prompt("Your npub:", res.npub);
     status("Copy failed; shown in prompt");
   }
+}
+async function backupProfile() {
+  try {
+    const res = await safeSend({ type: "backup-profile" });
+    if (!res?.backup) {
+      status("Backup failed");
+      return;
+    }
+    const json = JSON.stringify(res.backup, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const filename = `pushstr_profile_backup_${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.json`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    status("Backup downloaded");
+  } catch (err) {
+    status(`Backup failed: ${err?.message || err}`);
+  }
+}
+async function importProfile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file)
+      return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      const res = await safeSend({ type: "import-profile", backup });
+      if (!res?.ok) {
+        status(res?.error || "Import failed");
+        return;
+      }
+      status("Profile imported");
+      await init();
+    } catch (err) {
+      status(`Import failed: ${err?.message || err}`);
+    }
+  };
+  input.click();
 }
 async function showNpubQr() {
   let res;

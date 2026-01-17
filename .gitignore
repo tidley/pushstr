@@ -176,3 +176,4 @@ node_modules/
 pushstr_rust/target/
 **/target/
 .readme
+.backups

@@ -11798,7 +11798,12 @@ var DEFAULT_RELAYS = [
   "wss://relay.primal.net",
   "wss://nos.lol",
   "wss://nostr.mom",
-  "wss://relay.nostr.band"
+  "wss://relay.nostr.band",
+  "wss://relay.snort.social",
+  "wss://relay.nostr.bg",
+  "wss://eden.nostr.land",
+  "wss://relay.nostr.wine",
+  "wss://relay.plebstr.com"
 ];
 var settings = {
   relays: [...DEFAULT_RELAYS],
@@ -11822,8 +11827,16 @@ var BLOSSOM_SERVER = "https://blossom.primal.net";
 var PUBLISH_RETRY_ATTEMPTS = 3;
 var PUBLISH_RETRY_BASE_MS = 400;
 var RELAY_COOLDOWN_MS = 10 * 60 * 1e3;
+var KEEP_ALIVE_MS = 5 * 60 * 1e3;
+var READ_RECEIPT_KEY = "pushstr_ack";
+var PUSHSTR_CLIENT_TAG = "[pushstr:client]";
 var BLOSSOM_UPLOAD_PATH = "upload";
 var suppressNotifications = true;
+var keepAliveTimer = null;
+var keepAliveRunning = false;
+var pendingReceipts = /* @__PURE__ */ new Set();
+var sentReceipts = /* @__PURE__ */ new Set();
+var lastConnectAt = 0;
 var textEncoder = new TextEncoder();
 var textDecoder = new TextDecoder();
 var ready = (async () => {
@@ -11834,6 +11847,7 @@ var ready = (async () => {
     await connect();
     await setupContextMenus();
     quietNotifications();
+    startKeepAlive();
   } catch (err2) {
     console.error("[pushstr][background] init failed", err2);
   }
@@ -11884,10 +11898,33 @@ async function handleMessage(msg) {
     const pub = getPublicKey(priv);
     return { npub: nip19_exports.npubEncode(pub) };
   }
+  if (msg.type === "backup-profile") {
+    const backup = buildProfileBackup();
+    return { ok: true, backup };
+  }
+  if (msg.type === "import-profile") {
+    const backup = msg.backup;
+    if (!backup || typeof backup !== "object") {
+      return { ok: false, error: "invalid backup payload" };
+    }
+    const res = await importProfileBackup(backup);
+    return res;
+  }
   if (msg.type === "set-last-recipient") {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
     return { ok: true };
+  }
+  if (msg.type === "resend-message") {
+    const payload = msg.content || msg.message?.content;
+    const recipientRaw = msg.recipient || msg.message?.to || msg.message?.recipient;
+    if (!payload || !recipientRaw) {
+      return { ok: false, error: "missing payload or recipient" };
+    }
+    const recipient = normalizePubkey(recipientRaw);
+    const dmKind = msg.dm_kind || msg.message?.dm_kind || msg.message?.outerKind;
+    const modeOverride = dmKind === "nip04" || dmKind === 4 ? "nip04" : "nip17";
+    return await sendGift(recipient, payload, modeOverride);
   }
   if (msg.type === "set-dm-mode") {
     const recipient = normalizePubkey(msg.recipient);
@@ -11978,6 +12015,66 @@ async function handleMessage(msg) {
     return { ok: true, removed: before - messages2.length };
   }
   return { ok: true };
+}
+async function importProfileBackup(backup) {
+  const profile = backup.profile || {};
+  const nsec = profile.nsec;
+  if (!nsec || typeof nsec !== "string") {
+    return { ok: false, error: "missing nsec" };
+  }
+  settings.nsec = nsec;
+  addKeyToList(settings.nsec);
+  loadMessagesForCurrent();
+  quietNotifications();
+  const priv = currentPrivkeyHex();
+  const pub = priv ? getPublicKey(priv) : null;
+  if (pub && profile.nickname) {
+    settings.keys = settings.keys || [];
+    settings.keys = settings.keys.map(
+      (k) => k.pubkey === pub ? { ...k, nickname: profile.nickname } : k
+    );
+  }
+  const contacts = Array.isArray(backup.contacts) ? backup.contacts : [];
+  if (contacts.length) {
+    setRecipientsForCurrent(
+      contacts.map((c) => ({
+        pubkey: c.pubkey,
+        nickname: c.nickname || ""
+      }))
+    );
+    if (!settings.lastRecipient && contacts[0]?.pubkey) {
+      try {
+        settings.lastRecipient = normalizePubkey(contacts[0].pubkey);
+      } catch (_) {
+        settings.lastRecipient = contacts[0].pubkey;
+      }
+    }
+  }
+  await persistSettings();
+  await connect();
+  await setupContextMenus();
+  syncRecipientsForCurrent();
+  return { ok: true };
+}
+function buildProfileBackup() {
+  const pub = currentPubkey();
+  const npub = pub ? nip19_exports.npubEncode(pub) : null;
+  const keyEntry = (settings.keys || []).find((k) => k.pubkey === pub || k.nsec === settings.nsec);
+  const contacts = getRecipientsForCurrent().map((c) => ({
+    pubkey: c.pubkey,
+    nickname: c.nickname || ""
+  }));
+  return {
+    type: "pushstr_profile_backup",
+    version: 1,
+    created_at: (/* @__PURE__ */ new Date()).toISOString(),
+    profile: {
+      nsec: settings.nsec || null,
+      npub,
+      nickname: keyEntry?.nickname || ""
+    },
+    contacts
+  };
 }
 async function loadSettings() {
   const stored = await browser.storage.local.get();
@@ -12097,9 +12194,43 @@ async function connect() {
     sub = pool.subscribeMany(relayList, filter, {
       onevent: handleGiftEvent
     });
+    lastConnectAt = Date.now();
     console.info("[pushstr] subscribed", [filter], "relays", relayList);
   } else {
     console.warn("[pushstr] no relays available to subscribe");
+  }
+}
+function startKeepAlive() {
+  if (keepAliveTimer)
+    return;
+  keepAliveTimer = setInterval(() => {
+    keepAliveTick().catch((err2) => {
+      console.warn("[pushstr] keep-alive failed", err2?.message || String(err2));
+    });
+  }, KEEP_ALIVE_MS);
+}
+async function keepAliveTick() {
+  if (keepAliveRunning)
+    return;
+  keepAliveRunning = true;
+  try {
+    if (!pool) {
+      await connect();
+      return;
+    }
+    const relays = activeRelays.length ? activeRelays : settings.relays;
+    if (!relays.length || !sub) {
+      await connect();
+      return;
+    }
+    const needsReconnect = Date.now() - lastConnectAt > 10 * 60 * 1e3;
+    if (needsReconnect) {
+      await connect();
+      return;
+    }
+    await Promise.allSettled(relays.map((url) => pool.ensureRelay(url)));
+  } finally {
+    keepAliveRunning = false;
   }
 }
 function delay(ms) {
@@ -12208,6 +12339,144 @@ async function publishWithRetry(relays, event, label = "event") {
     }
   }
   return { ok: false, error: lastErr?.message || String(lastErr) };
+}
+function parseReadReceipt(content) {
+  if (!content || typeof content !== "string")
+    return null;
+  const cleaned = stripPushstrClientTag(content).trimStart();
+  if (!cleaned.includes(READ_RECEIPT_KEY))
+    return null;
+  if (!cleaned.startsWith("{"))
+    return null;
+  try {
+    const decoded = JSON.parse(cleaned);
+    if (decoded && typeof decoded === "object") {
+      const receiptId = decoded[READ_RECEIPT_KEY];
+      if (typeof receiptId === "string" && receiptId.length) {
+        return receiptId;
+      }
+    }
+  } catch (_) {
+  }
+  return null;
+}
+async function applyReadReceipt(receiptId) {
+  if (!receiptId)
+    return false;
+  let updated = false;
+  const now2 = Math.floor(Date.now() / 1e3);
+  for (const msg of messages2) {
+    if (msg.id !== receiptId)
+      continue;
+    if (msg.direction !== "out")
+      continue;
+    if (!msg.read_at) {
+      msg.read_at = now2;
+      msg.read = true;
+      updated = true;
+    }
+  }
+  if (!updated) {
+    pendingReceipts.add(receiptId);
+    return false;
+  }
+  settings.messagesByKey = settings.messagesByKey || {};
+  const pub = currentPubkey();
+  if (pub)
+    settings.messagesByKey[pub] = messages2;
+  await persistSettings();
+  return true;
+}
+async function sendReadReceipt(recipientHex, messageId, dmKind) {
+  if (!recipientHex || !messageId)
+    return;
+  if (sentReceipts.has(messageId))
+    return;
+  sentReceipts.add(messageId);
+  const content = JSON.stringify({
+    [READ_RECEIPT_KEY]: messageId,
+    ts: Math.floor(Date.now() / 1e3)
+  });
+  const mode = dmKind === "nip04" ? "nip04" : "nip17";
+  const created_at = Math.floor(Date.now() / 1e3);
+  const relayList = activeRelays.length ? activeRelays : settings.relays;
+  if (mode === "nip04") {
+    const priv2 = currentPrivkeyHex();
+    if (!priv2)
+      return;
+    const cipherText = await nip04_exports.encrypt(priv2, recipientHex, content);
+    const dm = {
+      kind: 4,
+      created_at,
+      tags: [["p", recipientHex]],
+      content: cipherText
+    };
+    const signedDm = finalizeEvent2(dm, priv2);
+    await publishWithRetry(relayList, signedDm, "receipt-nip04");
+    return;
+  }
+  const inner = {
+    kind: 14,
+    created_at,
+    tags: [
+      ["p", recipientHex],
+      ["alt", "Read receipt"]
+    ],
+    content
+  };
+  const priv = currentPrivkeyHex();
+  if (!priv)
+    return;
+  const innerSigned = finalizeEvent2(inner, priv);
+  const rumor = { ...innerSigned };
+  delete rumor.sig;
+  const twoDaysAgo = created_at - 2 * 24 * 60 * 60;
+  const sealedTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
+  const sealedContent = await encryptGift(priv, recipientHex, JSON.stringify(rumor));
+  const sealedEvent = finalizeEvent2({
+    kind: 13,
+    created_at: sealedTimestamp,
+    tags: [],
+    content: sealedContent
+  }, priv);
+  const wrappingPriv = generateSecretKey();
+  const wrappingPub = getPublicKey(wrappingPriv);
+  const giftCiphertext = await encryptGift(wrappingPriv, recipientHex, JSON.stringify(sealedEvent));
+  const randomTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
+  const expiration = created_at + 24 * 60 * 60;
+  const giftwrap = {
+    kind: 1059,
+    created_at: randomTimestamp,
+    tags: [
+      ["p", recipientHex],
+      ["expiration", expiration.toString()]
+    ],
+    content: giftCiphertext,
+    pubkey: wrappingPub
+  };
+  const signedGift = finalizeEvent2(giftwrap, wrappingPriv);
+  await publishWithRetry(relayList, signedGift, "receipt-giftwrap");
+}
+function hasPushstrClientTag(content) {
+  return typeof content === "string" && content.includes(PUSHSTR_CLIENT_TAG);
+}
+function stripPushstrClientTag(content) {
+  if (typeof content !== "string")
+    return content;
+  if (!content.includes(PUSHSTR_CLIENT_TAG))
+    return content;
+  const pattern = /(^|\n)\[pushstr:client\](\n|$)/g;
+  return content.replace(pattern, "\n").trim();
+}
+function appendPushstrClientTag(content) {
+  if (typeof content !== "string")
+    return content;
+  if (content.includes(PUSHSTR_CLIENT_TAG))
+    return content;
+  if (!content.length)
+    return PUSHSTR_CLIENT_TAG;
+  return `${content}
+${PUSHSTR_CLIENT_TAG}`;
 }
 async function handleGiftEvent(event) {
   try {
@@ -12322,28 +12591,46 @@ async function handleGiftEvent(event) {
     });
     const dmKind = event.kind === 1059 ? "nip17" : targetEvent.kind === 4 ? "nip04" : "nip17";
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
+    const receiptId = parseReadReceipt(message);
+    if (receiptId) {
+      await applyReadReceipt(receiptId);
+      browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {
+      });
+      return;
+    }
+    const isPushstrClient = hasPushstrClientTag(message);
+    const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
+    const isGiftwrap = event.kind === 1059;
+    const primaryId = isGiftwrap ? event.id : targetEvent.id || event.id;
+    if (primaryId && messageIds.has(primaryId) || targetEvent.id && messageIds.has(targetEvent.id) || event.id && messageIds.has(event.id)) {
+      return;
+    }
     await recordMessage({
-      id: targetEvent.id || event.id,
+      id: isGiftwrap ? event.id : targetEvent.id || event.id,
       direction: "in",
       from: sender,
       to: currentPubkey(),
-      content: message,
+      content: cleanedMessage,
       created_at: targetEvent.created_at || Math.floor(Date.now() / 1e3),
       outerKind: event.kind,
       dm_kind: dmKind,
       relayFrom: settings.relays
     });
-    if (message && !suppressNotifications) {
-      notify(`DM from ${sender.slice(0, 8)}...`, message);
+    const receiptTargetId = isGiftwrap ? event.id : targetEvent.id || event.id;
+    if (receiptTargetId && isPushstrClient) {
+      await sendReadReceipt(sender, receiptTargetId, dmKind);
     }
-    browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message }).catch(() => {
+    if (cleanedMessage && !suppressNotifications) {
+      notify(`DM from ${sender.slice(0, 8)}...`, cleanedMessage);
+    }
+    browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message: cleanedMessage }).catch(() => {
     });
   } catch (err2) {
     console.warn("Failed to unwrap gift/DM", err2);
   }
 }
-async function sendGift(recipient, content) {
+async function sendGift(recipient, content, modeOverride = null) {
   const priv = currentPrivkeyHex();
   if (!priv)
     throw new Error("No key configured");
@@ -12351,12 +12638,13 @@ async function sendGift(recipient, content) {
   if (!chosen)
     throw new Error("No recipient set");
   const recipientHex = normalizePubkey(chosen);
-  const dmMode = getDmModeForRecipient(recipientHex);
+  const dmMode = modeOverride || getDmModeForRecipient(recipientHex);
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1e3);
+  const taggedContent = appendPushstrClientTag(content);
   if (dmMode === "nip04") {
-    const cipherText = await nip04_exports.encrypt(priv, recipientHex, content);
+    const cipherText = await nip04_exports.encrypt(priv, recipientHex, taggedContent);
     const dm = {
       kind: 4,
       created_at,
@@ -12375,7 +12663,7 @@ async function sendGift(recipient, content) {
       direction: "out",
       from: currentPubkey(),
       to: recipientHex,
-      content,
+      content: taggedContent,
       created_at,
       outerKind: 4,
       dm_kind: "nip04",
@@ -12386,28 +12674,38 @@ async function sendGift(recipient, content) {
   const senderPubkey = getPublicKey(priv);
   const inner = {
     kind: 14,
-    // NIP-17: kind 14 for private direct message
     created_at,
-    tags: [["p", recipientHex]],
-    content
+    tags: [
+      ["p", recipientHex],
+      ["alt", "Direct message"]
+    ],
+    content: taggedContent
   };
   const innerSigned = finalizeEvent2(inner, priv);
+  const rumor = { ...innerSigned };
+  delete rumor.sig;
+  const twoDaysAgo = created_at - 2 * 24 * 60 * 60;
+  const sealedTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
+  const sealedContent = await encryptGift(priv, recipientHex, JSON.stringify(rumor));
+  const sealedEvent = finalizeEvent2({
+    kind: 13,
+    created_at: sealedTimestamp,
+    tags: [],
+    content: sealedContent
+  }, priv);
   const wrappingPriv = generateSecretKey();
   const wrappingPub = getPublicKey(wrappingPriv);
-  const sealedContent = await encryptGift(wrappingPriv, recipientHex, JSON.stringify(innerSigned));
-  const twoDaysAgo = created_at - 2 * 24 * 60 * 60;
+  const giftCiphertext = await encryptGift(wrappingPriv, recipientHex, JSON.stringify(sealedEvent));
   const randomTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
   const expiration = created_at + 24 * 60 * 60;
   const giftwrap = {
     kind: 1059,
     created_at: randomTimestamp,
-    // NIP-17: randomized timestamp
     tags: [
       ["p", recipientHex],
       ["expiration", expiration.toString()]
-      // NIP-17: expiration tag
     ],
-    content: sealedContent,
+    content: giftCiphertext,
     pubkey: wrappingPub
   };
   const signedGift = finalizeEvent2(giftwrap, wrappingPriv);
@@ -12422,7 +12720,7 @@ async function sendGift(recipient, content) {
     direction: "out",
     from: senderPubkey,
     to: recipientHex,
-    content,
+    content: taggedContent,
     created_at,
     outerKind: 1059,
     dm_kind: "nip17",
@@ -12672,6 +12970,11 @@ async function recordMessage(entry) {
   }
   if (clean.id)
     messageIds.add(clean.id);
+  if (clean.id && clean.direction === "out" && pendingReceipts.has(clean.id)) {
+    clean.read_at = Math.floor(Date.now() / 1e3);
+    clean.read = true;
+    pendingReceipts.delete(clean.id);
+  }
   messages2.push(clean);
   console.log("[pushstr][background] recordMessage: added message, total now:", messages2.length, "direction:", clean.direction, "to/from:", clean.to || clean.from);
   if (messages2.length > MESSAGE_LIMIT) {

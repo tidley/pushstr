@@ -45,11 +45,11 @@ cd wasm_crypto
 wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
 npm run patch:wasm
 
-# Chrome (MV3)
-MANIFEST_FILE=manifest.chrome.json npm run package
-
 # Firefox (MV2)
 npm run package
+
+# Chrome (MV3)
+MANIFEST_FILE=manifest.chrome.json npm run package
 ```
 
 Outputs:
