@@ -3083,9 +3083,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget? _buildReadReceiptBadge(Map<String, dynamic> message) {
     if (message['direction'] != 'out') return null;
-    final id = message['id']?.toString() ?? '';
-    final isLocal = id.startsWith('local_');
-    if (isLocal) return null;
     final hasRead = message['read_at'] != null || message['read'] == true;
     final color =
         hasRead ? const Color(0xFF22C55E) : Colors.grey.shade500;
