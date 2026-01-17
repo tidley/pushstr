@@ -61,7 +61,12 @@ const DEFAULT_RELAYS = [
   "wss://relay.primal.net",
   "wss://nos.lol",
   "wss://nostr.mom",
-  "wss://relay.nostr.band"
+  "wss://relay.nostr.band",
+  "wss://relay.snort.social",
+  "wss://relay.nostr.bg",
+  "wss://eden.nostr.land",
+  "wss://relay.nostr.wine",
+  "wss://relay.plebstr.com"
 ];
 let settings = {
   relays: [...DEFAULT_RELAYS],

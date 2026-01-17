@@ -4818,6 +4818,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'wss://nos.lol',
     'wss://nostr.mom',
     'wss://relay.nostr.band',
+    'wss://relay.snort.social',
+    'wss://relay.nostr.bg',
+    'wss://eden.nostr.land',
+    'wss://relay.nostr.wine',
+    'wss://relay.plebstr.com',
   ];
   List<Map<String, String>> profiles = [];
   List<String> profileNpubs = [];

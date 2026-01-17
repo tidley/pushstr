@@ -10,6 +10,16 @@ import '../bridge_generated.dart/frb_generated.dart';
 class RustSyncWorker {
   /// Single-flight guard so only one Rust wait runs at a time across isolates.
   static final _mutex = _AsyncMutex();
+  static const int _sendMutexRetries = 20;
+  static const Duration _sendMutexDelay = Duration(milliseconds: 50);
+
+  static Future<bool> _acquireSendMutex() async {
+    for (var attempt = 0; attempt < _sendMutexRetries; attempt++) {
+      if (await _mutex.tryAcquire()) return true;
+      await Future.delayed(_sendMutexDelay);
+    }
+    return false;
+  }
 
   /// Performs a bounded wait for new DMs on a background isolate.
   /// The `wait` should be short (2-3s) to avoid long blocks.
@@ -18,7 +28,7 @@ class RustSyncWorker {
     required Duration wait,
   }) async {
     if (nsec.isEmpty) return null;
-    if (!await _mutex.tryAcquire()) return null;
+    if (!await _acquireSendMutex()) return null;
     try {
       final seconds = wait.inSeconds.clamp(1, 3);
       return Isolate.run(() async {
@@ -43,7 +53,7 @@ class RustSyncWorker {
     int sinceTimestamp = 0,
   }) async {
     if (nsec.isEmpty) return null;
-    if (!await _mutex.tryAcquire()) return null;
+    if (!await _acquireSendMutex()) return null;
     try {
       return Isolate.run(() async {
         try {
