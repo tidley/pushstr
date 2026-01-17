@@ -11,11 +11,12 @@ class RustSyncWorker {
   /// Single-flight guard so only one Rust wait runs at a time across isolates.
   static final _mutex = _AsyncMutex();
   static final _sendMutex = _AsyncMutex();
-  static const int _sendMutexRetries = 20;
   static const Duration _sendMutexDelay = Duration(milliseconds: 50);
+  static const Duration _sendMutexTimeout = Duration(seconds: 15);
 
   static Future<bool> _acquireSendMutex() async {
-    for (var attempt = 0; attempt < _sendMutexRetries; attempt++) {
+    final deadline = DateTime.now().add(_sendMutexTimeout);
+    while (DateTime.now().isBefore(deadline)) {
       if (await _sendMutex.tryAcquire()) return true;
       await Future.delayed(_sendMutexDelay);
     }
