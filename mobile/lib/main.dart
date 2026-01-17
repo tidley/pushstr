@@ -190,6 +190,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     'com.pushstr.storage',
   );
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
+  static const String _pushstrClientTag = '[pushstr:client]';
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
@@ -456,87 +457,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
 
-  String _normalizeBackupPubkey(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) return trimmed;
-    if (trimmed.startsWith('npub') || trimmed.startsWith('nprofile')) {
-      try {
-        return api.npubToHex(npub: trimmed);
-      } catch (_) {
-        return trimmed;
-      }
-    }
-    return trimmed;
-  }
-
-  Future<void> _importProfileBackup() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['json'],
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-    try {
-      final file = result.files.first;
-      final bytes = file.bytes ?? (file.path != null
-          ? await File(file.path!).readAsBytes()
-          : null);
-      if (bytes == null) {
-        _showThemedToast('Import failed: file unreadable', preferTop: true);
-        return;
-      }
-      final jsonText = utf8.decode(bytes);
-      final decoded = jsonDecode(jsonText);
-      if (decoded is! Map) {
-        _showThemedToast('Import failed: invalid JSON', preferTop: true);
-        return;
-      }
-      final profile = decoded['profile'];
-      if (profile is! Map || profile['nsec'] is! String) {
-        _showThemedToast('Import failed: missing nsec', preferTop: true);
-        return;
-      }
-      final nsec = (profile['nsec'] as String).trim();
-      if (nsec.isEmpty) {
-        _showThemedToast('Import failed: empty nsec', preferTop: true);
-        return;
-      }
-      final nickname = (profile['nickname'] ?? '').toString().trim();
-
-      final prefs = await SharedPreferences.getInstance();
-      final contactsKey = _contactsKeyFor(nsec);
-      final contactsJson = decoded['contacts'];
-      if (contactsJson is List) {
-        final entries = <String>[];
-        final seen = <String>{};
-        for (final entry in contactsJson) {
-          if (entry is! Map) continue;
-          final rawPubkey = entry['pubkey']?.toString() ?? '';
-          final pubkey = _normalizeBackupPubkey(rawPubkey);
-          if (pubkey.isEmpty || seen.contains(pubkey)) continue;
-          seen.add(pubkey);
-          final nick = entry['nickname']?.toString() ?? '';
-          entries.add('$nick|$pubkey');
-        }
-        if (entries.isNotEmpty) {
-          await prefs.setStringList(contactsKey, entries);
-        }
-      }
-
-      setState(() {
-        profiles.add({'nsec': nsec, 'nickname': nickname});
-        selectedProfileIndex = profiles.length - 1;
-        profileNickname = nickname;
-        nicknameCtrl.text = nickname;
-      });
-      _markDirty();
-      await _saveSettings();
-      await _refreshProfileNpubs();
-      _showThemedToast('Profile imported', preferTop: true);
-    } catch (e) {
-      _showThemedToast('Import failed: $e', preferTop: true);
-    }
-  }
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
   String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
@@ -545,6 +465,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _dmGiftwrapKeyFor(String profileNsec) =>
       'dm_giftwrap_formats_$profileNsec';
   static const String _readReceiptKey = 'pushstr_ack';
+
+  bool _containsPushstrClientTag(String content) {
+    return content.contains(_pushstrClientTag);
+  }
+
+  String _stripPushstrClientTag(String content) {
+    if (!content.contains(_pushstrClientTag)) return content;
+    final pattern = RegExp(
+      r'(^|\n)\[pushstr:client\](\n|$)',
+      multiLine: true,
+    );
+    final stripped = content.replaceAll(pattern, '\n').trim();
+    return stripped;
+  }
+
+  String _withPushstrClientTag(String content) {
+    if (content.contains(_pushstrClientTag)) return content;
+    if (content.isEmpty) return _pushstrClientTag;
+    return '$content\n$_pushstrClientTag';
+  }
 
   String _buildReadReceiptPayload(String messageId) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -1128,6 +1068,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localText = text.isNotEmpty ? text : '(attachment)';
       }
 
+      payload = _withPushstrClientTag(payload);
       final dmMode = _effectiveDmMode(selectedContact!);
       final useLegacyDm = dmMode == 'nip04';
       final modeLabel = useLegacyDm ? 'nip04' : 'nip59';
@@ -1258,6 +1199,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
+    payload = _withPushstrClientTag(payload);
     return {'payload': payload, 'text': localText, 'media': localMedia};
   }
 
@@ -1931,6 +1873,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _handleIncomingReceipt(receiptId);
         continue;
       }
+      final isPushstrClient = _containsPushstrClientTag(content);
       final senderPubkey = m['from']?.toString() ?? npub ?? '';
       final messageId = m['id'] as String?;
       final processed = await _decodeContent(content, senderPubkey, messageId);
@@ -1940,7 +1883,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'media': processed['media'],
       };
       decoded.add(normalized);
-      unawaited(_maybeSendReadReceipt(normalized));
+      if (isPushstrClient) {
+        unawaited(_maybeSendReadReceipt(normalized));
+      }
     }
     return decoded;
   }
@@ -2051,6 +1996,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String senderPubkey,
     String? messageId,
   ) async {
+    raw = _stripPushstrClientTag(raw);
     final extracted = _extractPushstrMedia(raw);
     final cleanedText = (extracted['text'] ?? '').trim();
     final mediaJson = extracted['media'];
@@ -5605,6 +5551,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+
+  String _normalizeBackupPubkey(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (trimmed.startsWith('npub') || trimmed.startsWith('nprofile')) {
+      try {
+        return api.npubToHex(npub: trimmed);
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  Future<void> _importProfileBackup() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    try {
+      final file = result.files.first;
+      final bytes = file.bytes ?? (file.path != null
+          ? await File(file.path!).readAsBytes()
+          : null);
+      if (bytes == null) {
+        _showThemedToast('Import failed: file unreadable', preferTop: true);
+        return;
+      }
+      final jsonText = utf8.decode(bytes);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map) {
+        _showThemedToast('Import failed: invalid JSON', preferTop: true);
+        return;
+      }
+      final profile = decoded['profile'];
+      if (profile is! Map || profile['nsec'] is! String) {
+        _showThemedToast('Import failed: missing nsec', preferTop: true);
+        return;
+      }
+      final nsec = (profile['nsec'] as String).trim();
+      if (nsec.isEmpty) {
+        _showThemedToast('Import failed: empty nsec', preferTop: true);
+        return;
+      }
+      final nickname = (profile['nickname'] ?? '').toString().trim();
+
+      final prefs = await SharedPreferences.getInstance();
+      final contactsKey = _contactsKeyFor(nsec);
+      final contactsJson = decoded['contacts'];
+      if (contactsJson is List) {
+        final entries = <String>[];
+        final seen = <String>{};
+        for (final entry in contactsJson) {
+          if (entry is! Map) continue;
+          final rawPubkey = entry['pubkey']?.toString() ?? '';
+          final pubkey = _normalizeBackupPubkey(rawPubkey);
+          if (pubkey.isEmpty || seen.contains(pubkey)) continue;
+          seen.add(pubkey);
+          final nick = entry['nickname']?.toString() ?? '';
+          entries.add('$nick|$pubkey');
+        }
+        if (entries.isNotEmpty) {
+          await prefs.setStringList(contactsKey, entries);
+        }
+      }
+
+      setState(() {
+        profiles.add({'nsec': nsec, 'nickname': nickname});
+        selectedProfileIndex = profiles.length - 1;
+        profileNickname = nickname;
+        nicknameCtrl.text = nickname;
+      });
+      _markDirty();
+      await _saveSettings();
+      await _refreshProfileNpubs();
+      _showThemedToast('Profile imported', preferTop: true);
+    } catch (e) {
+      _showThemedToast('Import failed: $e', preferTop: true);
+    }
+  }
 
   Future<void> _addRelay() async {
     final relay = relayInputCtrl.text.trim();

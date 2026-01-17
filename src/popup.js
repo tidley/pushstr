@@ -67,6 +67,7 @@ const warningEl = document.getElementById('upload-warning');
 const showQrBtn = document.getElementById('show-qr');
 const settingsBtn = document.getElementById('open-settings');
 const dmToggleBtn = document.getElementById('dm-toggle');
+const PUSHSTR_CLIENT_TAG = '[pushstr:client]';
 
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
@@ -834,7 +835,9 @@ function buildContacts() {
       nickname: '',
     };
     entry.last = Math.max(entry.last, m.created_at || 0);
-    entry.snippet = truncateSnippet(stripNip18(m.content || ''));
+    entry.snippet = truncateSnippet(
+      stripPushstrClientTag(stripNip18(m.content || '')),
+    );
     counts[other] = entry;
   });
   return Object.values(counts)
@@ -1312,7 +1315,7 @@ function renderBubbleContent(
   messageId = null,
 ) {
   const result = { actions: null, hasMedia: false, mediaEncrypted: null };
-  const baseCleaned = stripNip18(content);
+  const baseCleaned = stripPushstrClientTag(stripNip18(content));
   const extracted = extractPushstrMedia(baseCleaned);
   const cleaned = extracted.text;
   const mediaJson = extracted.mediaJson;
@@ -1579,6 +1582,7 @@ function buildDmBadge(kind) {
   const badge = document.createElement('span');
   badge.className = `badge dm ${kind}`;
   badge.textContent = kind === 'nip04' ? '04' : '17';
+  badge.title = kind === 'nip04' ? 'NIP-04' : 'NIP-17';
   return badge;
 }
 
@@ -1588,6 +1592,7 @@ function buildReceiptBadge(message) {
   const badge = document.createElement('span');
   badge.className = `badge receipt ${hasRead ? 'read' : 'sent'}`;
   badge.textContent = hasRead ? 'R' : 'S';
+  badge.title = hasRead ? 'Read' : 'Sent';
   return badge;
 }
 
@@ -1753,6 +1758,14 @@ function contactLabel(pk) {
 function stripNip18(text) {
   if (!text) return '';
   return text.replace(/^\[\/\/\]:\s*#\s*\(nip18\)\s*/i, '').trim();
+}
+
+function stripPushstrClientTag(text) {
+  if (!text) return '';
+  if (!text.includes(PUSHSTR_CLIENT_TAG)) return text;
+  return text
+    .replace(/(^|\n)\[pushstr:client\](\n|$)/g, '\n')
+    .trim();
 }
 
 function parseUrlMeta(text) {

@@ -85,6 +85,7 @@ const PUBLISH_RETRY_BASE_MS = 400;
 const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
 const KEEP_ALIVE_MS = 5 * 60 * 1000;
 const READ_RECEIPT_KEY = "pushstr_ack";
+const PUSHSTR_CLIENT_TAG = "[pushstr:client]";
 const BLOSSOM_UPLOAD_PATH = "upload";
 let suppressNotifications = true;
 let keepAliveTimer = null;
@@ -739,6 +740,24 @@ async function sendReadReceipt(recipientHex, messageId, dmKind) {
   await publishWithRetry(relayList, signedGift, "receipt-giftwrap");
 }
 
+function hasPushstrClientTag(content) {
+  return typeof content === "string" && content.includes(PUSHSTR_CLIENT_TAG);
+}
+
+function stripPushstrClientTag(content) {
+  if (typeof content !== "string") return content;
+  if (!content.includes(PUSHSTR_CLIENT_TAG)) return content;
+  const pattern = /(^|\n)\[pushstr:client\](\n|$)/g;
+  return content.replace(pattern, "\n").trim();
+}
+
+function appendPushstrClientTag(content) {
+  if (typeof content !== "string") return content;
+  if (content.includes(PUSHSTR_CLIENT_TAG)) return content;
+  if (!content.length) return PUSHSTR_CLIENT_TAG;
+  return `${content}\n${PUSHSTR_CLIENT_TAG}`;
+}
+
 async function handleGiftEvent(event) {
   try {
     const priv = currentPrivkeyHex();
@@ -859,26 +878,28 @@ async function handleGiftEvent(event) {
       browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {});
       return;
     }
+    const isPushstrClient = hasPushstrClientTag(message);
+    const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
     await recordMessage({
       id: targetEvent.id || event.id,
       direction: "in",
       from: sender,
       to: currentPubkey(),
-      content: message,
+      content: cleanedMessage,
       created_at: targetEvent.created_at || Math.floor(Date.now() / 1000),
       outerKind: event.kind,
       dm_kind: dmKind,
       relayFrom: settings.relays
     });
     const receiptTargetId = targetEvent.id || event.id;
-    if (receiptTargetId) {
+    if (receiptTargetId && isPushstrClient) {
       await sendReadReceipt(sender, receiptTargetId, dmKind);
     }
-    if (message && !suppressNotifications) {
-      notify(`DM from ${sender.slice(0, 8)}...`, message);
+    if (cleanedMessage && !suppressNotifications) {
+      notify(`DM from ${sender.slice(0, 8)}...`, cleanedMessage);
     }
-    browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message }).catch(() => {});
+    browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message: cleanedMessage }).catch(() => {});
   } catch (err) {
     console.warn("Failed to unwrap gift/DM", err);
   }
@@ -894,9 +915,10 @@ async function sendGift(recipient, content, modeOverride = null) {
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1000);
+  const taggedContent = appendPushstrClientTag(content);
 
   if (dmMode === "nip04") {
-    const cipherText = await nt.nip04.encrypt(priv, recipientHex, content);
+    const cipherText = await nt.nip04.encrypt(priv, recipientHex, taggedContent);
     const dm = {
       kind: 4,
       created_at,
@@ -915,7 +937,7 @@ async function sendGift(recipient, content, modeOverride = null) {
       direction: "out",
       from: currentPubkey(),
       to: recipientHex,
-      content,
+      content: taggedContent,
       created_at,
       outerKind: 4,
       dm_kind: "nip04",
@@ -933,7 +955,7 @@ async function sendGift(recipient, content, modeOverride = null) {
       ["p", recipientHex],
       ["alt", "Direct message"]
     ],
-    content
+    content: taggedContent
   };
   const innerSigned = finalizeEvent(inner, priv);
   const rumor = { ...innerSigned };
@@ -977,7 +999,7 @@ async function sendGift(recipient, content, modeOverride = null) {
     direction: "out",
     from: senderPubkey,
     to: recipientHex,
-    content,
+    content: taggedContent,
     created_at,
     outerKind: 1059,
     dm_kind: "nip17",
