@@ -855,12 +855,13 @@ function otherParty(m) {
 
 function addOptimisticMessage({ content, recipient }) {
   if (!recipient || !content) return null;
+  const taggedContent = appendPushstrClientTag(content);
   const msg = {
     id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     direction: 'out',
     from: state.pubkey,
     to: recipient,
-    content,
+    content: taggedContent,
     created_at: Math.floor(Date.now() / 1000),
   };
   optimisticMessages.push(msg);
@@ -877,10 +878,12 @@ function removeOptimisticMessage(id) {
 function pruneOptimisticMessages() {
   if (!optimisticMessages.length) return;
   optimisticMessages = optimisticMessages.filter((opt) => {
+    const optContent = stripPushstrClientTag(stripNip18(opt.content || ''));
     return !state.messages.some((m) => {
       if (m.direction !== 'out') return false;
       if (m.to !== opt.to) return false;
-      if (m.content !== opt.content) return false;
+      const msgContent = stripPushstrClientTag(stripNip18(m.content || ''));
+      if (msgContent !== optContent) return false;
       const delta = Math.abs((m.created_at || 0) - (opt.created_at || 0));
       return delta <= 120;
     });
@@ -1816,6 +1819,12 @@ function stripPushstrClientTag(text) {
   return text
     .replace(/(^|\n)\[pushstr:client\](\n|$)/g, '\n')
     .trim();
+}
+
+function appendPushstrClientTag(text) {
+  if (!text) return PUSHSTR_CLIENT_TAG;
+  if (text.includes(PUSHSTR_CLIENT_TAG)) return text;
+  return `${text}\n${PUSHSTR_CLIENT_TAG}`;
 }
 
 function parseUrlMeta(text) {
