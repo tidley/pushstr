@@ -78,8 +78,8 @@ class RustSyncWorker {
     required String nsec,
     bool useNip44 = true,
   }) async {
-    if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return;
-    if (!await _mutex.tryAcquire()) return;
+    if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return null;
+    if (!await _mutex.tryAcquire()) return null;
     try {
       // ignore: avoid_print
       print('[dm] sendGiftDm start recipient=${recipient.substring(0, 8)}');
@@ -110,8 +110,8 @@ class RustSyncWorker {
     required String message,
     required String nsec,
   }) async {
-    if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return;
-    if (!await _mutex.tryAcquire()) return;
+    if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return null;
+    if (!await _mutex.tryAcquire()) return null;
     try {
       // ignore: avoid_print
       print('[dm] sendLegacyDm start recipient=${recipient.substring(0, 8)}');

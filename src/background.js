@@ -164,6 +164,11 @@ async function handleMessage(msg) {
     return { npub: nt.nip19.npubEncode(pub) };
   }
 
+  if (msg.type === "backup-profile") {
+    const backup = buildProfileBackup();
+    return { ok: true, backup };
+  }
+
   if (msg.type === "set-last-recipient") {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
@@ -275,6 +280,27 @@ async function handleMessage(msg) {
   }
 
   return { ok: true };
+}
+
+function buildProfileBackup() {
+  const pub = currentPubkey();
+  const npub = pub ? nt.nip19.npubEncode(pub) : null;
+  const keyEntry = (settings.keys || []).find((k) => k.pubkey === pub || k.nsec === settings.nsec);
+  const contacts = getRecipientsForCurrent().map((c) => ({
+    pubkey: c.pubkey,
+    nickname: c.nickname || ""
+  }));
+  return {
+    type: "pushstr_profile_backup",
+    version: 1,
+    created_at: new Date().toISOString(),
+    profile: {
+      nsec: settings.nsec || null,
+      npub,
+      nickname: keyEntry?.nickname || ""
+    },
+    contacts
+  };
 }
 
 async function loadSettings() {
@@ -742,6 +768,10 @@ async function handleGiftEvent(event) {
         innerTags: targetEvent.tags,
         outerTags: event.tags
       });
+      return;
+    }
+    const candidateId = targetEvent.id || event.id;
+    if (candidateId && messageIds.has(candidateId)) {
       return;
     }
     const sender = targetEvent.pubkey || "unknown";

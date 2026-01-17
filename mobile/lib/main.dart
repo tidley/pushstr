@@ -4765,6 +4765,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const String _appVersion = '0.0.3';
+  static const MethodChannel _storageChannel = MethodChannel(
+    'com.pushstr.storage',
+  );
   static const List<String> _defaultRelays = [
     'wss://relay.damus.io',
     'wss://relay.primal.net',
@@ -5153,6 +5156,105 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<File> _writeTempBackupFile(
+    Uint8List bytes,
+    String filename,
+  ) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  Future<void> _backupCurrentProfile() async {
+    if (profiles.isEmpty || selectedProfileIndex >= profiles.length) {
+      _showThemedToast('No profile selected', preferTop: true);
+      return;
+    }
+    final nsec = profiles[selectedProfileIndex]['nsec'] ?? '';
+    if (nsec.isEmpty) {
+      _showThemedToast('Missing profile secret', preferTop: true);
+      return;
+    }
+    final nickname = profiles[selectedProfileIndex]['nickname'] ?? '';
+    final npub = (selectedProfileIndex < profileNpubs.length)
+        ? profileNpubs[selectedProfileIndex]
+        : currentNpub;
+    final prefs = await SharedPreferences.getInstance();
+    final contactsKey = nsec.isNotEmpty ? _contactsKeyFor(nsec) : 'contacts';
+    final savedContacts = prefs.getStringList(contactsKey) ?? [];
+    final contacts = savedContacts
+        .map((entry) {
+          final parts = entry.split('|');
+          return {
+            'nickname': parts.isNotEmpty ? parts[0] : '',
+            'pubkey': parts.length > 1 ? parts[1] : '',
+          };
+        })
+        .where((c) => (c['pubkey'] ?? '').toString().isNotEmpty)
+        .toList();
+    final payload = {
+      'type': 'pushstr_profile_backup',
+      'version': 1,
+      'created_at': DateTime.now().toIso8601String(),
+      'profile': {
+        'nsec': nsec,
+        'npub': npub,
+        'nickname': nickname,
+      },
+      'contacts': contacts,
+    };
+    final json = jsonEncode(payload);
+    final bytes = Uint8List.fromList(utf8.encode(json));
+    final filename =
+        'pushstr_profile_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+
+    if (Platform.isAndroid) {
+      final uri = await _storageChannel.invokeMethod<String>(
+        'saveToDownloads',
+        {'bytes': bytes, 'mime': 'application/json', 'filename': filename},
+      );
+      if (!mounted) return;
+      if (uri == null) {
+        _showThemedToast('Backup failed', preferTop: true);
+      } else {
+        _showThemedToast('Backup saved to Downloads', preferTop: true);
+      }
+      return;
+    }
+
+    if (Platform.isIOS) {
+      final file = await _writeTempBackupFile(bytes, filename);
+      final ok = await _storageChannel.invokeMethod<bool>(
+        'shareFile',
+        {
+          'path': file.path,
+          'mime': 'application/json',
+          'filename': filename,
+        },
+      );
+      if (!mounted) return;
+      if (ok != true) {
+        _showThemedToast('Backup failed', preferTop: true);
+      }
+      return;
+    }
+
+    final selectedDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose where to save backup',
+    );
+    if (selectedDir == null) {
+      if (mounted) {
+        _showThemedToast('Backup cancelled', preferTop: true);
+      }
+      return;
+    }
+    final file = File('$selectedDir/$filename');
+    await file.writeAsBytes(bytes);
+    if (!mounted) return;
+    _showThemedToast('Backup saved to $selectedDir', preferTop: true);
+  }
+
   Future<void> _copyNpub() async {
     // Use cached currentNpub which reflects the selected profile
     final npubToCopy = currentNpub.isNotEmpty
@@ -5450,6 +5552,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (text.length <= 12) return text;
     return '${text.substring(0, 8)}...${text.substring(text.length - 4)}';
   }
+
+  String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
 
   Future<void> _addRelay() async {
     final relay = relayInputCtrl.text.trim();
@@ -5920,6 +6024,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: _showNpubQr,
                     icon: const Icon(Icons.qr_code_2, size: 20),
                     label: const Text('Show QR'),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _backupCurrentProfile,
+                    icon: const Icon(Icons.save_alt, size: 20),
+                    label: const Text('Backup Profile (JSON)'),
                   ),
                 ]),
                 const SizedBox(height: 12),
