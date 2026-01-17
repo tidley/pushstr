@@ -3092,7 +3092,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final tooltip = hasRead ? 'Read' : 'Sent';
     return Tooltip(
       message: tooltip,
-      child: Icon(Icons.visibility, size: 12, color: color),
+      child: Icon(
+        hasRead ? Icons.visibility : Icons.visibility_outlined,
+        size: 12,
+        color: color,
+      ),
     );
   }
 
