@@ -83,8 +83,14 @@ const BLOSSOM_SERVER = "https://blossom.primal.net";
 const PUBLISH_RETRY_ATTEMPTS = 3;
 const PUBLISH_RETRY_BASE_MS = 400;
 const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+const KEEP_ALIVE_MS = 60 * 1000;
+const READ_RECEIPT_KEY = "pushstr_ack";
 const BLOSSOM_UPLOAD_PATH = "upload";
 let suppressNotifications = true;
+let keepAliveTimer = null;
+let keepAliveRunning = false;
+const pendingReceipts = new Set();
+const sentReceipts = new Set();
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -101,6 +107,7 @@ const ready = (async () => {
     await connect();
     await setupContextMenus();
     quietNotifications();
+    startKeepAlive();
   } catch (err) {
     console.error("[pushstr][background] init failed", err);
   }
@@ -396,6 +403,25 @@ async function connect() {
   }
 }
 
+function startKeepAlive() {
+  if (keepAliveTimer) return;
+  keepAliveTimer = setInterval(() => {
+    keepAliveTick().catch((err) => {
+      console.warn("[pushstr] keep-alive failed", err?.message || String(err));
+    });
+  }, KEEP_ALIVE_MS);
+}
+
+async function keepAliveTick() {
+  if (keepAliveRunning) return;
+  keepAliveRunning = true;
+  try {
+    await connect();
+  } finally {
+    keepAliveRunning = false;
+  }
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -508,6 +534,115 @@ async function publishWithRetry(relays, event, label = "event") {
   return { ok: false, error: lastErr?.message || String(lastErr) };
 }
 
+function parseReadReceipt(content) {
+  if (!content || typeof content !== "string") return null;
+  if (!content.includes(READ_RECEIPT_KEY)) return null;
+  if (!content.trimStart().startsWith("{")) return null;
+  try {
+    const decoded = JSON.parse(content);
+    if (decoded && typeof decoded === "object") {
+      const receiptId = decoded[READ_RECEIPT_KEY];
+      if (typeof receiptId === "string" && receiptId.length) {
+        return receiptId;
+      }
+    }
+  } catch (_) {
+    // ignore receipt parse failures
+  }
+  return null;
+}
+
+async function applyReadReceipt(receiptId) {
+  if (!receiptId) return false;
+  let updated = false;
+  const now = Math.floor(Date.now() / 1000);
+  for (const msg of messages) {
+    if (msg.id !== receiptId) continue;
+    if (msg.direction !== "out") continue;
+    if (!msg.read_at) {
+      msg.read_at = now;
+      msg.read = true;
+      updated = true;
+    }
+  }
+  if (!updated) {
+    pendingReceipts.add(receiptId);
+    return false;
+  }
+  settings.messagesByKey = settings.messagesByKey || {};
+  const pub = currentPubkey();
+  if (pub) settings.messagesByKey[pub] = messages;
+  await persistSettings();
+  return true;
+}
+
+async function sendReadReceipt(recipientHex, messageId, dmKind) {
+  if (!recipientHex || !messageId) return;
+  if (sentReceipts.has(messageId)) return;
+  sentReceipts.add(messageId);
+  const content = JSON.stringify({
+    [READ_RECEIPT_KEY]: messageId,
+    ts: Math.floor(Date.now() / 1000)
+  });
+  const mode = dmKind === "nip04" ? "nip04" : "nip17";
+  const created_at = Math.floor(Date.now() / 1000);
+  const relayList = activeRelays.length ? activeRelays : settings.relays;
+  if (mode === "nip04") {
+    const priv = currentPrivkeyHex();
+    if (!priv) return;
+    const cipherText = await nt.nip04.encrypt(priv, recipientHex, content);
+    const dm = {
+      kind: 4,
+      created_at,
+      tags: [["p", recipientHex]],
+      content: cipherText
+    };
+    const signedDm = finalizeEvent(dm, priv);
+    await publishWithRetry(relayList, signedDm, "receipt-nip04");
+    return;
+  }
+
+  const inner = {
+    kind: 14,
+    created_at,
+    tags: [
+      ["p", recipientHex],
+      ["alt", "Read receipt"]
+    ],
+    content
+  };
+  const priv = currentPrivkeyHex();
+  if (!priv) return;
+  const innerSigned = finalizeEvent(inner, priv);
+  const rumor = { ...innerSigned };
+  delete rumor.sig;
+  const twoDaysAgo = created_at - (2 * 24 * 60 * 60);
+  const sealedTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
+  const sealedContent = await encryptGift(priv, recipientHex, JSON.stringify(rumor));
+  const sealedEvent = finalizeEvent({
+    kind: 13,
+    created_at: sealedTimestamp,
+    content: sealedContent
+  }, priv);
+  const wrappingPriv = nt.generateSecretKey();
+  const wrappingPub = nt.getPublicKey(wrappingPriv);
+  const giftCiphertext = await encryptGift(wrappingPriv, recipientHex, JSON.stringify(sealedEvent));
+  const randomTimestamp = Math.floor(Math.random() * (created_at - twoDaysAgo)) + twoDaysAgo;
+  const expiration = created_at + (24 * 60 * 60);
+  const giftwrap = {
+    kind: 1059,
+    created_at: randomTimestamp,
+    tags: [
+      ["p", recipientHex],
+      ["expiration", expiration.toString()]
+    ],
+    content: giftCiphertext,
+    pubkey: wrappingPub
+  };
+  const signedGift = finalizeEvent(giftwrap, wrappingPriv);
+  await publishWithRetry(relayList, signedGift, "receipt-giftwrap");
+}
+
 async function handleGiftEvent(event) {
   try {
     const priv = currentPrivkeyHex();
@@ -618,6 +753,12 @@ async function handleGiftEvent(event) {
     });
     const dmKind = event.kind === 1059 ? "nip17" : (targetEvent.kind === 4 ? "nip04" : "nip17");
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
+    const receiptId = parseReadReceipt(message);
+    if (receiptId) {
+      await applyReadReceipt(receiptId);
+      browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {});
+      return;
+    }
     await ensureContact(sender);
     await recordMessage({
       id: targetEvent.id || event.id,
@@ -630,6 +771,10 @@ async function handleGiftEvent(event) {
       dm_kind: dmKind,
       relayFrom: settings.relays
     });
+    const receiptTargetId = targetEvent.id || event.id;
+    if (receiptTargetId) {
+      await sendReadReceipt(sender, receiptTargetId, dmKind);
+    }
     if (message && !suppressNotifications) {
       notify(`DM from ${sender.slice(0, 8)}...`, message);
     }
@@ -1014,6 +1159,11 @@ async function recordMessage(entry) {
     return;
   }
   if (clean.id) messageIds.add(clean.id);
+  if (clean.id && clean.direction === "out" && pendingReceipts.has(clean.id)) {
+    clean.read_at = Math.floor(Date.now() / 1000);
+    clean.read = true;
+    pendingReceipts.delete(clean.id);
+  }
   messages.push(clean);
   console.log("[pushstr][background] recordMessage: added message, total now:", messages.length, "direction:", clean.direction, "to/from:", clean.to || clean.from);
   if (messages.length > MESSAGE_LIMIT) {

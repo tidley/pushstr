@@ -580,6 +580,12 @@ main {
   border-color: rgba(245, 158, 11, 0.5);
 }
 
+.badge.receipt {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
 .badge.lock.encrypted {
   color: #22c55e;
   border-color: rgba(34, 197, 94, 0.35);

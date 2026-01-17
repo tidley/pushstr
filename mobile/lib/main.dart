@@ -218,6 +218,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, Timer> _copiedMessageTimers = {};
   final Map<String, Timer> _holdTimersHome = {};
   final Map<String, double> _holdProgressHome = {};
+  final Set<String> _pendingReceipts = {};
+  final Set<String> _sentReceipts = {};
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 4000;
@@ -332,9 +334,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Handle shared content from Android intents
     _initShareListener();
 
-    final savedContacts = prefs.getStringList('contacts') ?? [];
-    final savedMessages = prefs.getString('messages');
+    final profileList = prefs.getStringList('profiles') ?? [];
+    String? profileNsec;
+    if (profileIndex >= 0 && profileIndex < profileList.length) {
+      final parts = profileList[profileIndex].split('|');
+      profileNsec = parts.isNotEmpty ? parts[0] : null;
+    }
+    profileNsec ??= savedNsec.isNotEmpty ? savedNsec : null;
+    final contactsKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _contactsKeyFor(profileNsec)
+        : 'contacts';
+    final messagesKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _messagesKeyFor(profileNsec)
+        : 'messages';
+    final pendingKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _pendingDmsKeyFor(profileNsec)
+        : 'pending_dms';
+    final savedContacts =
+        prefs.getStringList(contactsKey) ??
+        prefs.getStringList('contacts') ??
+        [];
+    final savedMessages =
+        prefs.getString(messagesKey) ?? prefs.getString('messages');
+    final pendingMessagesJson = prefs.getString(pendingKey);
     List<Map<String, dynamic>> loadedMessages = [];
+    List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
       try {
         final List<dynamic> msgsList = jsonDecode(savedMessages);
@@ -343,10 +367,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         print('Failed to load saved messages: $e');
       }
     }
+    if (pendingMessagesJson != null && pendingMessagesJson.isNotEmpty) {
+      try {
+        final List<dynamic> msgsList = jsonDecode(pendingMessagesJson);
+        pendingMessages = msgsList
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .map(_normalizeIncomingMessage)
+            .toList();
+      } catch (_) {
+        // ignore pending parse errors
+      }
+    }
     if (mounted) {
       setState(() {
         isConnected = false;
-        messages = loadedMessages;
+        messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
         contacts = _dedupeContacts(
           savedContacts
               .map((c) {
@@ -427,6 +462,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _dmOverridesKeyFor(String profileNsec) => 'dm_overrides_$profileNsec';
   String _dmGiftwrapKeyFor(String profileNsec) =>
       'dm_giftwrap_formats_$profileNsec';
+  static const String _readReceiptKey = 'pushstr_ack';
+
+  String _buildReadReceiptPayload(String messageId) {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return jsonEncode({_readReceiptKey: messageId, 'ts': now});
+  }
+
+  String? _extractReadReceiptId(String content) {
+    if (!content.contains(_readReceiptKey)) return null;
+    if (!content.trimLeft().startsWith('{')) return null;
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map && decoded[_readReceiptKey] is String) {
+        return decoded[_readReceiptKey] as String;
+      }
+    } catch (_) {
+      // ignore parse failures
+    }
+    return null;
+  }
 
   Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
     final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
@@ -870,6 +925,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }).toList();
 
       final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
+      _applyPendingReceiptsToList(merged);
       final added = merged.length > existingLen;
       setState(() {
         messages = merged;
@@ -1027,19 +1083,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       unawaited(
         Future(() async {
           try {
+            String? eventId;
             if (useLegacyDm) {
-              await RustSyncWorker.sendLegacyDm(
+              eventId = await RustSyncWorker.sendLegacyDm(
                 recipient: selectedContact!,
                 message: payload,
                 nsec: nsec!,
               );
             } else {
-              await RustSyncWorker.sendGiftDm(
+              eventId = await RustSyncWorker.sendGiftDm(
                 recipient: selectedContact!,
                 content: payload,
                 nsec: nsec!,
                 useNip44: true,
               );
+            }
+            if (eventId != null) {
+              _replaceLocalMessageId(localId, eventId);
             }
           } catch (e) {
             if (!mounted) return;
@@ -1166,18 +1226,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       unawaited(_saveMessages());
 
       if (useLegacyDm) {
-        await RustSyncWorker.sendLegacyDm(
+        final eventId = await RustSyncWorker.sendLegacyDm(
           recipient: recipient,
           message: payload,
           nsec: nsec!,
         );
+        if (eventId != null) {
+          _replaceLocalMessageId(localId, eventId);
+        }
       } else {
-        await RustSyncWorker.sendGiftDm(
+        final eventId = await RustSyncWorker.sendGiftDm(
           recipient: recipient,
           content: payload,
           nsec: nsec!,
           useNip44: true,
         );
+        if (eventId != null) {
+          _replaceLocalMessageId(localId, eventId);
+        }
       }
       if (!mounted) return;
       _showThemedToast('Resent', preferTop: true);
@@ -1508,7 +1574,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
 
           setState(() {
-            messages = _mergeMessages([...messages, ...newMessages]);
+            final merged = _mergeMessages([...messages, ...newMessages]);
+            _applyPendingReceiptsToList(merged);
+            messages = merged;
             lastError = null;
             contacts = _dedupeContacts(contacts);
             _sortContactsByActivity();
@@ -1733,7 +1801,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         contacts = _dedupeContacts(loadedContacts);
       }
       if (overrideLoaded || messages.isEmpty) {
-        messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
+        final merged = _mergeMessages([...loadedMessages, ...pendingMessages]);
+        _applyPendingReceiptsToList(merged);
+        messages = merged;
       }
       _sortContactsByActivity();
     });
@@ -1774,16 +1844,124 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final decoded = <Map<String, dynamic>>[];
     for (final m in msgs) {
       final content = m['content']?.toString() ?? '';
+      final receiptId = _extractReadReceiptId(content);
+      if (receiptId != null) {
+        _handleIncomingReceipt(receiptId);
+        continue;
+      }
       final senderPubkey = m['from']?.toString() ?? npub ?? '';
       final messageId = m['id'] as String?;
       final processed = await _decodeContent(content, senderPubkey, messageId);
-      decoded.add({
+      final normalized = {
         ...m,
         'content': processed['text'],
         'media': processed['media'],
-      });
+      };
+      decoded.add(normalized);
+      unawaited(_maybeSendReadReceipt(normalized));
     }
     return decoded;
+  }
+
+  void _handleIncomingReceipt(String receiptId) {
+    if (_applyReceiptToMessages(receiptId)) return;
+    _pendingReceipts.add(receiptId);
+  }
+
+  bool _applyReceiptToMessages(String receiptId) {
+    bool updated = false;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    for (final message in messages) {
+      if (message['id'] != receiptId) continue;
+      if (message['direction'] != 'out') continue;
+      if (message['read_at'] == null) {
+        message['read_at'] = now;
+        message['read'] = true;
+        updated = true;
+      }
+    }
+    if (updated && mounted) {
+      setState(() {});
+    }
+    if (updated) {
+      unawaited(_saveMessages());
+    }
+    return updated;
+  }
+
+  void _applyPendingReceiptsToList(List<Map<String, dynamic>> list) {
+    if (_pendingReceipts.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final remaining = <String>{..._pendingReceipts};
+    for (final message in list) {
+      final id = message['id'] as String?;
+      if (id == null || !remaining.contains(id)) continue;
+      if (message['direction'] != 'out') continue;
+      if (message['read_at'] == null) {
+        message['read_at'] = now;
+        message['read'] = true;
+      }
+      remaining.remove(id);
+    }
+    _pendingReceipts
+      ..clear()
+      ..addAll(remaining);
+  }
+
+  void _replaceLocalMessageId(String localId, String eventId) {
+    bool updated = false;
+    for (final message in messages) {
+      if (message['id'] == localId) {
+        message['id'] = eventId;
+        updated = true;
+      }
+    }
+    if (_sessionMessages.remove(localId)) {
+      _sessionMessages.add(eventId);
+    }
+    if (updated) {
+      _applyPendingReceiptsToList(messages);
+      if (mounted) {
+        setState(() {});
+      }
+      unawaited(_saveMessages());
+    }
+  }
+
+  Future<void> _maybeSendReadReceipt(Map<String, dynamic> message) async {
+    if (message['direction'] != 'in') return;
+    final sender = message['from']?.toString() ?? '';
+    final messageId = message['id']?.toString() ?? '';
+    if (sender.isEmpty || messageId.isEmpty) return;
+    if (_sentReceipts.contains(messageId)) return;
+    _sentReceipts.add(messageId);
+    final dmKind = message['dm_kind']?.toString();
+    final kind = _messageKind(message);
+    final useLegacyDm = dmKind == 'nip04' || kind == 4;
+    final payload = _buildReadReceiptPayload(messageId);
+    unawaited(
+      Future(() async {
+        if (nsec == null || nsec!.isEmpty) return;
+        try {
+          if (useLegacyDm) {
+            await RustSyncWorker.sendLegacyDm(
+              recipient: sender,
+              message: payload,
+              nsec: nsec!,
+            );
+          } else {
+            await RustSyncWorker.sendGiftDm(
+              recipient: sender,
+              content: payload,
+              nsec: nsec!,
+              useNip44: true,
+            );
+          }
+        } catch (_) {
+          // ignore receipt send failures
+        }
+      }),
+    );
   }
 
   Future<Map<String, dynamic>> _decodeContent(
@@ -2739,6 +2917,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);
+        final readReceiptBadge = _buildReadReceiptBadge(m);
         final resendBtn = isOut
             ? IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
@@ -2843,6 +3022,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(width: 6),
                     attachmentBadge,
                   ],
+                  if (readReceiptBadge != null) ...[
+                    const SizedBox(width: 6),
+                    readReceiptBadge,
+                  ],
                   if (resendBtn != null) ...[
                     const SizedBox(width: 6),
                     resendBtn,
@@ -2895,6 +3078,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Icon(Icons.arrow_downward_rounded, size: 18, color: iconColor),
         ),
       ),
+    );
+  }
+
+  Widget? _buildReadReceiptBadge(Map<String, dynamic> message) {
+    if (message['direction'] != 'out') return null;
+    final hasRead =
+        message['read_at'] != null || message['read'] == true;
+    if (!hasRead) return null;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.done_all, size: 12, color: Color(0xFF22C55E)),
+        const SizedBox(width: 4),
+        const Text(
+          'Read',
+          style: TextStyle(fontSize: 11, color: Color(0xFF22C55E)),
+        ),
+      ],
     );
   }
 

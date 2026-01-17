@@ -72,7 +72,7 @@ class RustSyncWorker {
   }
 
   /// Sends a DM on a background isolate to avoid blocking the UI.
-  static Future<void> sendGiftDm({
+  static Future<String?> sendGiftDm({
     required String recipient,
     required String content,
     required String nsec,
@@ -98,13 +98,14 @@ class RustSyncWorker {
         // ignore: avoid_print
         print('[dm] sendGiftDm ok id=$eventId');
       }
+      return eventId;
     } finally {
       _mutex.release();
     }
   }
 
   /// Sends a legacy NIP-04 DM (kind 4).
-  static Future<void> sendLegacyDm({
+  static Future<String?> sendLegacyDm({
     required String recipient,
     required String message,
     required String nsec,
@@ -129,6 +130,7 @@ class RustSyncWorker {
         // ignore: avoid_print
         print('[dm] sendLegacyDm ok id=$eventId');
       }
+      return eventId;
     } finally {
       _mutex.release();
     }

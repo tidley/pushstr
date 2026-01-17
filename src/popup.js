@@ -134,6 +134,11 @@ browser.runtime.onMessage.addListener((msg) => {
       console.error('[pushstr][popup] refreshState failed after incoming', err);
     });
   }
+  if (msg.type === 'receipt') {
+    refreshState().catch((err) => {
+      console.error('[pushstr][popup] refreshState failed after receipt', err);
+    });
+  }
 });
 
 init();
@@ -293,6 +298,8 @@ function renderHistory() {
         buildLockBadge(renderResult.mediaEncrypted !== false),
       );
     }
+    const receiptBadge = buildReceiptBadge(m);
+    if (receiptBadge) metaRow.appendChild(receiptBadge);
     if (m.direction === 'out') {
       const resendBtn = document.createElement('button');
       resendBtn.className = 'resend-btn';
@@ -1572,6 +1579,16 @@ function buildDmBadge(kind) {
   const badge = document.createElement('span');
   badge.className = `badge dm ${kind}`;
   badge.textContent = kind === 'nip04' ? '04' : '17';
+  return badge;
+}
+
+function buildReceiptBadge(message) {
+  if (!message || message.direction !== 'out') return null;
+  const hasRead = message.read_at || message.read;
+  if (!hasRead) return null;
+  const badge = document.createElement('span');
+  badge.className = 'badge receipt';
+  badge.textContent = 'Read';
   return badge;
 }
 
