@@ -83,7 +83,7 @@ const BLOSSOM_SERVER = "https://blossom.primal.net";
 const PUBLISH_RETRY_ATTEMPTS = 3;
 const PUBLISH_RETRY_BASE_MS = 400;
 const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
-const KEEP_ALIVE_MS = 60 * 1000;
+const KEEP_ALIVE_MS = 5 * 60 * 1000;
 const READ_RECEIPT_KEY = "pushstr_ack";
 const BLOSSOM_UPLOAD_PATH = "upload";
 let suppressNotifications = true;
@@ -91,6 +91,7 @@ let keepAliveTimer = null;
 let keepAliveRunning = false;
 const pendingReceipts = new Set();
 const sentReceipts = new Set();
+let lastConnectAt = 0;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -423,6 +424,7 @@ async function connect() {
     sub = pool.subscribeMany(relayList, filter, {
       onevent: handleGiftEvent
     });
+    lastConnectAt = Date.now();
     console.info("[pushstr] subscribed", [filter], "relays", relayList);
   } else {
     console.warn("[pushstr] no relays available to subscribe");
@@ -442,7 +444,21 @@ async function keepAliveTick() {
   if (keepAliveRunning) return;
   keepAliveRunning = true;
   try {
-    await connect();
+    if (!pool) {
+      await connect();
+      return;
+    }
+    const relays = activeRelays.length ? activeRelays : settings.relays;
+    if (!relays.length || !sub) {
+      await connect();
+      return;
+    }
+    const needsReconnect = Date.now() - lastConnectAt > 10 * 60 * 1000;
+    if (needsReconnect) {
+      await connect();
+      return;
+    }
+    await Promise.allSettled(relays.map((url) => pool.ensureRelay(url)));
   } finally {
     keepAliveRunning = false;
   }
@@ -648,6 +664,7 @@ async function sendReadReceipt(recipientHex, messageId, dmKind) {
   const sealedEvent = finalizeEvent({
     kind: 13,
     created_at: sealedTimestamp,
+    tags: [],
     content: sealedContent
   }, priv);
   const wrappingPriv = nt.generateSecretKey();
@@ -875,6 +892,7 @@ async function sendGift(recipient, content, modeOverride = null) {
   const sealedEvent = finalizeEvent({
     kind: 13,
     created_at: sealedTimestamp,
+    tags: [],
     content: sealedContent
   }, priv);
 

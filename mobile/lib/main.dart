@@ -2731,99 +2731,71 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             for (final contact in contacts)
-              Dismissible(
+              ListTile(
                 key: ValueKey(contact['pubkey'] ?? ''),
-                background: Container(
-                  color: Colors.red.withValues(alpha: 0.4),
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.only(left: 16),
-                  child: const Icon(Icons.delete, color: Colors.white),
+                title: Text(() {
+                  final nickname = (contact['nickname'] ?? '')
+                      .toString()
+                      .trim();
+                  return nickname.isNotEmpty
+                      ? nickname
+                      : _short(contact['pubkey'] ?? '');
+                }()),
+                subtitle: Text(
+                  _short(contact['pubkey'] ?? ''),
+                  style: const TextStyle(fontSize: 11),
                 ),
-                secondaryBackground: Container(
-                  color: Colors.red.withValues(alpha: 0.4),
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 16),
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                onDismissed: (_) async {
-                  setState(() {
-                    contacts.removeWhere(
-                      (c) => c['pubkey'] == contact['pubkey'],
-                    );
-                    if (selectedContact == contact['pubkey']) {
-                      selectedContact = contacts.isNotEmpty
-                          ? contacts.first['pubkey']
-                          : null;
-                    }
-                  });
+                selected: selectedContact == contact['pubkey'],
+                onTap: () {
+                  setState(() => selectedContact = contact['pubkey']);
                   _persistVisibleState();
-                  await _saveContacts();
+                  Navigator.pop(context);
                 },
-                child: ListTile(
-                  title: Text(() {
-                    final nickname = (contact['nickname'] ?? '')
-                        .toString()
-                        .trim();
-                    return nickname.isNotEmpty
-                        ? nickname
-                        : _short(contact['pubkey'] ?? '');
-                  }()),
-                  subtitle: Text(
-                    _short(contact['pubkey'] ?? ''),
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                  selected: selectedContact == contact['pubkey'],
-                  onTap: () {
-                    setState(() => selectedContact = contact['pubkey']);
-                    _persistVisibleState();
-                    Navigator.pop(context);
-                  },
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit),
-                        tooltip: 'Edit nickname',
-                        onPressed: () => _editContact(context, contact),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      tooltip: 'Edit nickname',
+                      onPressed: () => _editContact(context, contact),
+                    ),
+                    _HoldDeleteIcon(
+                      active:
+                          _holdActiveHome['delete_contact_${contact['pubkey']}'] ??
+                          false,
+                      progress: _holdProgressHomeFor(
+                        'delete_contact_${contact['pubkey']}',
                       ),
-                      _HoldDeleteIcon(
-                        active:
-                            _holdActiveHome['delete_contact_${contact['pubkey']}'] ??
-                            false,
-                        progress: _holdProgressHomeFor(
+                      onTap: () =>
+                          _showHoldWarningHome('Hold 5s to delete contact'),
+                      onHoldStart: () {
+                        _startHoldActionHome(
                           'delete_contact_${contact['pubkey']}',
-                        ),
-                        onTap: () =>
-                            _showHoldWarningHome('Hold 5s to delete contact'),
-                        onHoldStart: () {
-                          _startHoldActionHome(
-                            'delete_contact_${contact['pubkey']}',
-                            () async {
-                              setState(() {
-                                contacts.removeWhere(
-                                  (c) => c['pubkey'] == contact['pubkey'],
-                                );
-                                if (selectedContact == contact['pubkey']) {
-                                  selectedContact = contacts.isNotEmpty
-                                      ? contacts.first['pubkey']
-                                      : null;
-                                }
-                              });
-                              _persistVisibleState();
-                              await _saveContacts();
-                              _cancelHoldActionHome(
-                                'delete_contact_${contact['pubkey']}',
+                          () async {
+                            setState(() {
+                              contacts.removeWhere(
+                                (c) => c['pubkey'] == contact['pubkey'],
                               );
-                            },
-                            countdownLabel: 'delete contact',
-                          );
-                        },
-                        onHoldEnd: () => _cancelHoldActionHome(
-                          'delete_contact_${contact['pubkey']}',
-                        ),
+                              if (selectedContact == contact['pubkey']) {
+                                selectedContact = contacts.isNotEmpty
+                                    ? contacts.first['pubkey']
+                                    : null;
+                              }
+                            });
+                            _persistVisibleState();
+                            await _saveContacts();
+                            _cancelHoldActionHome(
+                              'delete_contact_${contact['pubkey']}',
+                            );
+                          },
+                          countdownLabel: 'delete contact',
+                        );
+                      },
+                      onHoldEnd: () => _cancelHoldActionHome(
+                        'delete_contact_${contact['pubkey']}',
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ListTile(
