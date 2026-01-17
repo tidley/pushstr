@@ -472,10 +472,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   String _stripPushstrClientTag(String content) {
     if (!content.contains(_pushstrClientTag)) return content;
-    final pattern = RegExp(
-      r'(^|\n)\[pushstr:client\](\n|$)',
-      multiLine: true,
-    );
+    final pattern = RegExp(r'(^|\n)\[pushstr:client\](\n|$)', multiLine: true);
     final stripped = content.replaceAll(pattern, '\n').trim();
     return stripped;
   }
@@ -675,7 +672,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (!hasOverride && _dmModes[pubkey] != 'nip59') {
           _dmModes[pubkey] = 'nip59';
           changed = true;
-          print('[dm] legacy giftwrap observed; using nip59 for ${pubkey.substring(0, 8)}');
+          print(
+            '[dm] legacy giftwrap observed; using nip59 for ${pubkey.substring(0, 8)}',
+          );
         }
         continue;
       }
@@ -1182,8 +1181,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final sizeValue = descriptor['size'] is int
             ? descriptor['size'] as int
             : int.tryParse(descriptor['size']?.toString() ?? '');
-        final sizeLabel =
-            sizeValue != null ? _formatBytes(sizeValue) : null;
+        final sizeLabel = sizeValue != null ? _formatBytes(sizeValue) : null;
         final attachmentLine = sizeLabel != null
             ? 'Attachment: $filename ($sizeLabel)'
             : 'Attachment: $filename';
@@ -2397,12 +2395,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (!await file.exists()) return;
             final bytes = await file.readAsBytes();
             final name = file.path.split(Platform.pathSeparator).last;
-            final mime = lookupMimeType(name, headerBytes: bytes) ?? 'audio/mp4';
-            await _setPendingAttachment(
-              bytes: bytes,
-              name: name,
-              mime: mime,
-            );
+            final mime =
+                lookupMimeType(name, headerBytes: bytes) ?? 'audio/mp4';
+            await _setPendingAttachment(bytes: bytes, name: name, mime: mime);
             try {
               await file.delete();
             } catch (_) {}
@@ -2411,7 +2406,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final recording = _isRecordingAudio;
           final minutes = _recordingElapsed ~/ 60;
           final seconds = _recordingElapsed % 60;
-          final timeLabel = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+          final timeLabel =
+              '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
 
           return SafeArea(
             child: Padding(
@@ -2421,7 +2417,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Text(
                     recording ? 'Recording…' : 'Record audio',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -2445,7 +2444,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     icon: Icon(recording ? Icons.stop : Icons.mic),
                     label: Text(recording ? 'Stop & Attach' : 'Start'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: recording ? Colors.redAccent : Colors.greenAccent,
+                      backgroundColor: recording
+                          ? Colors.redAccent
+                          : Colors.greenAccent,
                       foregroundColor: Colors.black,
                     ),
                   ),
@@ -2518,59 +2519,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-            child: GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.05,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildAttachOption(
-                  icon: Icons.photo_camera,
-                  label: 'Camera',
-                  color: Colors.redAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachImageFromCamera();
-                  },
-                ),
-                _buildAttachOption(
-                  icon: Icons.videocam,
-                  label: 'Video Cam',
-                  color: Colors.redAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachVideo(ImageSource.camera);
-                  },
-                ),
-                _buildAttachOption(
-                  icon: Icons.mic,
-                  label: 'Record',
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showRecordAudioSheet();
-                  },
-                  color: Colors.redAccent,
-                ),
-                _buildAttachOption(
-                  icon: Icons.photo_library,
-                  label: 'Gallery',
-                  color: Colors.lightBlueAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachImage();
-                  },
-                ),
-                _buildAttachOption(
-                  icon: Icons.video_library,
-                  label: 'Video',
-                  color: Colors.lightBlueAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachVideo(ImageSource.gallery);
-                  },
-                ),
+          child: GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.05,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildAttachOption(
+                icon: Icons.photo_camera,
+                label: 'Camera',
+                color: Colors.redAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachImageFromCamera();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.videocam,
+                label: 'Video Cam',
+                color: Colors.redAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachVideo(ImageSource.camera);
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.mic,
+                label: 'Record',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showRecordAudioSheet();
+                },
+                color: Colors.redAccent,
+              ),
+              _buildAttachOption(
+                icon: Icons.photo_library,
+                label: 'Gallery',
+                color: Colors.lightBlueAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachImage();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.video_library,
+                label: 'Video',
+                color: Colors.lightBlueAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachVideo(ImageSource.gallery);
+                },
+              ),
               _buildAttachOption(
                 icon: Icons.audio_file,
                 label: 'Audio',
@@ -2923,6 +2924,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
                 tooltip: 'Resend',
+                visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                 onPressed: () => _resendMessage(m),
               )
             : null;
@@ -3013,7 +3017,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: EdgeInsets.only(
                 left: 4,
                 right: 4,
-                bottom: isOut ? 2 : 6,
+                bottom: isOut ? 1 : 6,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -3032,7 +3036,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     readReceiptBadge,
                   ],
                   if (resendBtn != null) ...[
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     resendBtn,
                   ],
                 ],
@@ -3042,7 +3046,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
-    final canScroll = _scrollController.hasClients &&
+    final canScroll =
+        _scrollController.hasClients &&
         _scrollController.position.maxScrollExtent > 8;
     return Stack(
       children: [
@@ -3089,8 +3094,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget? _buildReadReceiptBadge(Map<String, dynamic> message) {
     if (message['direction'] != 'out') return null;
     final hasRead = message['read_at'] != null || message['read'] == true;
-    final color =
-        hasRead ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final color = hasRead ? const Color(0xFF22C55E) : Colors.grey.shade500;
     final tooltip = hasRead ? 'Read' : 'Sent';
     return Tooltip(
       message: tooltip,
@@ -3868,10 +3872,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (Platform.isIOS) {
         final file = await _writeTempMediaFile(bytes, mime);
-        final ok = await _storageChannel.invokeMethod<bool>(
-          'shareFile',
-          {'path': file.path, 'mime': mime, 'filename': filename},
-        );
+        final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+          'path': file.path,
+          'mime': mime,
+          'filename': filename,
+        });
         if (!mounted) return;
         if (ok != true) {
           _showThemedToast('Save failed', preferTop: true);
@@ -4539,8 +4544,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
               final duration = controller.value.duration;
               final progress = duration.inMilliseconds == 0
                   ? 0.0
-                  : (position.inMilliseconds / duration.inMilliseconds)
-                      .clamp(0.0, 1.0);
+                  : (position.inMilliseconds / duration.inMilliseconds).clamp(
+                      0.0,
+                      1.0,
+                    );
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggleControls,
@@ -4558,7 +4565,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                           right: 0,
                           bottom: 0,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             color: Colors.black.withOpacity(0.35),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -4567,10 +4577,19 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     IconButton(
-                                      icon: const Icon(Icons.replay_10, color: Colors.white),
+                                      icon: const Icon(
+                                        Icons.replay_10,
+                                        color: Colors.white,
+                                      ),
                                       onPressed: () {
-                                        final newPos = position - const Duration(seconds: 10);
-                                        controller.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
+                                        final newPos =
+                                            position -
+                                            const Duration(seconds: 10);
+                                        controller.seekTo(
+                                          newPos < Duration.zero
+                                              ? Duration.zero
+                                              : newPos,
+                                        );
                                       },
                                     ),
                                     const SizedBox(width: 8),
@@ -4593,9 +4612,14 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                     ),
                                     const SizedBox(width: 8),
                                     IconButton(
-                                      icon: const Icon(Icons.forward_10, color: Colors.white),
+                                      icon: const Icon(
+                                        Icons.forward_10,
+                                        color: Colors.white,
+                                      ),
                                       onPressed: () {
-                                        final newPos = position + const Duration(seconds: 10);
+                                        final newPos =
+                                            position +
+                                            const Duration(seconds: 10);
                                         controller.seekTo(
                                           newPos > duration ? duration : newPos,
                                         );
@@ -4607,16 +4631,22 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                   children: [
                                     Text(
                                       _formatDuration(position),
-                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                     Expanded(
                                       child: Slider(
                                         value: progress,
                                         onChanged: (value) {
-                                          if (duration.inMilliseconds == 0) return;
+                                          if (duration.inMilliseconds == 0)
+                                            return;
                                           final target = Duration(
                                             milliseconds:
-                                                (duration.inMilliseconds * value).round(),
+                                                (duration.inMilliseconds *
+                                                        value)
+                                                    .round(),
                                           );
                                           controller.seekTo(target);
                                         },
@@ -4624,7 +4654,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                     ),
                                     Text(
                                       _formatDuration(duration),
-                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -5159,10 +5192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<File> _writeTempBackupFile(
-    Uint8List bytes,
-    String filename,
-  ) async {
+  Future<File> _writeTempBackupFile(Uint8List bytes, String filename) async {
     final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/$filename');
     await file.writeAsBytes(bytes, flush: true);
@@ -5200,11 +5230,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'type': 'pushstr_profile_backup',
       'version': 1,
       'created_at': DateTime.now().toIso8601String(),
-      'profile': {
-        'nsec': nsec,
-        'npub': npub,
-        'nickname': nickname,
-      },
+      'profile': {'nsec': nsec, 'npub': npub, 'nickname': nickname},
       'contacts': contacts,
     };
     final json = jsonEncode(payload);
@@ -5228,14 +5254,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (Platform.isIOS) {
       final file = await _writeTempBackupFile(bytes, filename);
-      final ok = await _storageChannel.invokeMethod<bool>(
-        'shareFile',
-        {
-          'path': file.path,
-          'mime': 'application/json',
-          'filename': filename,
-        },
-      );
+      final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+        'path': file.path,
+        'mime': 'application/json',
+        'filename': filename,
+      });
       if (!mounted) return;
       if (ok != true) {
         _showThemedToast('Backup failed', preferTop: true);
@@ -5580,9 +5603,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (result == null || result.files.isEmpty) return;
     try {
       final file = result.files.first;
-      final bytes = file.bytes ?? (file.path != null
-          ? await File(file.path!).readAsBytes()
-          : null);
+      final bytes =
+          file.bytes ??
+          (file.path != null ? await File(file.path!).readAsBytes() : null);
       if (bytes == null) {
         _showThemedToast('Import failed: file unreadable', preferTop: true);
         return;
