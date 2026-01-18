@@ -72,66 +72,62 @@ class RustSyncWorker {
   }
 
   /// Sends a DM on a background isolate to avoid blocking the UI.
-  static Future<void> sendGiftDm({
+  static Future<String?> sendGiftDm({
     required String recipient,
     required String content,
     required String nsec,
     bool useNip44 = true,
   }) async {
-    if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return;
-    if (!await _mutex.tryAcquire()) return;
-    try {
-      // ignore: avoid_print
-      print('[dm] sendGiftDm start recipient=${recipient.substring(0, 8)}');
-      final eventId = await Isolate.run(() async {
-        try {
-          await RustLib.init();
-          api.initNostr(nsec: nsec);
-          return api.sendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
-        } catch (e) {
-          // ignore: avoid_print
-          print('[dm] sendGiftDm isolate error: $e');
-          return null;
-        }
-      });
-      if (eventId != null) {
+    if (recipient.isEmpty || content.isEmpty || nsec.isEmpty) return null;
+    // ignore: avoid_print
+    print('[dm] sendGiftDm start recipient=${recipient.substring(0, 8)}');
+    final eventId = await Isolate.run(() async {
+      try {
+        await RustLib.init();
+        api.initNostr(nsec: nsec);
+        return api.sendGiftDm(
+          recipient: recipient,
+          content: content,
+          useNip44: useNip44,
+        );
+      } catch (e) {
         // ignore: avoid_print
-        print('[dm] sendGiftDm ok id=$eventId');
+        print('[dm] sendGiftDm isolate error: $e');
+        return null;
       }
-    } finally {
-      _mutex.release();
+    });
+    if (eventId != null) {
+      // ignore: avoid_print
+      print('[dm] sendGiftDm ok id=$eventId');
     }
+    return eventId;
   }
 
   /// Sends a legacy NIP-04 DM (kind 4).
-  static Future<void> sendLegacyDm({
+  static Future<String?> sendLegacyDm({
     required String recipient,
     required String message,
     required String nsec,
   }) async {
-    if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return;
-    if (!await _mutex.tryAcquire()) return;
-    try {
-      // ignore: avoid_print
-      print('[dm] sendLegacyDm start recipient=${recipient.substring(0, 8)}');
-      final eventId = await Isolate.run(() async {
-        try {
-          await RustLib.init();
-          api.initNostr(nsec: nsec);
-          return api.sendDm(recipient: recipient, message: message);
-        } catch (e) {
-          // ignore: avoid_print
-          print('[dm] sendLegacyDm isolate error: $e');
-          return null;
-        }
-      });
-      if (eventId != null) {
+    if (recipient.isEmpty || message.isEmpty || nsec.isEmpty) return null;
+    // ignore: avoid_print
+    print('[dm] sendLegacyDm start recipient=${recipient.substring(0, 8)}');
+    final eventId = await Isolate.run(() async {
+      try {
+        await RustLib.init();
+        api.initNostr(nsec: nsec);
+        return api.sendDm(recipient: recipient, message: message);
+      } catch (e) {
         // ignore: avoid_print
-        print('[dm] sendLegacyDm ok id=$eventId');
+        print('[dm] sendLegacyDm isolate error: $e');
+        return null;
       }
-    } finally {
-      _mutex.release();
+    });
+    if (eventId != null) {
+      // ignore: avoid_print
+      print('[dm] sendLegacyDm ok id=$eventId');
     }
+    return eventId;
   }
 
   /// Sends a legacy giftwrap DM compatible with the browser extension.
@@ -144,7 +140,9 @@ class RustSyncWorker {
     if (!await _mutex.tryAcquire()) return;
     try {
       // ignore: avoid_print
-      print('[dm] sendLegacyGiftDm start recipient=${recipient.substring(0, 8)}');
+      print(
+        '[dm] sendLegacyGiftDm start recipient=${recipient.substring(0, 8)}',
+      );
       final eventId = await Isolate.run(() async {
         try {
           await RustLib.init();

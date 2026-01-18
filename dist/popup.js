@@ -8856,6 +8856,7 @@ var warningEl = document.getElementById("upload-warning");
 var showQrBtn = document.getElementById("show-qr");
 var settingsBtn = document.getElementById("open-settings");
 var dmToggleBtn = document.getElementById("dm-toggle");
+var PUSHSTR_CLIENT_TAG = "[pushstr:client]";
 async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
   let lastErr;
   for (let i2 = 0; i2 < attempts; i2++) {
@@ -8875,6 +8876,7 @@ var state = { messages: [], recipients: [], pubkey: null };
 var selectedContact = null;
 var pendingFile = null;
 var localPreviewCache = {};
+var optimisticMessages = [];
 var decryptedMediaCache = /* @__PURE__ */ new Map();
 var sessionMessages = /* @__PURE__ */ new Set();
 var sessionStartTime = Date.now();
@@ -8915,6 +8917,11 @@ browser.runtime.onMessage.addListener((msg) => {
       sessionMessages.add(msg.event.id);
     refreshState().catch((err) => {
       console.error("[pushstr][popup] refreshState failed after incoming", err);
+    });
+  }
+  if (msg.type === "receipt") {
+    refreshState().catch((err) => {
+      console.error("[pushstr][popup] refreshState failed after receipt", err);
     });
   }
 });
@@ -8962,6 +8969,12 @@ function render() {
 function renderContacts() {
   const contacts = buildContacts();
   contactsEl.innerHTML = "";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "add-contact-btn";
+  addBtn.textContent = "+ Add Contact";
+  addBtn.addEventListener("click", showAddContactDialog);
+  contactsEl.appendChild(addBtn);
   contacts.forEach((c) => {
     const el = document.createElement("div");
     el.className = "contact" + (selectedContact === c.id ? " active" : "");
@@ -8988,6 +9001,15 @@ function renderContacts() {
     meta.appendChild(snippet);
     const actions = document.createElement("div");
     actions.className = "contact-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "icon-btn edit";
+    edit.title = "Edit nickname";
+    edit.textContent = "\u270E";
+    edit.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await showEditContactDialog(c);
+    });
     const del = document.createElement("button");
     del.type = "button";
     del.className = "icon-btn danger";
@@ -9006,18 +9028,13 @@ function renderContacts() {
       });
       await refreshState();
     });
+    actions.appendChild(edit);
     actions.appendChild(del);
     el.appendChild(avatar);
     el.appendChild(meta);
     el.appendChild(actions);
     contactsEl.appendChild(el);
   });
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = "add-contact-btn";
-  addBtn.textContent = "+ Add Contact";
-  addBtn.addEventListener("click", showAddContactDialog);
-  contactsEl.appendChild(addBtn);
 }
 function renderHistory() {
   historyEl.innerHTML = "";
@@ -9031,14 +9048,60 @@ function renderHistory() {
     "selected:",
     selectedContact
   );
-  const convo = state.messages.filter((m) => otherParty(m) === selectedContact);
+  pruneOptimisticMessages();
+  let convo = [...state.messages, ...optimisticMessages].filter(
+    (m) => otherParty(m) === selectedContact
+  );
   console.log(
     "[pushstr][popup] renderHistory: filtered to",
     convo.length,
     "messages for contact"
   );
-  convo.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-  convo.forEach((m) => {
+  convo.sort((a, b) => {
+    const aTime = a.created_at || 0;
+    const bTime = b.created_at || 0;
+    if (aTime !== bTime)
+      return aTime - bTime;
+    const aSeq = messageSeq(a);
+    const bSeq = messageSeq(b);
+    if (aSeq != null && bSeq != null && aSeq !== bSeq) {
+      return aSeq - bSeq;
+    }
+    return 0;
+  });
+  const display = [];
+  let lastIncomingSeq = null;
+  for (const m of convo) {
+    if (m.direction === "in" && m.from === selectedContact) {
+      const seq = messageSeq(m);
+      if (seq != null && lastIncomingSeq != null && seq > lastIncomingSeq + 1) {
+        display.push({
+          direction: "gap",
+          missing_from: lastIncomingSeq + 1,
+          missing_to: seq - 1
+        });
+        browser.runtime.sendMessage({ type: "ensure-connect" }).catch(() => {
+        });
+      }
+      if (seq != null)
+        lastIncomingSeq = seq;
+    }
+    display.push(m);
+  }
+  display.forEach((m) => {
+    if (m.direction === "gap") {
+      const from = m.missing_from;
+      const to = m.missing_to;
+      const label = from === to ? `Missing message (seq ${from})` : `Missing messages (seq ${from}-${to})`;
+      const row2 = document.createElement("div");
+      row2.className = "msg-row gap";
+      const bubble2 = document.createElement("div");
+      bubble2.className = "bubble gap";
+      bubble2.textContent = label;
+      row2.appendChild(bubble2);
+      historyEl.appendChild(row2);
+      return;
+    }
     const row = document.createElement("div");
     row.className = "msg-row " + (m.direction === "out" ? "out" : "in");
     const bubble = document.createElement("div");
@@ -9066,6 +9129,30 @@ function renderHistory() {
       metaRow.appendChild(
         buildLockBadge(renderResult.mediaEncrypted !== false)
       );
+    }
+    const receiptBadge = buildReceiptBadge(m);
+    if (receiptBadge)
+      metaRow.appendChild(receiptBadge);
+    if (m.direction === "out") {
+      const resendBtn = document.createElement("button");
+      resendBtn.className = "resend-btn";
+      resendBtn.title = "Resend";
+      resendBtn.textContent = "\u21BB";
+      resendBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await safeSend({
+            type: "resend-message",
+            recipient: m.to,
+            content: m.content,
+            dm_kind: m.dm_kind
+          });
+          status("Resent");
+        } catch (err) {
+          status(`Resend failed: ${err?.message || err}`);
+        }
+      });
+      metaRow.appendChild(resendBtn);
     }
     if (m.direction !== "out") {
       const copyBtn = document.createElement("button");
@@ -9532,13 +9619,82 @@ function buildContacts() {
       nickname: ""
     };
     entry.last = Math.max(entry.last, m.created_at || 0);
-    entry.snippet = truncateSnippet(stripNip18(m.content || ""));
+    entry.snippet = truncateSnippet(
+      stripPushstrClientTag(stripNip18(m.content || ""))
+    );
     counts[other] = entry;
   });
   return Object.values(counts).sort((a, b) => (b.last || 0) - (a.last || 0)).map((c) => ({ ...c, label: c.nickname || short(c.id) }));
 }
 function otherParty(m) {
   return m.direction === "out" ? m.to : m.from;
+}
+function messageSeq(m) {
+  const raw = m?.seq;
+  if (typeof raw === "number")
+    return raw;
+  if (typeof raw === "string") {
+    const parsed = parseInt(raw, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+function addOptimisticMessage({ content, recipient }) {
+  if (!recipient || !content)
+    return null;
+  const taggedContent = appendPushstrClientTag(content);
+  const msg = {
+    id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    direction: "out",
+    from: state.pubkey,
+    to: recipient,
+    content: taggedContent,
+    created_at: Math.floor(Date.now() / 1e3),
+    local_status: "sending",
+    dm_kind: getDmModeForContact(recipient) === "nip04" ? "nip04" : "nip17"
+  };
+  optimisticMessages.push(msg);
+  render();
+  return msg;
+}
+function removeOptimisticMessage(id) {
+  if (!id)
+    return;
+  optimisticMessages = optimisticMessages.filter((m) => m.id !== id);
+  render();
+}
+function markOptimisticSent(id) {
+  if (!id)
+    return;
+  let updated = false;
+  optimisticMessages = optimisticMessages.map((m) => {
+    if (m.id !== id)
+      return m;
+    if (m.local_status === "sent")
+      return m;
+    updated = true;
+    return { ...m, local_status: "sent" };
+  });
+  if (updated)
+    render();
+}
+function pruneOptimisticMessages() {
+  if (!optimisticMessages.length)
+    return;
+  optimisticMessages = optimisticMessages.filter((opt) => {
+    const optContent = stripPushstrClientTag(stripNip18(opt.content || ""));
+    return !state.messages.some((m) => {
+      if (m.direction !== "out")
+        return false;
+      if (m.to !== opt.to)
+        return false;
+      const msgContent = stripPushstrClientTag(stripNip18(m.content || ""));
+      if (msgContent !== optContent)
+        return false;
+      const delta = Math.abs((m.created_at || 0) - (opt.created_at || 0));
+      return delta <= 120;
+    });
+  });
 }
 async function loadStateFallback() {
   try {
@@ -9574,16 +9730,26 @@ async function send() {
     status("Nothing to send");
     return;
   }
+  const originalContent = messageInput.value;
+  messageInput.value = "";
+  updateComposerMode();
   status("Sending...");
   try {
     if (content) {
+      const optimistic = addOptimisticMessage({
+        content,
+        recipient: selectedContact
+      });
       const res = await browser.runtime.sendMessage({
         type: "send-gift",
         recipient: selectedContact,
         content
       });
-      if (res && res.ok === false)
+      if (res && res.ok === false) {
+        removeOptimisticMessage(optimistic?.id);
         throw new Error(res.error || "publish failed");
+      }
+      markOptimisticSent(optimistic?.id);
     }
     if (fileToSend) {
       const arrayBuf = await fileToSend.arrayBuffer();
@@ -9606,23 +9772,32 @@ async function send() {
         }
       }
       const payload = buildPushstrAttachmentPayload(content, res);
+      const optimistic = addOptimisticMessage({
+        content: payload,
+        recipient: selectedContact
+      });
       const sendRes = await browser.runtime.sendMessage({
         type: "send-gift",
         recipient: selectedContact,
         content: payload
       });
       if (sendRes && sendRes.ok === false) {
+        removeOptimisticMessage(optimistic?.id);
         throw new Error(sendRes.error || "publish failed");
       }
+      markOptimisticSent(optimistic?.id);
       showUploadedPreview(res.url, res.mime || fileToSend.type);
     }
-    messageInput.value = "";
     pendingFile = null;
     clearPreview(!!fileToSend);
     updateComposerMode();
     await refreshState();
     status("Sent");
   } catch (err) {
+    if (!messageInput.value) {
+      messageInput.value = originalContent;
+      updateComposerMode();
+    }
     status("Failed: " + err.message);
   }
 }
@@ -9636,6 +9811,7 @@ async function refreshState() {
     );
     if (newState) {
       state = newState;
+      pruneOptimisticMessages();
       render();
     } else {
       console.warn("[pushstr][popup] refreshState: no state returned");
@@ -9829,7 +10005,7 @@ async function showQrDialog() {
   wrapper.appendChild(label);
   wrapper.appendChild(text);
   wrapper.appendChild(copyBtn);
-  showInfoModal("Your npub", wrapper);
+  showInfoModal("My nPub", wrapper);
 }
 async function showAddContactDialog() {
   const wrapper = document.createElement("div");
@@ -9869,6 +10045,38 @@ async function showAddContactDialog() {
     await refreshState();
   } catch (err) {
     status("Add contact failed");
+  }
+}
+async function showEditContactDialog(contact) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
+      <label style="font-size:12px;color:#9ca3af;">Nickname</label>
+      <input type="text" id="ec_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
+      <label style="font-size:12px;color:#9ca3af;">Pubkey</label>
+      <input type="text" id="ec_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#9ca3af;" disabled>
+    </div>
+  `;
+  const nickInput = wrapper.querySelector("#ec_nick");
+  const pubInput = wrapper.querySelector("#ec_pub");
+  if (nickInput)
+    nickInput.value = contact.nickname || "";
+  if (pubInput)
+    pubInput.value = contact.id || "";
+  const result = await showModal("Edit Contact", wrapper);
+  if (!result)
+    return;
+  const nickname = nickInput.value.trim();
+  const recipients = (state.recipients || []).map((r) => ({ ...r }));
+  const idx = recipients.findIndex((r) => r.pubkey === contact.id);
+  if (idx === -1)
+    return;
+  recipients[idx].nickname = nickname;
+  try {
+    await browser.runtime.sendMessage({ type: "save-settings", recipients });
+    await refreshState();
+  } catch (err) {
+    status("Update contact failed");
   }
 }
 function popout() {
@@ -9933,7 +10141,7 @@ function flashCopyButton(btn) {
 }
 function renderBubbleContent(container, content, senderPubkey, isOut, messageId = null) {
   const result = { actions: null, hasMedia: false, mediaEncrypted: null };
-  const baseCleaned = stripNip18(content);
+  const baseCleaned = stripPushstrClientTag(stripNip18(content));
   const extracted = extractPushstrMedia(baseCleaned);
   const cleaned = extracted.text;
   const mediaJson = extracted.mediaJson;
@@ -10190,6 +10398,24 @@ function buildDmBadge(kind) {
   const badge = document.createElement("span");
   badge.className = `badge dm ${kind}`;
   badge.textContent = kind === "nip04" ? "04" : "17";
+  badge.title = kind === "nip04" ? "NIP-04" : "NIP-17";
+  return badge;
+}
+function buildReceiptBadge(message) {
+  if (!message || message.direction !== "out")
+    return null;
+  const hasRead = message.read_at || message.read;
+  const localStatus = message.local_status;
+  const badge = document.createElement("span");
+  if (localStatus === "sending") {
+    badge.className = "badge receipt sent";
+    badge.textContent = "-";
+    badge.title = "Sending";
+  } else {
+    badge.className = `badge receipt ${hasRead ? "read" : "sent"}`;
+    badge.textContent = hasRead ? "R" : "S";
+    badge.title = hasRead ? "Received" : "Sent";
+  }
   return badge;
 }
 function buildLockBadge(encrypted) {
@@ -10216,19 +10442,32 @@ function attachFile() {
 }
 async function handlePaste(event) {
   const items = event.clipboardData?.items || [];
-  let handled = false;
+  const files = [];
   for (const item of items) {
     if (item.kind === "file") {
-      event.preventDefault();
       const file = item.getAsFile();
       if (file)
-        await handleFileAttachment(file);
-      handled = true;
-      break;
+        files.push(file);
     }
   }
-  if (handled)
+  if (files.length) {
+    event.preventDefault();
+    await handleFileAttachment(files[0]);
     return;
+  }
+  for (const item of items) {
+    if (item.kind === "string") {
+      const data = await new Promise((resolve) => item.getAsString(resolve));
+      const trimmed = (data || "").trim();
+      if (trimmed.startsWith("data:")) {
+        event.preventDefault();
+        const file = dataUrlToFile(trimmed, "pasted");
+        if (file)
+          await handleFileAttachment(file);
+        return;
+      }
+    }
+  }
 }
 async function handleFileAttachment(file) {
   showPreview(file);
@@ -10257,6 +10496,20 @@ function buildPushstrAttachmentPayload(text, media) {
     lines.push(url);
   lines.push("", PUSHSTR_MEDIA_START, descriptorJson, PUSHSTR_MEDIA_END);
   return lines.join("\n");
+}
+function dataUrlToFile(dataUrl, basename) {
+  try {
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match)
+      return null;
+    const mime = match[1];
+    const b64 = match[2];
+    const bytes4 = b64ToBytes(b64);
+    const ext = mime.includes("/") ? mime.split("/")[1] : "bin";
+    return new File([bytes4], `${basename}.${ext}`, { type: mime });
+  } catch (_) {
+    return null;
+  }
 }
 function showPreview(file) {
   previewEl.classList.remove("uploaded");
@@ -10297,6 +10550,21 @@ function stripNip18(text) {
   if (!text)
     return "";
   return text.replace(/^\[\/\/\]:\s*#\s*\(nip18\)\s*/i, "").trim();
+}
+function stripPushstrClientTag(text) {
+  if (!text)
+    return "";
+  if (!text.includes(PUSHSTR_CLIENT_TAG))
+    return text;
+  return text.replace(/(^|\n)\[pushstr:client\](\n|$)/g, "\n").trim();
+}
+function appendPushstrClientTag(text) {
+  if (!text)
+    return PUSHSTR_CLIENT_TAG;
+  if (text.includes(PUSHSTR_CLIENT_TAG))
+    return text;
+  return `${text}
+${PUSHSTR_CLIENT_TAG}`;
 }
 function parseUrlMeta(text) {
   if (!text)

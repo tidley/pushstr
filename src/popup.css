@@ -64,8 +64,8 @@ main {
 
 .topbar-actions {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  gap: 8px;
 }
 
 .controls {
@@ -249,37 +249,6 @@ button:hover {
   border-color: var(--accent);
 }
 
-.contacts-footer {
-  padding: 10px 12px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.footer-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  padding: 6px;
-  border-radius: 10px;
-  background: var(--panel-alt);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-
-.footer-action svg {
-  width: 20px;
-  height: 20px;
-  fill: currentColor;
-}
-
-.footer-action:hover {
-  border-color: var(--accent);
-}
 
 .dm-toggle {
   width: 36px;
@@ -310,8 +279,8 @@ main {
 }
 
 #contacts-pane {
-  flex: 0 0 200px;
-  max-width: 220px;
+  flex: 0 0 240px;
+  max-width: 260px;
   border-right: 1px solid var(--border);
   background: var(--panel);
   display: flex;
@@ -389,6 +358,25 @@ main {
   border-color: #f87171;
 }
 
+.icon-btn.edit {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #ffffff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 18px;
+}
+
+.icon-btn.edit:hover {
+  border-color: var(--accent);
+}
+
 .contact .name {
   margin: 0;
   font-size: 13px;
@@ -462,6 +450,10 @@ main {
   width: 100%;
 }
 
+.msg-row.out {
+  margin-top: 6px;
+}
+
 .popout-float {
   position: absolute;
   top: 12px;
@@ -507,6 +499,14 @@ main {
   align-self: flex-end;
   font-weight: 400;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.bubble.gap {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  align-self: flex-start;
+  font-size: 11px;
 }
 
 .bubble .meta {
@@ -578,6 +578,18 @@ main {
 .badge.lock.unencrypted {
   color: #f59e0b;
   border-color: rgba(245, 158, 11, 0.5);
+}
+
+.badge.receipt.sent {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.badge.receipt.read {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.4);
 }
 
 .badge.lock.encrypted {

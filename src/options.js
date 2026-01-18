@@ -58,6 +58,9 @@ const keyNicknameEl = document.getElementById("keyNickname");
 const saveBtn = document.getElementById("save");
 const copyNsecBtn = document.getElementById("export");
 const copyNpubBtn = document.getElementById("exportNpub");
+const backupProfileBtn = document.getElementById("backupProfile");
+const backupAllProfilesBtn = document.getElementById("backupAllProfiles");
+const importProfileBtn = document.getElementById("importProfile");
 const relayInput = document.getElementById("relayInput");
 const relayError = document.getElementById("relayError");
 const relayList = document.getElementById("relayList");
@@ -100,6 +103,9 @@ document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
 copyNpubBtn.addEventListener("click", exportNpub);
+backupProfileBtn?.addEventListener("click", backupProfile);
+backupAllProfilesBtn?.addEventListener("click", backupAllProfiles);
+importProfileBtn?.addEventListener("click", importProfile);
 document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
 document.getElementById("addContact").addEventListener("click", addContactFromForm);
@@ -139,7 +145,7 @@ async function init() {
     renderContacts(recipients, true);
     renderRelays(relays, true);
     populateKeys(keys, state.pubkey);
-    fillKeyNickname(keys, state.pubkey);
+    fillKeyNickname(keys, state.pubkey, keySelect.value);
     saveBtn.disabled = true;
     saveBtn.textContent = "Save";
     syncFloatingState(keySelect);
@@ -148,12 +154,14 @@ async function init() {
     syncFloatingState(contactPub);
     syncFloatingState(contactNick);
     setDirty(false);
-    if (state.pubkey) {
-      pubkeyLabel.textContent = `Current npub: ${shortKey(state.pubkey)}`;
-      pubkeyLabel.title = toNpub(state.pubkey);
-    } else {
-      pubkeyLabel.textContent = "";
-      pubkeyLabel.title = "";
+    if (pubkeyLabel) {
+      if (state.pubkey) {
+        pubkeyLabel.textContent = `Current npub: ${shortKey(state.pubkey)}`;
+        pubkeyLabel.title = toNpub(state.pubkey);
+      } else {
+        pubkeyLabel.textContent = "";
+        pubkeyLabel.title = "";
+      }
     }
   } catch (err) {
     console.error("[pushstr][options] render failed", err, state);
@@ -167,7 +175,9 @@ async function init() {
       status("Unable to initialize key");
     }
   }
-  pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
+  if (pubkeyLabel) {
+    pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
+  }
   if (settingsVersion) {
     try {
       const manifest = browser.runtime.getManifest();
@@ -393,7 +403,7 @@ async function exportNsec() {
   }
   try {
     await navigator.clipboard.writeText(res.nsec);
-    flashButton(copyNsecBtn, "Copied");
+    flashButton(copyNsecBtn, "Secret Key Copied");
   } catch (err) {
     prompt("Your nsec (keep secret):", res.nsec);
     status("Copy failed; shown in prompt");
@@ -416,9 +426,83 @@ async function exportNpub() {
     await navigator.clipboard.writeText(res.npub);
     flashButton(copyNpubBtn, "Copied");
   } catch (err) {
-    prompt("Your npub:", res.npub);
+    prompt('My nPub:', res.npub);
     status("Copy failed; shown in prompt");
   }
+}
+
+async function backupProfile() {
+  try {
+    const res = await safeSend({ type: "backup-profile" });
+    if (!res?.backup) {
+      status("Backup failed");
+      return;
+    }
+    const json = JSON.stringify(res.backup, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const filename = `pushstr_profile_backup_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    status("Backup downloaded");
+  } catch (err) {
+    status(`Backup failed: ${err?.message || err}`);
+  }
+}
+
+async function backupAllProfiles() {
+  try {
+    const res = await safeSend({ type: "backup-profiles" });
+    if (!res?.backup) {
+      status("Backup failed");
+      return;
+    }
+    const json = JSON.stringify(res.backup, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const filename = `pushstr_profiles_backup_${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")}.json`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    status("Backup downloaded");
+  } catch (err) {
+    status(`Backup failed: ${err?.message || err}`);
+  }
+}
+
+async function importProfile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      const res = await safeSend({ type: "import-profile", backup });
+      if (!res?.ok) {
+        status(res?.error || "Import failed");
+        return;
+      }
+      status("Profile imported");
+      await init();
+    } catch (err) {
+      status(`Import failed: ${err?.message || err}`);
+    }
+  };
+  input.click();
 }
 
 async function showNpubQr() {
@@ -477,8 +561,10 @@ function populateKeys(keys = [], currentPub) {
     opt.textContent = toNpub(currentPub);
     keySelect.appendChild(opt);
     keySelect.title = toNpub(currentPub);
-    pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
-    pubkeyLabel.title = toNpub(currentPub);
+    if (pubkeyLabel) {
+      pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
+      pubkeyLabel.title = toNpub(currentPub);
+    }
     return;
   }
   unique.forEach((k) => {
@@ -491,8 +577,10 @@ function populateKeys(keys = [], currentPub) {
   if (!keySelect.value && unique[0]) keySelect.value = unique[0].nsec;
   if (currentPub) {
     keySelect.title = toNpub(currentPub);
-    pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
-    pubkeyLabel.title = toNpub(currentPub);
+    if (pubkeyLabel) {
+      pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
+      pubkeyLabel.title = toNpub(currentPub);
+    }
   }
   syncFloatingState(keySelect);
 }
@@ -551,8 +639,10 @@ function shortKey(pk) {
   return `${npub.slice(0, 8)}...${npub.slice(-4)}`;
 }
 
-function fillKeyNickname(keys, currentPub) {
-  const entry = (keys || []).find((k) => k.pubkey === currentPub);
+function fillKeyNickname(keys, currentPub, currentNsec) {
+  const entry = (keys || []).find(
+    (k) => k.pubkey === currentPub || (currentNsec && k.nsec === currentNsec),
+  );
   keyNicknameEl.value = entry?.nickname || "";
   syncFloatingState(keyNicknameEl);
 }

@@ -22,6 +22,7 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:workmanager/workmanager.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
@@ -190,6 +191,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     'com.pushstr.storage',
   );
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
+  static const String _pushstrClientTag = '[pushstr:client]';
+  static const Color _historyAccentGreen = Color(0xFF2F8F62);
+  // Color.fromARGB(255, 18, 113, 53);
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
@@ -218,6 +222,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, Timer> _copiedMessageTimers = {};
   final Map<String, Timer> _holdTimersHome = {};
   final Map<String, double> _holdProgressHome = {};
+  final Set<String> _pendingReceipts = {};
+  final Set<String> _sentReceipts = {};
+  final Map<String, int> _missingFetchTs = {};
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 4000;
@@ -332,9 +339,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Handle shared content from Android intents
     _initShareListener();
 
-    final savedContacts = prefs.getStringList('contacts') ?? [];
-    final savedMessages = prefs.getString('messages');
+    final profileList = prefs.getStringList('profiles') ?? [];
+    String? profileNsec;
+    if (profileIndex >= 0 && profileIndex < profileList.length) {
+      final parts = profileList[profileIndex].split('|');
+      profileNsec = parts.isNotEmpty ? parts[0] : null;
+    }
+    profileNsec ??= savedNsec.isNotEmpty ? savedNsec : null;
+    final contactsKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _contactsKeyFor(profileNsec)
+        : 'contacts';
+    final messagesKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _messagesKeyFor(profileNsec)
+        : 'messages';
+    final pendingKey = profileNsec != null && profileNsec.isNotEmpty
+        ? _pendingDmsKeyFor(profileNsec)
+        : 'pending_dms';
+    final savedContacts =
+        prefs.getStringList(contactsKey) ??
+        prefs.getStringList('contacts') ??
+        [];
+    final savedMessages =
+        prefs.getString(messagesKey) ?? prefs.getString('messages');
+    final pendingMessagesJson = prefs.getString(pendingKey);
     List<Map<String, dynamic>> loadedMessages = [];
+    List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
       try {
         final List<dynamic> msgsList = jsonDecode(savedMessages);
@@ -343,10 +372,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         print('Failed to load saved messages: $e');
       }
     }
+    if (pendingMessagesJson != null && pendingMessagesJson.isNotEmpty) {
+      try {
+        final List<dynamic> msgsList = jsonDecode(pendingMessagesJson);
+        pendingMessages = msgsList
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .map(_normalizeIncomingMessage)
+            .toList();
+      } catch (_) {
+        // ignore pending parse errors
+      }
+    }
     if (mounted) {
       setState(() {
         isConnected = false;
-        messages = loadedMessages;
+        messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
         contacts = _dedupeContacts(
           savedContacts
               .map((c) {
@@ -420,6 +460,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
   String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
@@ -427,6 +468,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _dmOverridesKeyFor(String profileNsec) => 'dm_overrides_$profileNsec';
   String _dmGiftwrapKeyFor(String profileNsec) =>
       'dm_giftwrap_formats_$profileNsec';
+  static const String _readReceiptKey = 'pushstr_ack';
+
+  bool _containsPushstrClientTag(String content) {
+    return content.contains(_pushstrClientTag);
+  }
+
+  String _stripPushstrClientTag(String content) {
+    if (!content.contains(_pushstrClientTag)) return content;
+    final pattern = RegExp(r'(^|\n)\[pushstr:client\](\n|$)', multiLine: true);
+    final stripped = content.replaceAll(pattern, '\n').trim();
+    return stripped;
+  }
+
+  String _withPushstrClientTag(String content) {
+    if (content.contains(_pushstrClientTag)) return content;
+    if (content.isEmpty) return _pushstrClientTag;
+    return '$content\n$_pushstrClientTag';
+  }
+
+  String _buildReadReceiptPayload(String messageId) {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return jsonEncode({_readReceiptKey: messageId, 'ts': now});
+  }
+
+  String? _extractReadReceiptId(String content) {
+    final cleaned = _stripPushstrClientTag(content).trimLeft();
+    if (!cleaned.contains(_readReceiptKey)) return null;
+    if (!cleaned.startsWith('{')) return null;
+    try {
+      final decoded = jsonDecode(cleaned);
+      if (decoded is Map && decoded[_readReceiptKey] is String) {
+        return decoded[_readReceiptKey] as String;
+      }
+    } catch (_) {
+      // ignore parse failures
+    }
+    return null;
+  }
 
   Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
     final dir = (msg['direction'] ?? msg['dir'] ?? '').toString().toLowerCase();
@@ -582,6 +661,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return 0;
   }
 
+  int? _messageSeq(Map<String, dynamic> message) {
+    final raw = message['seq'];
+    if (raw is int) return raw;
+    if (raw is double) return raw.round();
+    if (raw is String) return int.tryParse(raw);
+    return null;
+  }
+
+  void _requestMissingMessages(String contact) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final last = _missingFetchTs[contact] ?? 0;
+    if (now - last < 30000) return;
+    _missingFetchTs[contact] = now;
+    unawaited(_fetchMessages());
+  }
+
   void _updateDmModesFromMessages(List<Map<String, dynamic>> incoming) {
     bool changed = false;
     bool giftwrapChanged = false;
@@ -597,7 +692,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (!hasOverride && _dmModes[pubkey] != 'nip59') {
           _dmModes[pubkey] = 'nip59';
           changed = true;
-          print('[dm] legacy giftwrap observed; using nip59 for ${pubkey.substring(0, 8)}');
+          print(
+            '[dm] legacy giftwrap observed; using nip59 for ${pubkey.substring(0, 8)}',
+          );
         }
         continue;
       }
@@ -665,8 +762,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isGiftwrap =
         dmKind == 'nip59' || dmKind == 'legacy_giftwrap' || kind == 1059;
     if (!isNip04 && !isGiftwrap) return null;
-    final iconData = isGiftwrap ? Icons.visibility_off : Icons.visibility;
-    final color = isGiftwrap ? const Color(0xFF22C55E) : Colors.grey.shade500;
+    final iconData = isGiftwrap ? Icons.lock : Icons.lock_open;
+    final color = isGiftwrap ? _historyAccentGreen : Colors.grey.shade500;
     final label = isGiftwrap ? '17' : '04';
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -684,7 +781,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final enabled = target.isNotEmpty;
     final mode = enabled ? _effectiveDmMode(target) : 'nip59';
     final isGiftwrap = mode != 'nip04';
-    final iconData = isGiftwrap ? Icons.visibility_off : Icons.visibility;
+    final iconData = isGiftwrap ? Icons.lock : Icons.lock_open;
 
     final activeColor = isGiftwrap
         ? const Color(0xFF22C55E)
@@ -870,6 +967,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }).toList();
 
       final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
+      _applyPendingReceiptsToList(merged);
       final added = merged.length > existingLen;
       setState(() {
         messages = merged;
@@ -990,6 +1088,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localText = text.isNotEmpty ? text : '(attachment)';
       }
 
+      payload = _withPushstrClientTag(payload);
       final dmMode = _effectiveDmMode(selectedContact!);
       final useLegacyDm = dmMode == 'nip04';
       final modeLabel = useLegacyDm ? 'nip04' : 'nip59';
@@ -1027,19 +1126,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       unawaited(
         Future(() async {
           try {
+            String? eventId;
             if (useLegacyDm) {
-              await RustSyncWorker.sendLegacyDm(
+              eventId = await RustSyncWorker.sendLegacyDm(
                 recipient: selectedContact!,
                 message: payload,
                 nsec: nsec!,
               );
             } else {
-              await RustSyncWorker.sendGiftDm(
+              eventId = await RustSyncWorker.sendGiftDm(
                 recipient: selectedContact!,
                 content: payload,
                 nsec: nsec!,
                 useNip44: true,
               );
+            }
+            if (eventId != null) {
+              _replaceLocalMessageId(localId, eventId);
             }
           } catch (e) {
             if (!mounted) return;
@@ -1098,8 +1201,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final sizeValue = descriptor['size'] is int
             ? descriptor['size'] as int
             : int.tryParse(descriptor['size']?.toString() ?? '');
-        final sizeLabel =
-            sizeValue != null ? _formatBytes(sizeValue) : null;
+        final sizeLabel = sizeValue != null ? _formatBytes(sizeValue) : null;
         final attachmentLine = sizeLabel != null
             ? 'Attachment: $filename ($sizeLabel)'
             : 'Attachment: $filename';
@@ -1116,6 +1218,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
+    payload = _withPushstrClientTag(payload);
     return {'payload': payload, 'text': localText, 'media': localMedia};
   }
 
@@ -1166,18 +1269,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       unawaited(_saveMessages());
 
       if (useLegacyDm) {
-        await RustSyncWorker.sendLegacyDm(
+        final eventId = await RustSyncWorker.sendLegacyDm(
           recipient: recipient,
           message: payload,
           nsec: nsec!,
         );
+        if (eventId != null) {
+          _replaceLocalMessageId(localId, eventId);
+        }
       } else {
-        await RustSyncWorker.sendGiftDm(
+        final eventId = await RustSyncWorker.sendGiftDm(
           recipient: recipient,
           content: payload,
           nsec: nsec!,
           useNip44: true,
         );
+        if (eventId != null) {
+          _replaceLocalMessageId(localId, eventId);
+        }
       }
       if (!mounted) return;
       _showThemedToast('Resent', preferTop: true);
@@ -1508,7 +1617,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
 
           setState(() {
-            messages = _mergeMessages([...messages, ...newMessages]);
+            final merged = _mergeMessages([...messages, ...newMessages]);
+            _applyPendingReceiptsToList(merged);
+            messages = merged;
             lastError = null;
             contacts = _dedupeContacts(contacts);
             _sortContactsByActivity();
@@ -1549,8 +1660,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _ensureSelectedContact() {
-    if (selectedContact != null &&
-        contacts.any((c) => c['pubkey'] == selectedContact)) {
+    if (contacts.isEmpty) {
+      if (mounted && selectedContact != null) {
+        setState(() {
+          selectedContact = null;
+        });
+        _persistVisibleState();
+      }
       return;
     }
     String? best;
@@ -1568,7 +1684,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     best ??= contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-    if (best != null && mounted) {
+    if (best != null && mounted && best != selectedContact) {
       setState(() {
         selectedContact = best;
       });
@@ -1733,7 +1849,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         contacts = _dedupeContacts(loadedContacts);
       }
       if (overrideLoaded || messages.isEmpty) {
-        messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
+        final merged = _mergeMessages([...loadedMessages, ...pendingMessages]);
+        _applyPendingReceiptsToList(merged);
+        messages = merged;
       }
       _sortContactsByActivity();
     });
@@ -1773,17 +1891,128 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   ) async {
     final decoded = <Map<String, dynamic>>[];
     for (final m in msgs) {
+      final receiptId = m['receipt_for']?.toString();
+      if (receiptId != null && receiptId.isNotEmpty) {
+        _handleIncomingReceipt(receiptId);
+        continue;
+      }
+      final isPushstrClient = m['pushstr_client'] == true;
       final content = m['content']?.toString() ?? '';
       final senderPubkey = m['from']?.toString() ?? npub ?? '';
       final messageId = m['id'] as String?;
       final processed = await _decodeContent(content, senderPubkey, messageId);
-      decoded.add({
+      final normalized = {
         ...m,
         'content': processed['text'],
         'media': processed['media'],
-      });
+      };
+      decoded.add(normalized);
+      if (isPushstrClient) {
+        unawaited(_maybeSendReadReceipt(normalized));
+      }
     }
     return decoded;
+  }
+
+  void _handleIncomingReceipt(String receiptId) {
+    if (_applyReceiptToMessages(receiptId)) return;
+    _pendingReceipts.add(receiptId);
+  }
+
+  bool _applyReceiptToMessages(String receiptId) {
+    bool updated = false;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    for (final message in messages) {
+      if (message['id'] != receiptId) continue;
+      if (message['direction'] != 'out') continue;
+      if (message['read_at'] == null) {
+        message['read_at'] = now;
+        message['read'] = true;
+        updated = true;
+      }
+    }
+    if (updated && mounted) {
+      setState(() {});
+    }
+    if (updated) {
+      unawaited(_saveMessages());
+    }
+    return updated;
+  }
+
+  void _applyPendingReceiptsToList(List<Map<String, dynamic>> list) {
+    if (_pendingReceipts.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final remaining = <String>{..._pendingReceipts};
+    for (final message in list) {
+      final id = message['id'] as String?;
+      if (id == null || !remaining.contains(id)) continue;
+      if (message['direction'] != 'out') continue;
+      if (message['read_at'] == null) {
+        message['read_at'] = now;
+        message['read'] = true;
+      }
+      remaining.remove(id);
+    }
+    _pendingReceipts
+      ..clear()
+      ..addAll(remaining);
+  }
+
+  void _replaceLocalMessageId(String localId, String eventId) {
+    bool updated = false;
+    for (final message in messages) {
+      if (message['id'] == localId) {
+        message['id'] = eventId;
+        updated = true;
+      }
+    }
+    if (_sessionMessages.remove(localId)) {
+      _sessionMessages.add(eventId);
+    }
+    if (updated) {
+      _applyPendingReceiptsToList(messages);
+      if (mounted) {
+        setState(() {});
+      }
+      unawaited(_saveMessages());
+    }
+  }
+
+  Future<void> _maybeSendReadReceipt(Map<String, dynamic> message) async {
+    if (message['direction'] != 'in') return;
+    final sender = message['from']?.toString() ?? '';
+    final messageId = message['id']?.toString() ?? '';
+    if (sender.isEmpty || messageId.isEmpty) return;
+    if (_sentReceipts.contains(messageId)) return;
+    _sentReceipts.add(messageId);
+    final dmKind = message['dm_kind']?.toString();
+    final kind = _messageKind(message);
+    final useLegacyDm = dmKind == 'nip04' || kind == 4;
+    final payload = _buildReadReceiptPayload(messageId);
+    unawaited(
+      Future(() async {
+        if (nsec == null || nsec!.isEmpty) return;
+        try {
+          if (useLegacyDm) {
+            await RustSyncWorker.sendLegacyDm(
+              recipient: sender,
+              message: payload,
+              nsec: nsec!,
+            );
+          } else {
+            await RustSyncWorker.sendGiftDm(
+              recipient: sender,
+              content: payload,
+              nsec: nsec!,
+              useNip44: true,
+            );
+          }
+        } catch (_) {
+          // ignore receipt send failures
+        }
+      }),
+    );
   }
 
   Future<Map<String, dynamic>> _decodeContent(
@@ -1791,6 +2020,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String senderPubkey,
     String? messageId,
   ) async {
+    raw = _stripPushstrClientTag(raw);
     final extracted = _extractPushstrMedia(raw);
     final cleanedText = (extracted['text'] ?? '').trim();
     final mediaJson = extracted['media'];
@@ -2190,12 +2420,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (!await file.exists()) return;
             final bytes = await file.readAsBytes();
             final name = file.path.split(Platform.pathSeparator).last;
-            final mime = lookupMimeType(name, headerBytes: bytes) ?? 'audio/mp4';
-            await _setPendingAttachment(
-              bytes: bytes,
-              name: name,
-              mime: mime,
-            );
+            final mime =
+                lookupMimeType(name, headerBytes: bytes) ?? 'audio/mp4';
+            await _setPendingAttachment(bytes: bytes, name: name, mime: mime);
             try {
               await file.delete();
             } catch (_) {}
@@ -2204,7 +2431,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final recording = _isRecordingAudio;
           final minutes = _recordingElapsed ~/ 60;
           final seconds = _recordingElapsed % 60;
-          final timeLabel = '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+          final timeLabel =
+              '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
 
           return SafeArea(
             child: Padding(
@@ -2214,7 +2442,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Text(
                     recording ? 'Recording…' : 'Record audio',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -2238,7 +2469,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     icon: Icon(recording ? Icons.stop : Icons.mic),
                     label: Text(recording ? 'Stop & Attach' : 'Start'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: recording ? Colors.redAccent : Colors.greenAccent,
+                      backgroundColor: recording
+                          ? Colors.redAccent
+                          : Colors.greenAccent,
                       foregroundColor: Colors.black,
                     ),
                   ),
@@ -2311,59 +2544,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-            child: GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.05,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildAttachOption(
-                  icon: Icons.photo_camera,
-                  label: 'Camera',
-                  color: Colors.redAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachImageFromCamera();
-                  },
-                ),
-                _buildAttachOption(
-                  icon: Icons.videocam,
-                  label: 'Video Cam',
-                  color: Colors.redAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachVideo(ImageSource.camera);
-                  },
-                ),
-                _buildAttachOption(
-                  icon: Icons.mic,
-                  label: 'Record',
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showRecordAudioSheet();
-                  },
-                  color: Colors.redAccent,
-                ),
-                _buildAttachOption(
-                  icon: Icons.photo_library,
-                  label: 'Gallery',
-                  color: Colors.lightBlueAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachImage();
-                  },
-                ),
-                _buildAttachOption(
-                  icon: Icons.video_library,
-                  label: 'Video',
-                  color: Colors.lightBlueAccent,
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _attachVideo(ImageSource.gallery);
-                  },
-                ),
+          child: GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.05,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildAttachOption(
+                icon: Icons.photo_camera,
+                label: 'Camera',
+                color: Colors.redAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachImageFromCamera();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.videocam,
+                label: 'Video Cam',
+                color: Colors.redAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachVideo(ImageSource.camera);
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.mic,
+                label: 'Record',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showRecordAudioSheet();
+                },
+                color: Colors.redAccent,
+              ),
+              _buildAttachOption(
+                icon: Icons.photo_library,
+                label: 'Gallery',
+                color: Colors.lightBlueAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachImage();
+                },
+              ),
+              _buildAttachOption(
+                icon: Icons.video_library,
+                label: 'Video',
+                color: Colors.lightBlueAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _attachVideo(ImageSource.gallery);
+                },
+              ),
               _buildAttachOption(
                 icon: Icons.audio_file,
                 label: 'Audio',
@@ -2540,7 +2773,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     IconButton(
                       icon: const Icon(Icons.qr_code_2, size: 32),
-                      tooltip: 'Show my npub QR',
+                      tooltip: 'Show my nPub QR',
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints.tightFor(
                         width: 52,
@@ -2548,131 +2781,120 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       onPressed: _showMyNpubQr,
                     ),
+                    IconButton(
+                      icon: const Icon(Icons.settings, size: 28),
+                      tooltip: 'Settings',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 52,
+                        height: 52,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showSettings(context);
+                      },
+                    ),
                   ],
                 ),
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add contact'),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _addContact(context);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan QR'),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _scanContactQr();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
             for (final contact in contacts)
-              Dismissible(
+              ListTile(
                 key: ValueKey(contact['pubkey'] ?? ''),
-                background: Container(
-                  color: Colors.red.withValues(alpha: 0.4),
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.only(left: 16),
-                  child: const Icon(Icons.delete, color: Colors.white),
+                title: Text(() {
+                  final nickname = (contact['nickname'] ?? '')
+                      .toString()
+                      .trim();
+                  return nickname.isNotEmpty
+                      ? nickname
+                      : _short(contact['pubkey'] ?? '');
+                }()),
+                subtitle: Text(
+                  _short(contact['pubkey'] ?? ''),
+                  style: const TextStyle(fontSize: 11),
                 ),
-                secondaryBackground: Container(
-                  color: Colors.red.withValues(alpha: 0.4),
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 16),
-                  child: const Icon(Icons.delete, color: Colors.white),
-                ),
-                onDismissed: (_) async {
-                  setState(() {
-                    contacts.removeWhere(
-                      (c) => c['pubkey'] == contact['pubkey'],
-                    );
-                    if (selectedContact == contact['pubkey']) {
-                      selectedContact = contacts.isNotEmpty
-                          ? contacts.first['pubkey']
-                          : null;
-                    }
-                  });
+                selected: selectedContact == contact['pubkey'],
+                onTap: () {
+                  setState(() => selectedContact = contact['pubkey']);
                   _persistVisibleState();
-                  await _saveContacts();
+                  Navigator.pop(context);
                 },
-                child: ListTile(
-                  title: Text(() {
-                    final nickname = (contact['nickname'] ?? '')
-                        .toString()
-                        .trim();
-                    return nickname.isNotEmpty
-                        ? nickname
-                        : _short(contact['pubkey'] ?? '');
-                  }()),
-                  subtitle: Text(
-                    _short(contact['pubkey'] ?? ''),
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                  selected: selectedContact == contact['pubkey'],
-                  onTap: () {
-                    setState(() => selectedContact = contact['pubkey']);
-                    _persistVisibleState();
-                    Navigator.pop(context);
-                  },
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit),
-                        tooltip: 'Edit nickname',
-                        onPressed: () => _editContact(context, contact),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      tooltip: 'Edit nickname',
+                      onPressed: () => _editContact(context, contact),
+                    ),
+                    _HoldDeleteIcon(
+                      active:
+                          _holdActiveHome['delete_contact_${contact['pubkey']}'] ??
+                          false,
+                      progress: _holdProgressHomeFor(
+                        'delete_contact_${contact['pubkey']}',
                       ),
-                      _HoldDeleteIcon(
-                        active:
-                            _holdActiveHome['delete_contact_${contact['pubkey']}'] ??
-                            false,
-                        progress: _holdProgressHomeFor(
+                      onTap: () =>
+                          _showHoldWarningHome('Hold 5s to delete contact'),
+                      onHoldStart: () {
+                        _startHoldActionHome(
                           'delete_contact_${contact['pubkey']}',
-                        ),
-                        onTap: () =>
-                            _showHoldWarningHome('Hold 5s to delete contact'),
-                        onHoldStart: () {
-                          _startHoldActionHome(
-                            'delete_contact_${contact['pubkey']}',
-                            () async {
-                              setState(() {
-                                contacts.removeWhere(
-                                  (c) => c['pubkey'] == contact['pubkey'],
-                                );
-                                if (selectedContact == contact['pubkey']) {
-                                  selectedContact = contacts.isNotEmpty
-                                      ? contacts.first['pubkey']
-                                      : null;
-                                }
-                              });
-                              _persistVisibleState();
-                              await _saveContacts();
-                              _cancelHoldActionHome(
-                                'delete_contact_${contact['pubkey']}',
+                          () async {
+                            setState(() {
+                              contacts.removeWhere(
+                                (c) => c['pubkey'] == contact['pubkey'],
                               );
-                            },
-                            countdownLabel: 'delete contact',
-                          );
-                        },
-                        onHoldEnd: () => _cancelHoldActionHome(
-                          'delete_contact_${contact['pubkey']}',
-                        ),
+                              if (selectedContact == contact['pubkey']) {
+                                selectedContact = contacts.isNotEmpty
+                                    ? contacts.first['pubkey']
+                                    : null;
+                              }
+                            });
+                            _persistVisibleState();
+                            await _saveContacts();
+                            _cancelHoldActionHome(
+                              'delete_contact_${contact['pubkey']}',
+                            );
+                          },
+                          countdownLabel: 'delete contact',
+                        );
+                      },
+                      onHoldEnd: () => _cancelHoldActionHome(
+                        'delete_contact_${contact['pubkey']}',
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text('Add contact'),
-              onTap: () {
-                Navigator.pop(context);
-                _addContact(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.qr_code_scanner),
-              title: const Text('Scan QR'),
-              onTap: () {
-                Navigator.pop(context);
-                _scanContactQr();
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
-              onTap: () {
-                Navigator.pop(context);
-                _showSettings(context);
-              },
-            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -2715,16 +2937,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   (m['direction'] == 'in' && m['from'] == selectedContact),
             )
             .toList()
-          ..sort(
-            (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
-          );
+          ..sort((a, b) {
+            final aTime = a['created_at'] ?? 0;
+            final bTime = b['created_at'] ?? 0;
+            final timeCmp = aTime.compareTo(bTime);
+            if (timeCmp != 0) return timeCmp;
+            final aSeq = _messageSeq(a);
+            final bSeq = _messageSeq(b);
+            if (aSeq != null && bSeq != null) {
+              return aSeq.compareTo(bSeq);
+            }
+            return 0;
+          });
+
+    final display = <Map<String, dynamic>>[];
+    int? lastIncomingSeq;
+    for (final m in convo) {
+      if (m['direction'] == 'in' && m['from'] == selectedContact) {
+        final seq = _messageSeq(m);
+        if (seq != null &&
+            lastIncomingSeq != null &&
+            seq > lastIncomingSeq + 1) {
+          display.add({
+            'direction': 'gap',
+            'missing_from': lastIncomingSeq + 1,
+            'missing_to': seq - 1,
+          });
+          _requestMissingMessages(selectedContact!);
+        }
+        if (seq != null) {
+          lastIncomingSeq = seq;
+        }
+      }
+      display.add(m);
+    }
 
     final listView = ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(12),
-      itemCount: convo.length,
+      itemCount: display.length,
       itemBuilder: (context, idx) {
-        final m = convo[idx];
+        final m = display[idx];
+        if (m['direction'] == 'gap') {
+          final from = m['missing_from'];
+          final to = m['missing_to'];
+          final label = from == to
+              ? 'Missing message (seq $from)'
+              : 'Missing messages (seq $from-$to)';
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              ),
+            ),
+          );
+        }
         final align = m['direction'] == 'out'
             ? Alignment.centerRight
             : Alignment.centerLeft;
@@ -2739,10 +3015,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);
+        final readReceiptBadge = _buildReadReceiptBadge(m);
         final resendBtn = isOut
             ? IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
                 tooltip: 'Resend',
+                visualDensity: const VisualDensity(
+                  horizontal: -4,
+                  vertical: -4,
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                 onPressed: () => _resendMessage(m),
               )
             : null;
@@ -2791,7 +3074,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    margin: const EdgeInsets.only(bottom: 4),
+                    margin: EdgeInsets.only(bottom: isOut ? 2 : 4),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
                       vertical: 10,
@@ -2830,7 +3113,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4, bottom: 12),
+              padding: EdgeInsets.only(
+                left: 4,
+                right: 4,
+                bottom: isOut ? 7 : 12,
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -2843,8 +3130,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const SizedBox(width: 6),
                     attachmentBadge,
                   ],
-                  if (resendBtn != null) ...[
+                  if (readReceiptBadge != null) ...[
                     const SizedBox(width: 6),
+                    readReceiptBadge,
+                  ],
+                  if (resendBtn != null) ...[
+                    const SizedBox(width: 4),
                     resendBtn,
                   ],
                 ],
@@ -2854,7 +3145,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       },
     );
-    final canScroll = _scrollController.hasClients &&
+    final canScroll =
+        _scrollController.hasClients &&
         _scrollController.position.maxScrollExtent > 8;
     return Stack(
       children: [
@@ -2870,7 +3162,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildScrollToBottomButton() {
-    final iconColor = _hasNewMessages ? const Color(0xFF22C55E) : Colors.grey;
+    final iconColor = _hasNewMessages ? _historyAccentGreen : Colors.grey;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -2894,6 +3186,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           child: Icon(Icons.arrow_downward_rounded, size: 18, color: iconColor),
         ),
+      ),
+    );
+  }
+
+  Widget? _buildReadReceiptBadge(Map<String, dynamic> message) {
+    if (message['direction'] != 'out') return null;
+    final hasRead = message['read_at'] != null || message['read'] == true;
+    final id = message['id']?.toString() ?? '';
+    final isLocal = id.startsWith('local_');
+    final color = hasRead ? _historyAccentGreen : Colors.grey.shade500;
+    final tooltip = hasRead ? 'Read' : (isLocal ? 'Sending' : 'Sent');
+    return Tooltip(
+      message: tooltip,
+      child: Icon(
+        hasRead
+            ? Icons.visibility
+            : (isLocal ? Icons.visibility_outlined : Icons.visibility),
+        size: 12,
+        color: color,
       ),
     );
   }
@@ -3198,7 +3509,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'My npub',
+                  'My nPub',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
@@ -3664,10 +3975,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (Platform.isIOS) {
         final file = await _writeTempMediaFile(bytes, mime);
-        final ok = await _storageChannel.invokeMethod<bool>(
-          'shareFile',
-          {'path': file.path, 'mime': mime, 'filename': filename},
-        );
+        final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+          'path': file.path,
+          'mime': mime,
+          'filename': filename,
+        });
         if (!mounted) return;
         if (ok != true) {
           _showThemedToast('Save failed', preferTop: true);
@@ -4335,8 +4647,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
               final duration = controller.value.duration;
               final progress = duration.inMilliseconds == 0
                   ? 0.0
-                  : (position.inMilliseconds / duration.inMilliseconds)
-                      .clamp(0.0, 1.0);
+                  : (position.inMilliseconds / duration.inMilliseconds).clamp(
+                      0.0,
+                      1.0,
+                    );
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggleControls,
@@ -4354,7 +4668,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                           right: 0,
                           bottom: 0,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             color: Colors.black.withOpacity(0.35),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -4363,10 +4680,19 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     IconButton(
-                                      icon: const Icon(Icons.replay_10, color: Colors.white),
+                                      icon: const Icon(
+                                        Icons.replay_10,
+                                        color: Colors.white,
+                                      ),
                                       onPressed: () {
-                                        final newPos = position - const Duration(seconds: 10);
-                                        controller.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
+                                        final newPos =
+                                            position -
+                                            const Duration(seconds: 10);
+                                        controller.seekTo(
+                                          newPos < Duration.zero
+                                              ? Duration.zero
+                                              : newPos,
+                                        );
                                       },
                                     ),
                                     const SizedBox(width: 8),
@@ -4389,9 +4715,14 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                     ),
                                     const SizedBox(width: 8),
                                     IconButton(
-                                      icon: const Icon(Icons.forward_10, color: Colors.white),
+                                      icon: const Icon(
+                                        Icons.forward_10,
+                                        color: Colors.white,
+                                      ),
                                       onPressed: () {
-                                        final newPos = position + const Duration(seconds: 10);
+                                        final newPos =
+                                            position +
+                                            const Duration(seconds: 10);
                                         controller.seekTo(
                                           newPos > duration ? duration : newPos,
                                         );
@@ -4403,16 +4734,22 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                   children: [
                                     Text(
                                       _formatDuration(position),
-                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                     Expanded(
                                       child: Slider(
                                         value: progress,
                                         onChanged: (value) {
-                                          if (duration.inMilliseconds == 0) return;
+                                          if (duration.inMilliseconds == 0)
+                                            return;
                                           final target = Duration(
                                             milliseconds:
-                                                (duration.inMilliseconds * value).round(),
+                                                (duration.inMilliseconds *
+                                                        value)
+                                                    .round(),
                                           );
                                           controller.seekTo(target);
                                         },
@@ -4420,7 +4757,10 @@ class _VideoPlayerPageState extends State<_VideoPlayerPage> {
                                     ),
                                     Text(
                                       _formatDuration(duration),
-                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -4563,13 +4903,21 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const String _appVersion = '0.0.3';
+  String _appVersion = '0.0.7';
+  static const MethodChannel _storageChannel = MethodChannel(
+    'com.pushstr.storage',
+  );
   static const List<String> _defaultRelays = [
     'wss://relay.damus.io',
     'wss://relay.primal.net',
     'wss://nos.lol',
     'wss://nostr.mom',
     'wss://relay.nostr.band',
+    'wss://relay.snort.social',
+    'wss://relay.nostr.bg',
+    'wss://eden.nostr.land',
+    'wss://relay.nostr.wine',
+    'wss://relay.plebstr.com',
   ];
   List<Map<String, String>> profiles = [];
   List<String> profileNpubs = [];
@@ -4604,6 +4952,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     relayInputCtrl.addListener(_updateRelayValidity);
     _loadSettings();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _appVersion = info.version);
+    } catch (_) {
+      // Fall back to the default version string.
+    }
   }
 
   @override
@@ -4819,15 +5178,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await prefs.setString('nostr_nsec', selectedNsec);
         profiles[selectedProfileIndex]['nickname'] = nicknameCtrl.text.trim();
 
-        // Ensure the selected profile is active in Rust
-        try {
-          api.initNostr(nsec: selectedNsec);
-          if (selectedProfileIndex < profileNpubs.length) {
-            setState(() => currentNpub = profileNpubs[selectedProfileIndex]);
-          }
-        } catch (e) {
-          print('Failed to activate profile: $e');
+        if (selectedProfileIndex < profileNpubs.length) {
+          setState(() => currentNpub = profileNpubs[selectedProfileIndex]);
         }
+      } else {
+        await prefs.remove('nostr_nsec');
       }
 
       await prefs.setStringList('relays', relays);
@@ -4893,10 +5248,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (nsec.isNotEmpty) {
                 setState(() {
                   profiles.add({'nsec': nsec, 'nickname': nickname});
+                  selectedProfileIndex = profiles.length - 1;
+                  profileNickname = nickname;
+                  nicknameCtrl.text = nickname;
                 });
                 _markDirty();
                 await _saveSettings();
                 await _refreshProfileNpubs();
+                unawaited(_primeProfileData(nsec));
               }
               Navigator.pop(ctx);
             },
@@ -4929,10 +5288,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final nickname = nicknameDialogCtrl.text.trim();
               setState(() {
                 profiles.add({'nsec': nsec, 'nickname': nickname});
+                selectedProfileIndex = profiles.length - 1;
+                profileNickname = nickname;
+                nicknameCtrl.text = nickname;
               });
               _markDirty();
               await _saveSettings();
               await _refreshProfileNpubs();
+              unawaited(_primeProfileData(nsec));
               Navigator.pop(ctx);
             },
             child: const Text('Generate'),
@@ -4950,6 +5313,262 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       _showThemedToast('Copied profile secret (nSec)', preferTop: true);
     }
+  }
+
+  Future<File> _writeTempBackupFile(Uint8List bytes, String filename) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  Future<void> _backupCurrentProfile() async {
+    if (profiles.isEmpty || selectedProfileIndex >= profiles.length) {
+      _showThemedToast('No profile selected', preferTop: true);
+      return;
+    }
+    final nsec = profiles[selectedProfileIndex]['nsec'] ?? '';
+    if (nsec.isEmpty) {
+      _showThemedToast('Missing profile secret', preferTop: true);
+      return;
+    }
+    final nickname = profiles[selectedProfileIndex]['nickname'] ?? '';
+    final npub = (selectedProfileIndex < profileNpubs.length)
+        ? profileNpubs[selectedProfileIndex]
+        : currentNpub;
+    final prefs = await SharedPreferences.getInstance();
+    final contactsKey = nsec.isNotEmpty ? _contactsKeyFor(nsec) : 'contacts';
+    final savedContacts = prefs.getStringList(contactsKey) ?? [];
+    final contacts = savedContacts
+        .map((entry) {
+          final parts = entry.split('|');
+          return {
+            'nickname': parts.isNotEmpty ? parts[0] : '',
+            'pubkey': parts.length > 1 ? parts[1] : '',
+          };
+        })
+        .where((c) => (c['pubkey'] ?? '').toString().isNotEmpty)
+        .toList();
+    final payload = {
+      'type': 'pushstr_profile_backup',
+      'version': 1,
+      'created_at': DateTime.now().toIso8601String(),
+      'profiles': [
+        {
+          'profile': {'nsec': nsec, 'npub': npub, 'nickname': nickname},
+          'contacts': contacts,
+        },
+      ],
+    };
+    final json = jsonEncode(payload);
+    final bytes = Uint8List.fromList(utf8.encode(json));
+    final filename =
+        'pushstr_profile_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+
+    if (Platform.isAndroid) {
+      final uri = await _storageChannel.invokeMethod<String>(
+        'saveToDownloads',
+        {'bytes': bytes, 'mime': 'application/json', 'filename': filename},
+      );
+      if (!mounted) return;
+      if (uri == null) {
+        _showThemedToast('Backup failed', preferTop: true);
+      } else {
+        _showThemedToast('Backup saved to Downloads', preferTop: true);
+      }
+      return;
+    }
+
+    if (Platform.isIOS) {
+      final file = await _writeTempBackupFile(bytes, filename);
+      final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+        'path': file.path,
+        'mime': 'application/json',
+        'filename': filename,
+      });
+      if (!mounted) return;
+      if (ok != true) {
+        _showThemedToast('Backup failed', preferTop: true);
+      }
+      return;
+    }
+
+    final selectedDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose where to save backup',
+    );
+    if (selectedDir == null) {
+      if (mounted) {
+        _showThemedToast('Backup cancelled', preferTop: true);
+      }
+      return;
+    }
+    final file = File('$selectedDir/$filename');
+    await file.writeAsBytes(bytes);
+    if (!mounted) return;
+    _showThemedToast('Backup saved to $selectedDir', preferTop: true);
+  }
+
+  Future<void> _backupAllProfiles() async {
+    if (profiles.isEmpty) {
+      _showThemedToast('No profiles to backup', preferTop: true);
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final profileEntries = <Map<String, dynamic>>[];
+    for (var i = 0; i < profiles.length; i++) {
+      final nsec = profiles[i]['nsec'] ?? '';
+      if (nsec.isEmpty) continue;
+      final nickname = profiles[i]['nickname'] ?? '';
+      final npub = (i < profileNpubs.length) ? profileNpubs[i] : '';
+      final contactsKey = _contactsKeyFor(nsec);
+      final savedContacts = prefs.getStringList(contactsKey) ?? [];
+      final contacts = savedContacts
+          .map((entry) {
+            final parts = entry.split('|');
+            return {
+              'nickname': parts.isNotEmpty ? parts[0] : '',
+              'pubkey': parts.length > 1 ? parts[1] : '',
+            };
+          })
+          .where((c) => (c['pubkey'] ?? '').toString().isNotEmpty)
+          .toList();
+      profileEntries.add({
+        'profile': {'nsec': nsec, 'npub': npub, 'nickname': nickname},
+        'contacts': contacts,
+      });
+    }
+    if (profileEntries.isEmpty) {
+      _showThemedToast('No profiles to backup', preferTop: true);
+      return;
+    }
+    final payload = {
+      'type': 'pushstr_profile_backup',
+      'version': 1,
+      'created_at': DateTime.now().toIso8601String(),
+      'profiles': profileEntries,
+    };
+    final json = jsonEncode(payload);
+    final bytes = Uint8List.fromList(utf8.encode(json));
+    final filename =
+        'pushstr_profiles_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+
+    if (Platform.isAndroid) {
+      final uri = await _storageChannel.invokeMethod<String>(
+        'saveToDownloads',
+        {'bytes': bytes, 'mime': 'application/json', 'filename': filename},
+      );
+      if (!mounted) return;
+      if (uri == null) {
+        _showThemedToast('Backup failed', preferTop: true);
+      } else {
+        _showThemedToast('Backup saved to Downloads', preferTop: true);
+      }
+      return;
+    }
+
+    if (Platform.isIOS) {
+      final file = await _writeTempBackupFile(bytes, filename);
+      final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+        'path': file.path,
+        'mime': 'application/json',
+        'filename': filename,
+      });
+      if (!mounted) return;
+      if (ok != true) {
+        _showThemedToast('Backup failed', preferTop: true);
+      }
+      return;
+    }
+
+    final selectedDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose where to save backup',
+    );
+    if (selectedDir == null) {
+      if (mounted) {
+        _showThemedToast('Backup cancelled', preferTop: true);
+      }
+      return;
+    }
+    final file = File('$selectedDir/$filename');
+    await file.writeAsBytes(bytes);
+    if (!mounted) return;
+    _showThemedToast('Backup saved to $selectedDir', preferTop: true);
+  }
+
+  Future<void> _deleteProfileData(
+    SharedPreferences prefs,
+    String profileNsec,
+  ) async {
+    if (profileNsec.isEmpty) return;
+    final keys = [
+      _contactsKeyFor(profileNsec),
+      _messagesKeyFor(profileNsec),
+      _pendingDmsKeyFor(profileNsec),
+      _dmModesKeyFor(profileNsec),
+      _dmOverridesKeyFor(profileNsec),
+      _dmGiftwrapKeyFor(profileNsec),
+      _lastSeenKeyFor(profileNsec),
+      'last_notified_ts_$profileNsec',
+    ];
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
+  }
+
+  Future<void> _deleteProfileAt(int index) async {
+    if (index < 0 || index >= profiles.length) return;
+    final prefs = await SharedPreferences.getInstance();
+    final nsec = profiles[index]['nsec'] ?? '';
+    await _deleteProfileData(prefs, nsec);
+
+    setState(() {
+      profiles.removeAt(index);
+      if (index < profileNpubs.length) {
+        profileNpubs.removeAt(index);
+      }
+      if (selectedProfileIndex >= profiles.length) {
+        selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+      } else if (selectedProfileIndex > index) {
+        selectedProfileIndex = selectedProfileIndex - 1;
+      }
+      profileNickname = profiles.isNotEmpty
+          ? (profiles[selectedProfileIndex]['nickname'] ?? '')
+          : '';
+      nicknameCtrl.text = profileNickname;
+      currentNpub =
+          (profiles.isNotEmpty && selectedProfileIndex < profileNpubs.length)
+          ? profileNpubs[selectedProfileIndex]
+          : '';
+    });
+    _hasPendingChanges = false;
+    await _saveSettings();
+    if (profiles.isNotEmpty) {
+      await _refreshProfileNpubs();
+    }
+  }
+
+  Future<void> _deleteAllProfiles() async {
+    if (profiles.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    for (final profile in profiles) {
+      final nsec = profile['nsec'] ?? '';
+      await _deleteProfileData(prefs, nsec);
+    }
+    await prefs.remove('profiles');
+    await prefs.remove('profile_npubs_cache');
+    await prefs.remove('selected_profile_index');
+    await prefs.remove('nostr_nsec');
+
+    setState(() {
+      profiles = [];
+      profileNpubs = [];
+      selectedProfileIndex = 0;
+      profileNickname = '';
+      nicknameCtrl.text = '';
+      currentNpub = '';
+    });
+    _hasPendingChanges = false;
+    await _saveSettings();
   }
 
   Future<void> _copyNpub() async {
@@ -5155,7 +5774,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'My npub',
+                  'My nPub',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
@@ -5192,38 +5811,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _refreshProfileNpubs() async {
     if (profiles.isEmpty) return;
-
-    final current =
-        (selectedProfileIndex < profiles.length && selectedProfileIndex >= 0)
-        ? profiles[selectedProfileIndex]['nsec'] ?? ''
-        : '';
-
-    final npubs = <String>[];
-
-    // Compute npubs on main thread to avoid isolate state confusion
-    // Crypto operations are fast enough for a few profiles
-    for (final profile in profiles) {
-      final nsec = profile['nsec'] ?? '';
-      if (nsec.isEmpty) {
-        npubs.add('');
-        continue;
-      }
-      try {
-        final npub = api.initNostr(nsec: nsec);
-        npubs.add(npub);
-      } catch (e) {
-        print('Failed to derive npub: $e');
-        npubs.add('');
-      }
-    }
-
-    // Restore the current nsec
-    if (current.isNotEmpty) {
-      try {
-        api.initNostr(nsec: current);
-      } catch (_) {
-        // ignore restore errors
-      }
+    final nsecs = profiles
+        .map((profile) => profile['nsec'] ?? '')
+        .toList(growable: false);
+    List<String> npubs = [];
+    try {
+      npubs = api.deriveNpubs(nsecs: nsecs);
+    } catch (e) {
+      print('Failed to derive npubs: $e');
+      npubs = List.filled(nsecs.length, '');
     }
 
     // Cache the computed npubs
@@ -5248,6 +5844,184 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final text = value.trim();
     if (text.length <= 12) return text;
     return '${text.substring(0, 8)}...${text.substring(text.length - 4)}';
+  }
+
+  String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+  String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+  String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
+  String _dmModesKeyFor(String profileNsec) => 'dm_modes_$profileNsec';
+  String _dmOverridesKeyFor(String profileNsec) => 'dm_overrides_$profileNsec';
+  String _dmGiftwrapKeyFor(String profileNsec) =>
+      'dm_giftwrap_formats_$profileNsec';
+  String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
+
+  String _normalizeBackupPubkey(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (trimmed.startsWith('npub') || trimmed.startsWith('nprofile')) {
+      try {
+        return api.npubToHex(npub: trimmed);
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  Future<void> _importProfileBackup() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    try {
+      final file = result.files.first;
+      final bytes =
+          file.bytes ??
+          (file.path != null ? await File(file.path!).readAsBytes() : null);
+      if (bytes == null) {
+        _showThemedToast('Import failed: file unreadable', preferTop: true);
+        return;
+      }
+      final jsonText = utf8.decode(bytes);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map) {
+        _showThemedToast('Import failed: invalid JSON', preferTop: true);
+        return;
+      }
+      final rawEntries = <Map<String, dynamic>>[];
+      if (decoded['profiles'] is List) {
+        for (final entry in decoded['profiles'] as List) {
+          if (entry is Map) {
+            rawEntries.add(Map<String, dynamic>.from(entry));
+          }
+        }
+      } else if (decoded['profile'] is Map) {
+        rawEntries.add({
+          'profile': Map<String, dynamic>.from(decoded['profile'] as Map),
+          'contacts': decoded['contacts'],
+        });
+      }
+      if (rawEntries.isEmpty) {
+        _showThemedToast('Import failed: no profiles found', preferTop: true);
+        return;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final updatedProfiles = profiles
+          .map((p) => Map<String, String>.from(p))
+          .toList();
+      var importedCount = 0;
+      var activeNicknameUpdated = false;
+
+      for (final entry in rawEntries) {
+        final profile = entry['profile'];
+        if (profile is! Map) continue;
+        final rawNsec = profile['nsec'];
+        if (rawNsec is! String) continue;
+        final nsec = rawNsec.trim();
+        if (nsec.isEmpty) continue;
+        final nickname = (profile['nickname'] ?? '').toString().trim();
+        final contactsJson = entry['contacts'];
+        if (contactsJson is List) {
+          final entries = <String>[];
+          final seen = <String>{};
+          for (final contact in contactsJson) {
+            if (contact is! Map) continue;
+            final rawPubkey = contact['pubkey']?.toString() ?? '';
+            final pubkey = _normalizeBackupPubkey(rawPubkey);
+            if (pubkey.isEmpty || seen.contains(pubkey)) continue;
+            seen.add(pubkey);
+            final nick = contact['nickname']?.toString() ?? '';
+            entries.add('$nick|$pubkey');
+          }
+          if (entries.isNotEmpty) {
+            await prefs.setStringList(_contactsKeyFor(nsec), entries);
+          }
+        }
+
+        final idx = updatedProfiles.indexWhere((p) => p['nsec'] == nsec);
+        if (idx == -1) {
+          updatedProfiles.add({'nsec': nsec, 'nickname': nickname});
+        } else if (nickname.isNotEmpty) {
+          updatedProfiles[idx]['nickname'] = nickname;
+          if (idx == selectedProfileIndex) {
+            activeNicknameUpdated = true;
+          }
+        }
+        importedCount++;
+      }
+
+      if (importedCount == 0) {
+        _showThemedToast('Import failed: missing nsec', preferTop: true);
+        return;
+      }
+
+      setState(() {
+        profiles = updatedProfiles;
+        if (activeNicknameUpdated) {
+          profileNickname =
+              profiles[selectedProfileIndex]['nickname'] ?? profileNickname;
+          nicknameCtrl.text = profileNickname;
+        }
+      });
+      _markDirty();
+      await _saveSettings();
+      await _refreshProfileNpubs();
+      _showThemedToast(
+        importedCount > 1 ? 'Profiles imported' : 'Profile imported',
+        preferTop: true,
+      );
+    } catch (e) {
+      _showThemedToast('Import failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _primeProfileData(String nsec) async {
+    if (nsec.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dmsJson = await RustSyncWorker.fetchRecentDms(
+        nsec: nsec,
+        limit: 100,
+        sinceTimestamp: 0,
+      );
+      if (dmsJson == null || dmsJson.isEmpty) return;
+      await prefs.setString(_messagesKeyFor(nsec), dmsJson);
+      final List<dynamic> dmsList = jsonDecode(dmsJson);
+      final messages = dmsList.cast<Map<String, dynamic>>();
+      final maxSeen = messages.fold<int>(0, (acc, m) {
+        final raw = m['created_at'];
+        if (raw is int && raw > acc) return raw;
+        if (raw is double && raw > acc) return raw.round();
+        if (raw is String) {
+          final parsed = int.tryParse(raw);
+          if (parsed != null && parsed > acc) return parsed;
+        }
+        return acc;
+      });
+      if (maxSeen > 0) {
+        await prefs.setInt(_lastSeenKeyFor(nsec), maxSeen);
+      }
+      final contactSet = <String>{};
+      final contactsList = <String>[];
+      for (final message in messages) {
+        final direction = message['direction']?.toString();
+        final pubkey = (direction == 'out')
+            ? message['to']?.toString()
+            : message['from']?.toString();
+        if (pubkey == null || pubkey.isEmpty) continue;
+        if (contactSet.add(pubkey)) {
+          contactsList.add('|$pubkey');
+        }
+      }
+      if (contactsList.isNotEmpty) {
+        await prefs.setStringList(_contactsKeyFor(nsec), contactsList);
+      }
+    } catch (e) {
+      print('Failed to prime profile data: $e');
+    }
   }
 
   Future<void> _addRelay() async {
@@ -5465,105 +6239,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 12),
                 if (profiles.isNotEmpty &&
                     selectedProfileIndex < profiles.length) ...[
-                  InputDecorator(
-                    decoration: InputDecoration(
-                      labelText: 'Active profile',
-                      filled: true,
-                      fillColor: Colors.black.withOpacity(0.35),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 3,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: Colors.greenAccent.shade200,
-                        ),
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: selectedProfileIndex,
-                        isExpanded: true,
-                        items: profiles.asMap().entries.map((entry) {
-                          final idx = entry.key;
-                          final profile = entry.value;
-                          final fullNpub =
-                              (idx < profileNpubs.length &&
-                                  profileNpubs[idx].isNotEmpty)
-                              ? profileNpubs[idx]
-                              : '';
-                          final shortNpub = fullNpub.isNotEmpty
-                              ? _shortNpub(fullNpub)
-                              : 'Profile ${idx + 1}';
-                          final nickname = (profile['nickname'] ?? '').trim();
-                          final label = nickname.isNotEmpty
-                              ? '$shortNpub - $nickname'
-                              : shortNpub;
-
-                          return DropdownMenuItem(
-                            value: idx,
-                            child: Text(label),
-                          );
-                        }).toList(),
-                        selectedItemBuilder: (ctx) {
-                          return profiles.asMap().entries.map((entry) {
-                            final idx = entry.key;
-                            final fullNpub =
-                                (idx < profileNpubs.length &&
-                                    profileNpubs[idx].isNotEmpty)
-                                ? profileNpubs[idx]
-                                : '';
-                            final shortNpub = fullNpub.isNotEmpty
-                                ? _shortNpub(fullNpub)
-                                : 'Profile ${idx + 1}';
-                            return Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(shortNpub),
-                            );
-                          }).toList();
-                        },
-                        onChanged: (idx) async {
-                          if (idx != null &&
-                              idx < profiles.length &&
-                              idx != selectedProfileIndex) {
-                            final nsec = profiles[idx]['nsec'] ?? '';
-                            if (nsec.isNotEmpty) {
-                              // Switch the active key in Rust
-                              try {
-                                api.initNostr(nsec: nsec);
-                              } catch (e) {
-                                print('Failed to switch profile: $e');
-                              }
-                            }
-                            setState(() {
-                              selectedProfileIndex = idx;
-                              profileNickname = profiles[idx]['nickname'] ?? '';
-                              nicknameCtrl.text = profileNickname;
-                              if (idx < profileNpubs.length) {
-                                currentNpub = profileNpubs[idx];
-                              }
-                            });
-                            _markDirty();
-                            await _saveSettings();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
                   Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: nicknameCtrl,
+                        child: InputDecorator(
                           decoration: InputDecoration(
-                            labelText: 'Profile nickname (optional)',
+                            labelText: 'Active profile',
                             filled: true,
                             fillColor: Colors.black.withOpacity(0.35),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 3,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -5573,23 +6260,104 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 color: Colors.greenAccent.shade200,
                               ),
                             ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: selectedProfileIndex,
+                              isExpanded: true,
+                              items: profiles.asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final profile = entry.value;
+                                final fullNpub =
+                                    (idx < profileNpubs.length &&
+                                        profileNpubs[idx].isNotEmpty)
+                                    ? profileNpubs[idx]
+                                    : '';
+                                final shortNpub = fullNpub.isNotEmpty
+                                    ? _shortNpub(fullNpub)
+                                    : 'Profile ${idx + 1}';
+                                final nickname = (profile['nickname'] ?? '')
+                                    .trim();
+                                final label = nickname.isNotEmpty
+                                    ? '$shortNpub - $nickname'
+                                    : shortNpub;
+
+                                return DropdownMenuItem(
+                                  value: idx,
+                                  child: Text(label),
+                                );
+                              }).toList(),
+                              selectedItemBuilder: (ctx) {
+                                return profiles.asMap().entries.map((entry) {
+                                  final idx = entry.key;
+                                  final fullNpub =
+                                      (idx < profileNpubs.length &&
+                                          profileNpubs[idx].isNotEmpty)
+                                      ? profileNpubs[idx]
+                                      : '';
+                                  final shortNpub = fullNpub.isNotEmpty
+                                      ? _shortNpub(fullNpub)
+                                      : 'Profile ${idx + 1}';
+                                  return Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(shortNpub),
+                                  );
+                                }).toList();
+                              },
+                              onChanged: (idx) async {
+                                if (idx != null &&
+                                    idx < profiles.length &&
+                                    idx != selectedProfileIndex) {
+                                  setState(() {
+                                    selectedProfileIndex = idx;
+                                    profileNickname =
+                                        profiles[idx]['nickname'] ?? '';
+                                    nicknameCtrl.text = profileNickname;
+                                    if (idx < profileNpubs.length) {
+                                      currentNpub = profileNpubs[idx];
+                                    }
+                                  });
+                                  _markDirty();
+                                  await _saveSettings();
+                                  final nsec = profiles[idx]['nsec'] ?? '';
+                                  unawaited(_primeProfileData(nsec));
+                                }
+                              },
                             ),
                           ),
-                          onChanged: (value) {
-                            if (profiles.isNotEmpty &&
-                                selectedProfileIndex < profiles.length) {
-                              profiles[selectedProfileIndex]['nickname'] =
-                                  value;
-                              _markDirty(schedule: false);
-                            }
-                          },
                         ),
                       ),
                       const SizedBox(width: 10),
-                      AnimatedSwitcher(
+                      IconButton.filled(
+                        onPressed: _generateProfile,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black,
+                          foregroundColor: Colors.greenAccent.shade200,
+                          shape: const CircleBorder(),
+                          padding: const EdgeInsets.all(10),
+                        ),
+                        icon: const Icon(Icons.add, size: 22),
+                        tooltip: 'New profile',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: nicknameCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Profile nickname (optional)',
+                      filled: true,
+                      fillColor: Colors.black.withOpacity(0.35),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: Colors.greenAccent.shade200,
+                        ),
+                      ),
+                      suffixIcon: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 150),
                         child: showProfileSave
                             ? IconButton.filled(
@@ -5599,119 +6367,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   backgroundColor: Colors.greenAccent.shade400,
                                   foregroundColor: Colors.black,
                                   shape: const CircleBorder(),
-                                  padding: const EdgeInsets.all(10),
+                                  padding: const EdgeInsets.all(8),
                                 ),
-                                icon: const Icon(Icons.check, size: 22),
+                                icon: const Icon(Icons.check, size: 18),
                                 tooltip: 'Save profile',
                               )
-                            : _HoldDeleteIcon(
-                                active: _holdActive['delete_profile'] ?? false,
-                                progress: _holdProgressFor('delete_profile'),
-                                onTap: () => _showHoldWarning(
-                                  'Hold 5s to delete profile',
-                                ),
-                                onHoldStart: () {
-                                  if (_isSaving || profiles.length <= 1) return;
-                                  _startHoldAction(
-                                    'delete_profile',
-                                    () async {
-                                      final removing = selectedProfileIndex;
-                                      setState(() {
-                                        profiles.removeAt(removing);
-                                        if (removing < profileNpubs.length) {
-                                          profileNpubs.removeAt(removing);
-                                        }
-                                        if (selectedProfileIndex >=
-                                            profiles.length) {
-                                          selectedProfileIndex =
-                                              profiles.isEmpty
-                                              ? 0
-                                              : profiles.length - 1;
-                                        }
-                                        profileNickname = profiles.isNotEmpty
-                                            ? (profiles[selectedProfileIndex]['nickname'] ??
-                                                  '')
-                                            : '';
-                                        nicknameCtrl.text = profileNickname;
-                                      });
-                                      _hasPendingChanges = false;
-                                      await _saveSettings();
-                                      await _refreshProfileNpubs();
-                                      _cancelHoldAction('delete_profile');
-                                    },
-                                    countdownLabel: 'delete profile',
-                                  );
-                                },
-                                onHoldEnd: () =>
-                                    _cancelHoldAction('delete_profile'),
+                            : const SizedBox(
+                                key: ValueKey('save_profile_empty'),
+                                width: 36,
+                                height: 36,
                               ),
                       ),
-                    ],
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                    ),
+                    onChanged: (value) {
+                      if (profiles.isNotEmpty &&
+                          selectedProfileIndex < profiles.length) {
+                        profiles[selectedProfileIndex]['nickname'] = value;
+                        _markDirty(schedule: false);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
                 ],
-                actionGroup('Management', [
-                  ElevatedButton.icon(
-                    style: textButtonStyle,
-                    onPressed: _generateProfile,
-                    icon: const Icon(Icons.add, size: 22),
-                    label: const Text('New Profile'),
-                  ),
-                  ElevatedButton.icon(
-                    style: textButtonStyle,
-                    onPressed: _addProfile,
-                    icon: const Icon(Icons.input_outlined, size: 20),
-                    label: const Text('Import Profile (nSec)'),
-                  ),
-                ]),
-                const SizedBox(height: 8),
-                actionGroup('Utilities', [
-                  Builder(
-                    builder: (context) {
-                      final holdActive = _holdActive['copy_nsec'] ?? false;
-                      final progress = _holdProgress['copy_nsec'] ?? 0.0;
-                      final remainingMs = (_holdMillis * (1 - progress)).clamp(
-                        0.0,
-                        _holdMillis.toDouble(),
-                      );
-                      final remainingSeconds = (remainingMs / 1000).ceil();
-                      final label = _nsecCopied
-                          ? 'Copied'
-                          : holdActive
-                          ? 'Hold ${remainingSeconds}s to copy profile secret (nSec)'
-                          : 'Hold 5s to copy profile secret (nSec)';
-                      return GestureDetector(
-                        onLongPressStart: (_) => _startHoldAction(
-                          'copy_nsec',
-                          () async {
-                            await _exportCurrentKey();
-                            _setCopyState(nsec: true);
-                            _cancelHoldAction('copy_nsec');
-                          },
-                          countdownLabel: 'copy profile secret (nSec)',
-                        ),
-                        onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
-                        onTap: () {},
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 120),
-                          opacity: 1.0,
-                          child: ElevatedButton.icon(
-                            style: textButtonStyle,
-                            onPressed: null,
-                            icon: const Icon(Icons.vpn_key_outlined, size: 20),
-                            label: Text(label),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                actionGroup('Actions', [
                   ElevatedButton.icon(
                     style: textButtonStyle,
                     onPressed: () async {
                       await _copyNpub();
                       _setCopyState(npub: true);
                     },
-                    icon: const Icon(Icons.mail_outline, size: 22),
+                    icon: const Icon(Icons.content_copy, size: 20),
                     label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
                   ),
                   ElevatedButton.icon(
@@ -5722,10 +6411,224 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ]),
                 const SizedBox(height: 12),
+                actionGroup('Key Management', [
+                  SizedBox(
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (context) {
+                            final holdActive =
+                                _holdActive['copy_nsec'] ?? false;
+                            final progress = _holdProgress['copy_nsec'] ?? 0.0;
+                            final remainingMs = (_holdMillis * (1 - progress))
+                                .clamp(0.0, _holdMillis.toDouble());
+                            final remainingSeconds = (remainingMs / 1000)
+                                .ceil();
+                            final label = _nsecCopied
+                                ? 'Copied'
+                                : holdActive
+                                ? 'Hold ${remainingSeconds}s to copy nSec'
+                                : 'Hold 5s to copy nSec';
+                            return GestureDetector(
+                              onLongPressStart: (_) =>
+                                  _startHoldAction('copy_nsec', () async {
+                                    await _exportCurrentKey();
+                                    _setCopyState(nsec: true);
+                                    _cancelHoldAction('copy_nsec');
+                                  }, countdownLabel: 'copy nSec'),
+                              onLongPressEnd: (_) =>
+                                  _cancelHoldAction('copy_nsec'),
+                              onTap: () {},
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 120),
+                                opacity: 1.0,
+                                child: ElevatedButton.icon(
+                                  style: textButtonStyle,
+                                  onPressed: null,
+                                  icon: const Icon(
+                                    Icons.vpn_key_outlined,
+                                    size: 20,
+                                  ),
+                                  label: Text(label),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Never share this key',
+                          style: TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _addProfile,
+                    icon: const Icon(Icons.input_outlined, size: 20),
+                    label: const Text('Import nSec'),
+                  ),
+                  SizedBox(
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (context) {
+                            final holdActive =
+                                _holdActive['delete_profile'] ?? false;
+                            final progress =
+                                _holdProgress['delete_profile'] ?? 0.0;
+                            final remainingMs = (_holdMillis * (1 - progress))
+                                .clamp(0.0, _holdMillis.toDouble());
+                            final remainingSeconds = (remainingMs / 1000)
+                                .ceil();
+                            final label = holdActive
+                                ? 'Hold ${remainingSeconds}s to delete active profile'
+                                : 'Hold 5s to delete active profile';
+                            return GestureDetector(
+                              onLongPressStart: (_) => _startHoldAction(
+                                'delete_profile',
+                                () async {
+                                  if (_isSaving || profiles.isEmpty) {
+                                    _cancelHoldAction('delete_profile');
+                                    return;
+                                  }
+                                  await _deleteProfileAt(selectedProfileIndex);
+                                  _cancelHoldAction('delete_profile');
+                                },
+                                countdownLabel: 'delete active profile',
+                              ),
+                              onLongPressEnd: (_) =>
+                                  _cancelHoldAction('delete_profile'),
+                              onTap: () {},
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 120),
+                                opacity: profiles.isEmpty ? 0.4 : 1.0,
+                                child: ElevatedButton.icon(
+                                  style: textButtonStyle,
+                                  onPressed: null,
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 20,
+                                  ),
+                                  label: Text(label),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Profile, contacts and messages will be deleted from device',
+                          style: TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (context) {
+                            final holdActive =
+                                _holdActive['delete_all_profiles'] ?? false;
+                            final progress =
+                                _holdProgress['delete_all_profiles'] ?? 0.0;
+                            final remainingMs = (_holdMillis * (1 - progress))
+                                .clamp(0.0, _holdMillis.toDouble());
+                            final remainingSeconds = (remainingMs / 1000)
+                                .ceil();
+                            final label = holdActive
+                                ? 'Hold ${remainingSeconds}s to delete all profiles'
+                                : 'Hold 5s to delete all profiles';
+                            return GestureDetector(
+                              onLongPressStart: (_) => _startHoldAction(
+                                'delete_all_profiles',
+                                () async {
+                                  if (_isSaving || profiles.isEmpty) {
+                                    _cancelHoldAction('delete_all_profiles');
+                                    return;
+                                  }
+                                  await _deleteAllProfiles();
+                                  _cancelHoldAction('delete_all_profiles');
+                                },
+                                countdownLabel: 'delete all profiles',
+                              ),
+                              onLongPressEnd: (_) =>
+                                  _cancelHoldAction('delete_all_profiles'),
+                              onTap: () {},
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 120),
+                                opacity: profiles.isEmpty ? 0.4 : 1.0,
+                                child: ElevatedButton.icon(
+                                  style: textButtonStyle,
+                                  onPressed: null,
+                                  icon: const Icon(
+                                    Icons.delete_sweep_outlined,
+                                    size: 20,
+                                  ),
+                                  label: Text(label),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Profile, contacts and messages will be deleted from device',
+                          style: TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                actionGroup('Backup and Restore', [
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _backupCurrentProfile,
+                    icon: const Icon(Icons.save_alt, size: 20),
+                    label: const Text('Backup Active Profile (JSON)'),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _backupAllProfiles,
+                    icon: const Icon(Icons.all_inbox, size: 20),
+                    label: const Text('Backup All Profiles (JSON)'),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _importProfileBackup,
+                    icon: const Icon(Icons.upload_file, size: 20),
+                    label: const Text('Import Profile (JSON)'),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Connectivity',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
                 SwitchListTile(
-                  title: const Text('Stay connected (foreground)'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Stay connected'),
                   subtitle: const Text(
-                    'Runs an opt-in foreground service for quicker catch-up',
+                    'Runs a foreground service for faster relay catch-up',
                   ),
                   value: _foregroundEnabled,
                   onChanged: (val) async {
@@ -5769,22 +6672,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     }
                   },
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          Container(
-            decoration: sectionDecoration,
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                const SizedBox(height: 10),
                 const Text(
-                  'Relays',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  'RELAYS',
+                  style: TextStyle(
+                    fontSize: 13,
+                    letterSpacing: 0.4,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 6),
-                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(

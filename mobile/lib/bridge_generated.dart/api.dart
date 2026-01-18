@@ -6,9 +6,9 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ensure_recipient_dm_relays`, `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `parse_pubkey`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `sha256_hex`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Nip44MessageKeys`, `RumorData`, `UnwrappedGift`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `enqueue_send`, `ensure_recipient_dm_relays`, `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `is_read_receipt_content`, `next_send_seq`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `normalize_message_content`, `parse_pubkey`, `parse_read_receipt_id`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `send_dm_direct`, `send_gift_dm_direct`, `seq_from_event_tags`, `seq_from_tag_list`, `sha256_hex`, `start_send_worker`, `strip_pushstr_client_tag`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Nip44MessageKeys`, `RumorData`, `SendKind`, `SendRequest`, `UnwrappedGift`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 /// Initialize the Nostr service with a secret key (nsec)
 /// If nsec is empty, generates a new key
@@ -28,7 +28,7 @@ String generateNewKey() => RustLib.instance.api.crateApiGenerateNewKey();
 String sendGiftDm({required String recipient, required String content, required bool useNip44}) =>
     RustLib.instance.api.crateApiSendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
 
-/// Send a legacy giftwrap DM compatible with the Pushstr browser extension.
+/// Send a giftwrap DM using the standard NIP-59 sealed rumor path.
 String sendLegacyGiftDm({required String recipient, required String content}) =>
     RustLib.instance.api.crateApiSendLegacyGiftDm(recipient: recipient, content: content);
 
@@ -45,6 +45,9 @@ String npubToHex({required String npub}) => RustLib.instance.api.crateApiNpubToH
 
 /// Convert hex pubkey to npub
 String hexToNpub({required String hex}) => RustLib.instance.api.crateApiHexToNpub(hex: hex);
+
+/// Derive npubs for a list of nsecs without mutating global state.
+List<String> deriveNpubs({required List<String> nsecs}) => RustLib.instance.api.crateApiDeriveNpubs(nsecs: nsecs);
 
 /// Send an encrypted DM using NIP-04 (kind 4) - matches browser extension default
 /// recipient can be npub or hex pubkey

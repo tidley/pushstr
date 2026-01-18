@@ -6,14 +6,22 @@ Private, relay-backed messaging over Nostr. Pushstr ships as a browser extension
 - NIP-04 DMs (kind 4).
 - NIP-59 giftwrap DMs (kind 1059 + sealed rumor kind 13 + inner kind 14) using NIP-44 v2.
 - Legacy giftwrap compatibility for older clients.
+- Read receipts (between Pushstr clients).
+- Ordered delivery hints via per-recipient sequence tags and gap placeholders.
 - Encrypted attachments via Blossom-compatible uploads with inline previews.
 - Per-contact DM mode toggle (04 vs giftwrap).
 - Multi-relay delivery with retry/backoff and relay cooldown.
+- JSON profile backup/import (mobile + extension).
+- Optimistic send in extension UI.
+- Streamlined settings: actions, key management, backup/restore, connectivity toggle.
+- Extension sidebar refresh (settings in header, edit nickname, wider contacts pane).
+- Extension settings aligned to mobile sections with active/all profile backups.
 
 ## Architecture
 - UI: Flutter (mobile), HTML/CSS/JS (extension).
 - Crypto/relays: Rust (nostr-sdk), exposed via flutter_rust_bridge.
 - Extension crypto: WASM bundle (built from `wasm_crypto`).
+- Rust handles message normalization, receipt parsing, and FIFO send ordering; Dart/JS focus on UI.
 
 ## Repo Layout
 - `src/` extension source
@@ -45,11 +53,11 @@ cd wasm_crypto
 wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
 npm run patch:wasm
 
-# Chrome (MV3)
-MANIFEST_FILE=manifest.chrome.json npm run package
-
 # Firefox (MV2)
 npm run package
+
+# Chrome (MV3)
+MANIFEST_FILE=manifest.chrome.json npm run package
 ```
 
 Outputs:
@@ -64,7 +72,7 @@ Load the unpacked extension:
 
 Optional Rust rebuild (FFI + native libs):
 ```bash
-flutter_rust_bridge_codegen generate
+flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
 cd pushstr_rust
 cargo ndk -t arm64-v8a -t armeabi-v7a -o ../mobile/android/app/src/main/jniLibs build --release
 ```
@@ -102,4 +110,3 @@ flutter install --use-application-binary build/app/outputs/flutter-apk/app-relea
 <img width="540" height="1200" alt="image" src="https://github.com/user-attachments/assets/01a76f36-dbf2-417e-a616-f29e90bb7596" />
 
 <img width="540" height="1200" alt="image" src="https://github.com/user-attachments/assets/fdc65467-6848-4465-9ab6-b9cfab5a815e" />
-
