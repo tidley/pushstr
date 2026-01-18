@@ -59,6 +59,7 @@ const saveBtn = document.getElementById("save");
 const copyNsecBtn = document.getElementById("export");
 const copyNpubBtn = document.getElementById("exportNpub");
 const backupProfileBtn = document.getElementById("backupProfile");
+const backupAllProfilesBtn = document.getElementById("backupAllProfiles");
 const importProfileBtn = document.getElementById("importProfile");
 const relayInput = document.getElementById("relayInput");
 const relayError = document.getElementById("relayError");
@@ -103,6 +104,7 @@ document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
 copyNpubBtn.addEventListener("click", exportNpub);
 backupProfileBtn?.addEventListener("click", backupProfile);
+backupAllProfilesBtn?.addEventListener("click", backupAllProfiles);
 importProfileBtn?.addEventListener("click", importProfile);
 document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
@@ -436,6 +438,32 @@ async function backupProfile() {
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const filename = `pushstr_profile_backup_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    status("Backup downloaded");
+  } catch (err) {
+    status(`Backup failed: ${err?.message || err}`);
+  }
+}
+
+async function backupAllProfiles() {
+  try {
+    const res = await safeSend({ type: "backup-profiles" });
+    if (!res?.backup) {
+      status("Backup failed");
+      return;
+    }
+    const json = JSON.stringify(res.backup, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const filename = `pushstr_profiles_backup_${new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")}.json`;
     const link = document.createElement("a");
     link.href = url;
     link.download = filename;

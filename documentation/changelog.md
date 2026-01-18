@@ -19,12 +19,15 @@
 - Settings layout reorganized (Actions, Key Management, Backup/Restore, Connectivity).
 - App version display pulled from mobile build metadata.
 - Profile switches focus the most recent contact and clear history when none exist.
+- Backup JSON format standardized to a profiles array, with multi-profile import support.
+- Extension side panel layout tightened (wider pane, edit pen, topbar settings).
 
 ### Fixed
 - Duplicate notifications for already-received messages.
 - Giftwrap send serialization bug (missing tags on sealed events).
 - Read receipt parsing when Pushstr client tag is present.
 - Swipe-to-delete removal on mobile contacts list to prevent accidental deletes.
+- Extension contact delete now removes the contact entry, not just the conversation.
 
 ## 0.0.6
 

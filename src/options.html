@@ -33,23 +33,28 @@
       </div>
       <div class="action-groups">
         <div class="action-cluster">
-          <div class="cluster-label">Profile Tools</div>
+          <div class="cluster-label">Actions</div>
           <div class="button-row">
-            <button id="export">Copy Secret Key (nSec)</button>
             <button id="exportNpub">Copy Public Key (nPub)</button>
             <button class="ghost-btn" id="showNpubQr">Show nPub QR</button>
-            <button class="ghost-btn" id="backupProfile">Backup Profile (JSON)</button>
-            <button class="ghost-btn" id="importProfile">Import Profile (JSON)</button>
           </div>
         </div>
         <div class="action-cluster">
-          <div class="cluster-label">Manage Profile</div>
+          <div class="cluster-label">Key Management</div>
           <div class="button-row">
-            <button id="regen">Generate New Profile</button>
+            <button id="export">Copy Secret Key (nSec)</button>
             <button id="import">Import Secret Key (nSec)</button>
-            <button id="removeProfile" class="icon-btn ghost danger push-right" title="Remove profile" aria-label="Remove profile">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6a1 1 0 0 1 1 1v2h3v2h-1v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V8H5V6h3V4a1 1 0 0 1 1-1zm1 3h4V5h-4zm-1 4v7h2v-7zm4 0v7h2v-7z"/></svg>
-            </button>
+            <button id="regen">Generate New Profile</button>
+            <button id="removeProfile" class="danger">Delete Active Profile</button>
+          </div>
+          <p class="helper">Profile, contacts and messages will be deleted from device.</p>
+        </div>
+        <div class="action-cluster">
+          <div class="cluster-label">Backup and Restore</div>
+          <div class="button-row">
+            <button class="ghost-btn" id="backupProfile">Backup Active Profile (JSON)</button>
+            <button class="ghost-btn" id="backupAllProfiles">Backup All Profiles (JSON)</button>
+            <button class="ghost-btn" id="importProfile">Import Profile (JSON)</button>
           </div>
         </div>
       </div>
@@ -58,9 +63,10 @@
     <div class="card tone-2">
       <div class="card-header">
         <div>
-          <h2>Relays</h2>
+          <h2>Connectivity</h2>
         </div>
       </div>
+      <div class="cluster-label">Relays</div>
       <div class="relay-add">
         <div class="field floating stretch">
           <input id="relayInput" type="text" placeholder=" " />

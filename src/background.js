@@ -177,6 +177,11 @@ async function handleMessage(msg) {
     return { ok: true, backup };
   }
 
+  if (msg.type === "backup-profiles") {
+    const backup = buildProfilesBackup();
+    return { ok: true, backup };
+  }
+
   if (msg.type === "import-profile") {
     const backup = msg.backup;
     if (!backup || typeof backup !== "object") {
@@ -396,6 +401,39 @@ function buildProfileBackup() {
   };
 }
 
+function buildProfilesBackup() {
+  const keys = settings.keys || [];
+  const profiles = [];
+  for (const key of keys) {
+    const nsec = key.nsec || null;
+    const pub = key.pubkey || (nsec ? derivePubkeyFromNsec(nsec) : null);
+    if (!nsec || !pub) continue;
+    const npub = nt.nip19.npubEncode(pub);
+    const contacts = (settings.recipientsByKey?.[pub] || []).map((c) => ({
+      pubkey: c.pubkey,
+      nickname: c.nickname || ""
+    }));
+    profiles.push({
+      profile: {
+        nsec,
+        npub,
+        nickname: key.nickname || ""
+      },
+      contacts
+    });
+  }
+  if (!profiles.length && settings.nsec) {
+    const fallback = buildProfileBackup();
+    profiles.push(...(fallback.profiles || []));
+  }
+  return {
+    type: "pushstr_profile_backup",
+    version: 1,
+    created_at: new Date().toISOString(),
+    profiles
+  };
+}
+
 async function loadSettings() {
   const stored = await browser.storage.local.get();
   const prevKeys = (settings.keys || []).length;
@@ -446,6 +484,21 @@ function currentPrivkeyHex() {
     return decoded.type === "nsec" ? decoded.data : settings.nsec;
   } catch (err) {
     return settings.nsec;
+  }
+}
+
+function derivePubkeyFromNsec(nsec) {
+  if (!nsec) return null;
+  try {
+    const decoded = nt.nip19.decode(nsec);
+    const priv = decoded.type === "nsec" ? decoded.data : nsec;
+    return nt.getPublicKey(priv);
+  } catch (_) {
+    try {
+      return nt.getPublicKey(nsec);
+    } catch (err) {
+      return null;
+    }
   }
 }
 
@@ -960,7 +1013,7 @@ async function handleGiftEvent(event) {
       await sendReadReceipt(sender, receiptTargetId, dmKind);
     }
     if (cleanedMessage && !suppressNotifications) {
-      notify(`DM from ${sender.slice(0, 8)}...`, cleanedMessage);
+      notify(`DM from ${formatSenderLabel(sender)}`, cleanedMessage);
     }
     browser.runtime.sendMessage({ type: "incoming", event: targetEvent, outer: event, message: cleanedMessage }).catch(() => {});
   } catch (err) {
@@ -1440,6 +1493,24 @@ browser.contextMenus && browser.contextMenus.onClicked.addListener(async (info, 
 function short(pk) {
   if (!pk) return "unknown";
   return pk.slice(0, 6) + "..." + pk.slice(-4);
+}
+
+function formatNpubForNotify(pubkey) {
+  if (!pubkey) return "unknown";
+  try {
+    const npub = nt.nip19.npubEncode(pubkey);
+    return short(npub);
+  } catch (_) {
+    return short(pubkey);
+  }
+}
+
+function formatSenderLabel(pubkey) {
+  const recips = getRecipientsForCurrent();
+  const match = recips.find((r) => normalizePubkey(r.pubkey) === pubkey);
+  const nickname = match?.nickname?.trim();
+  if (nickname) return nickname;
+  return formatNpubForNotify(pubkey);
 }
 
 function addKeyToList(nsec) {
