@@ -21,6 +21,7 @@
 - Profile switches focus the most recent contact and clear history when none exist.
 - Backup JSON format standardized to a profiles array, with multi-profile import support.
 - Extension side panel layout tightened (wider pane, edit pen, topbar settings).
+- Extension settings UI now mirrors mobile sections with active/all profile backups.
 
 ### Fixed
 - Duplicate notifications for already-received messages.
@@ -28,6 +29,8 @@
 - Read receipt parsing when Pushstr client tag is present.
 - Swipe-to-delete removal on mobile contacts list to prevent accidental deletes.
 - Extension contact delete now removes the contact entry, not just the conversation.
+- Extension notifications show npub/nickname instead of raw hex pubkey.
+- Extension profile nickname refreshes on profile switch.
 
 ## 0.0.6
 

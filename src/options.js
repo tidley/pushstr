@@ -403,7 +403,7 @@ async function exportNsec() {
   }
   try {
     await navigator.clipboard.writeText(res.nsec);
-    flashButton(copyNsecBtn, "Copied");
+    flashButton(copyNsecBtn, "Secret Key Copied");
   } catch (err) {
     prompt("Your nsec (keep secret):", res.nsec);
     status("Copy failed; shown in prompt");
