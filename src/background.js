@@ -292,6 +292,14 @@ async function handleMessage(msg) {
     const before = messages.length;
     messages = messages.filter((m) => m.from !== target && m.to !== target);
     messageIds = new Set(messages.map((m) => m.id).filter(Boolean));
+    const recipients = getRecipientsForCurrent();
+    const filtered = recipients.filter((r) => normalizePubkey(r.pubkey) !== target);
+    if (filtered.length !== recipients.length) {
+      setRecipientsForCurrent(filtered);
+      if (settings.lastRecipient === target) {
+        settings.lastRecipient = filtered[0]?.pubkey || null;
+      }
+    }
     const pub = currentPubkey();
     if (pub) {
       settings.messagesByKey = settings.messagesByKey || {};
