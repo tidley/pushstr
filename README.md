@@ -14,6 +14,7 @@ Private, relay-backed messaging over Nostr. Pushstr ships as a browser extension
 - JSON profile backup/import (mobile + extension).
 - Optimistic send in extension UI.
 - Streamlined settings: actions, key management, backup/restore, connectivity toggle.
+- Extension sidebar refresh (settings in header, edit nickname, wider contacts pane).
 
 ## Architecture
 - UI: Flutter (mobile), HTML/CSS/JS (extension).
