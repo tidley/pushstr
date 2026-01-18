@@ -632,12 +632,12 @@ fn wire__crate__api__wrap_gift_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_inner_json = <String>::sse_decode(&mut deserializer);
             let api_recipient = <String>::sse_decode(&mut deserializer);
-            let api_use_nip44 = <bool>::sse_decode(&mut deserializer);
+            let api__use_nip44 = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                 (move || {
                     let output_ok =
-                        crate::api::wrap_gift(api_inner_json, api_recipient, api_use_nip44)?;
+                        crate::api::wrap_gift(api_inner_json, api_recipient, api__use_nip44)?;
                     Ok(output_ok)
                 })(),
             )
