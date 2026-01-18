@@ -12011,6 +12011,14 @@ async function handleMessage(msg) {
     const before = messages2.length;
     messages2 = messages2.filter((m) => m.from !== target && m.to !== target);
     messageIds = new Set(messages2.map((m) => m.id).filter(Boolean));
+    const recipients = getRecipientsForCurrent();
+    const filtered = recipients.filter((r) => normalizePubkey(r.pubkey) !== target);
+    if (filtered.length !== recipients.length) {
+      setRecipientsForCurrent(filtered);
+      if (settings.lastRecipient === target) {
+        settings.lastRecipient = filtered[0]?.pubkey || null;
+      }
+    }
     const pub = currentPubkey();
     if (pub) {
       settings.messagesByKey = settings.messagesByKey || {};
@@ -12022,44 +12030,56 @@ async function handleMessage(msg) {
   return { ok: true };
 }
 async function importProfileBackup(backup) {
-  const profile = backup.profile || {};
-  const nsec = profile.nsec;
-  if (!nsec || typeof nsec !== "string") {
-    return { ok: false, error: "missing nsec" };
-  }
-  settings.nsec = nsec;
-  addKeyToList(settings.nsec);
-  loadMessagesForCurrent();
-  quietNotifications();
-  const priv = currentPrivkeyHex();
-  const pub = priv ? getPublicKey(priv) : null;
-  if (pub && profile.nickname) {
-    settings.keys = settings.keys || [];
-    settings.keys = settings.keys.map(
-      (k) => k.pubkey === pub ? { ...k, nickname: profile.nickname } : k
-    );
-  }
-  const contacts = Array.isArray(backup.contacts) ? backup.contacts : [];
-  if (contacts.length) {
-    setRecipientsForCurrent(
-      contacts.map((c) => ({
+  const entries = Array.isArray(backup.profiles) ? backup.profiles : backup.profile ? [{ profile: backup.profile, contacts: backup.contacts || [] }] : [backup];
+  let imported = 0;
+  for (const entry of entries) {
+    const profile = entry.profile || {};
+    const nsec = profile.nsec;
+    if (!nsec || typeof nsec !== "string")
+      continue;
+    addKeyToList(nsec);
+    const pub = (() => {
+      try {
+        const decoded = nip19_exports.decode(nsec);
+        const priv = decoded.type === "nsec" ? decoded.data : nsec;
+        return getPublicKey(priv);
+      } catch (_) {
+        try {
+          return getPublicKey(nsec);
+        } catch (err2) {
+          return null;
+        }
+      }
+    })();
+    if (pub && profile.nickname) {
+      settings.keys = settings.keys || [];
+      settings.keys = settings.keys.map(
+        (k) => k.pubkey === pub ? { ...k, nickname: profile.nickname } : k
+      );
+    }
+    const contacts = Array.isArray(entry.contacts) ? entry.contacts : [];
+    if (contacts.length) {
+      const list = contacts.map((c) => ({
         pubkey: c.pubkey,
         nickname: c.nickname || ""
-      }))
-    );
-    if (!settings.lastRecipient && contacts[0]?.pubkey) {
-      try {
-        settings.lastRecipient = normalizePubkey(contacts[0].pubkey);
-      } catch (_) {
-        settings.lastRecipient = contacts[0].pubkey;
+      }));
+      const activePub = currentPubkey();
+      if (activePub && pub === activePub) {
+        setRecipientsForCurrent(list);
+      } else {
+        setRecipientsForKey(pub, list);
       }
     }
+    imported++;
+  }
+  if (!imported) {
+    return { ok: false, error: "missing nsec" };
   }
   await persistSettings();
   await connect();
   await setupContextMenus();
   syncRecipientsForCurrent();
-  return { ok: true };
+  return { ok: true, imported };
 }
 function buildProfileBackup() {
   const pub = currentPubkey();
@@ -12073,12 +12093,16 @@ function buildProfileBackup() {
     type: "pushstr_profile_backup",
     version: 1,
     created_at: (/* @__PURE__ */ new Date()).toISOString(),
-    profile: {
-      nsec: settings.nsec || null,
-      npub,
-      nickname: keyEntry?.nickname || ""
-    },
-    contacts
+    profiles: [
+      {
+        profile: {
+          nsec: settings.nsec || null,
+          npub,
+          nickname: keyEntry?.nickname || ""
+        },
+        contacts
+      }
+    ]
   };
 }
 async function loadSettings() {
@@ -13158,6 +13182,13 @@ function setRecipientsForCurrent(list) {
   } else {
     settings.recipients = normalized;
   }
+}
+function setRecipientsForKey(pubkey, list) {
+  const normalized = normalizeRecipients(list);
+  settings.recipientsByKey = settings.recipientsByKey || {};
+  if (!pubkey)
+    return;
+  settings.recipientsByKey[pubkey] = normalized;
 }
 function syncRecipientsForCurrent() {
   const pk = currentPubkey();

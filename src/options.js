@@ -420,7 +420,7 @@ async function exportNpub() {
     await navigator.clipboard.writeText(res.npub);
     flashButton(copyNpubBtn, "Copied");
   } catch (err) {
-    prompt("Your npub:", res.npub);
+    prompt('My nPub:', res.npub);
     status("Copy failed; shown in prompt");
   }
 }

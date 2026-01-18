@@ -8969,6 +8969,12 @@ function render() {
 function renderContacts() {
   const contacts = buildContacts();
   contactsEl.innerHTML = "";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "add-contact-btn";
+  addBtn.textContent = "+ Add Contact";
+  addBtn.addEventListener("click", showAddContactDialog);
+  contactsEl.appendChild(addBtn);
   contacts.forEach((c) => {
     const el = document.createElement("div");
     el.className = "contact" + (selectedContact === c.id ? " active" : "");
@@ -8995,6 +9001,15 @@ function renderContacts() {
     meta.appendChild(snippet);
     const actions = document.createElement("div");
     actions.className = "contact-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "icon-btn edit";
+    edit.title = "Edit nickname";
+    edit.textContent = "\u270E";
+    edit.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await showEditContactDialog(c);
+    });
     const del = document.createElement("button");
     del.type = "button";
     del.className = "icon-btn danger";
@@ -9013,18 +9028,13 @@ function renderContacts() {
       });
       await refreshState();
     });
+    actions.appendChild(edit);
     actions.appendChild(del);
     el.appendChild(avatar);
     el.appendChild(meta);
     el.appendChild(actions);
     contactsEl.appendChild(el);
   });
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = "add-contact-btn";
-  addBtn.textContent = "+ Add Contact";
-  addBtn.addEventListener("click", showAddContactDialog);
-  contactsEl.appendChild(addBtn);
 }
 function renderHistory() {
   historyEl.innerHTML = "";
@@ -9995,7 +10005,7 @@ async function showQrDialog() {
   wrapper.appendChild(label);
   wrapper.appendChild(text);
   wrapper.appendChild(copyBtn);
-  showInfoModal("Your npub", wrapper);
+  showInfoModal("My nPub", wrapper);
 }
 async function showAddContactDialog() {
   const wrapper = document.createElement("div");
@@ -10035,6 +10045,38 @@ async function showAddContactDialog() {
     await refreshState();
   } catch (err) {
     status("Add contact failed");
+  }
+}
+async function showEditContactDialog(contact) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
+      <label style="font-size:12px;color:#9ca3af;">Nickname</label>
+      <input type="text" id="ec_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
+      <label style="font-size:12px;color:#9ca3af;">Pubkey</label>
+      <input type="text" id="ec_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#9ca3af;" disabled>
+    </div>
+  `;
+  const nickInput = wrapper.querySelector("#ec_nick");
+  const pubInput = wrapper.querySelector("#ec_pub");
+  if (nickInput)
+    nickInput.value = contact.nickname || "";
+  if (pubInput)
+    pubInput.value = contact.id || "";
+  const result = await showModal("Edit Contact", wrapper);
+  if (!result)
+    return;
+  const nickname = nickInput.value.trim();
+  const recipients = (state.recipients || []).map((r) => ({ ...r }));
+  const idx = recipients.findIndex((r) => r.pubkey === contact.id);
+  if (idx === -1)
+    return;
+  recipients[idx].nickname = nickname;
+  try {
+    await browser.runtime.sendMessage({ type: "save-settings", recipients });
+    await refreshState();
+  } catch (err) {
+    status("Update contact failed");
   }
 }
 function popout() {

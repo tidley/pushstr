@@ -6391,7 +6391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       }
                     },
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 12),
                 ],
                 actionGroup('Actions', [
                   ElevatedButton.icon(
