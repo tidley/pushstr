@@ -1,122 +1,139 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="UTF-8" />
-  <link rel="stylesheet" href="options.css" />
-  <title>Settings</title>
-</head>
-<body>
-  <header class="settings-header">
-    <div class="title-stack">
-      <h1>Settings</h1>
-      <p class="subtitle">Manage profiles, relays, and contacts</p>
-    </div>
-  </header>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="options.css" />
+    <title>Settings</title>
+  </head>
+  <body>
+    <header class="settings-header">
+      <div class="title-stack">
+        <h1>Settings</h1>
+        <p class="subtitle">Manage profiles, relays, and contacts</p>
+      </div>
+    </header>
 
-  <div class="page">
-    <div class="card key-card tone-1">
-      <div class="card-header">
-        <div>
-          <h2>Profile</h2>
-        </div>
-      </div>
-      <div class="key-grid">
-        <div class="field floating select-field">
-          <select id="keySelect"></select>
-          <label for="keySelect">Active profile</label>
-        </div>
-        <div class="field floating">
-          <input id="keyNickname" type="text" placeholder=" " />
-          <label for="keyNickname">Profile nickname (optional)</label>
-        </div>
-      </div>
-      <div class="action-groups">
-        <div class="action-cluster">
-          <div class="cluster-label">Actions</div>
-          <div class="button-row">
-            <button id="exportNpub">Copy Public Key (nPub)</button>
-            <button class="ghost-btn" id="showNpubQr">Show nPub QR</button>
+    <div class="page">
+      <div class="card key-card tone-1">
+        <div class="card-header">
+          <div>
+            <h2>Profile</h2>
           </div>
         </div>
-        <div class="action-cluster">
-          <div class="cluster-label">Key Management</div>
-          <div class="button-row">
-            <button id="export">Copy Secret Key (nSec)</button>
-            <button id="import">Import Secret Key (nSec)</button>
-            <button id="regen">Generate New Profile</button>
-            <button id="removeProfile" class="danger">Delete Active Profile</button>
+        <div class="key-grid">
+          <div class="field floating select-field">
+            <select id="keySelect"></select>
+            <label for="keySelect">Active profile</label>
           </div>
-          <p class="helper">Profile, contacts and messages will be deleted from device.</p>
-          <p class="helper">Never share this secret key.</p>
-        </div>
-        <div class="action-cluster">
-          <div class="cluster-label">Backup and Restore</div>
-          <div class="button-row">
-            <button class="ghost-btn" id="backupProfile">Backup Active Profile (JSON)</button>
-            <button class="ghost-btn" id="backupAllProfiles">Backup All Profiles (JSON)</button>
-            <button class="ghost-btn" id="importProfile">Import Profile (JSON)</button>
+          <div class="field floating">
+            <input id="keyNickname" type="text" placeholder=" " />
+            <label for="keyNickname">Profile nickname (optional)</label>
           </div>
         </div>
-      </div>
-    </div>
+        <div class="action-groups">
+          <div class="action-cluster">
+            <div class="cluster-label">Actions</div>
+            <div class="button-row">
+              <button id="exportNpub">Copy Public Key (nPub)</button>
+              <button class="ghost-btn" id="showNpubQr">Show nPub QR</button>
+            </div>
+          </div>
+          <div class="action-cluster">
+            <div class="cluster-label">Key Management</div>
+            <div class="button-row">
+              <button id="export" >Copy Secret Key (nSec)</button>
+            </div>
+            <p class="helper">Never share this secret key.</p>
 
-    <div class="card tone-2">
-      <div class="card-header">
-        <div>
-          <h2>Connectivity</h2>
+            <div class="button-row">
+              <button id="import">Import Secret Key (nSec)</button>
+              <button id="regen">Generate New Profile</button>
+              <button id="removeProfile" class="danger">
+                Delete Active Profile
+              </button>
+            </div>
+            <p class="helper">
+              Profile, contacts and messages will be deleted from device.
+            </p>
+          </div>
+          <div class="action-cluster">
+            <div class="cluster-label">Backup and Restore</div>
+            <div class="button-row">
+              <button class="ghost-btn" id="backupProfile">
+                Backup Active Profile (JSON)
+              </button>
+              <button class="ghost-btn" id="backupAllProfiles">
+                Backup All Profiles (JSON)
+              </button>
+              <button class="ghost-btn" id="importProfile">
+                Import Profile (JSON)
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="cluster-label">Relays</div>
-      <div class="relay-add">
-        <div class="field floating stretch">
-          <input id="relayInput" type="text" placeholder=" " />
-          <label for="relayInput">Relay URL</label>
-        </div>
-        <button id="addRelay" class="primary ghost">Add</button>
-      </div>
-      <span id="relayError" class="helper error"></span>
-      <div id="relayList" class="relay-list"></div>
-    </div>
 
-    <div class="card tone-3">
-      <div class="card-header">
-        <div>
-          <h2>Contacts</h2>
+      <div class="card tone-2">
+        <div class="card-header">
+          <div>
+            <h2>Connectivity</h2>
+          </div>
         </div>
+        <div class="cluster-label">Relays</div>
+        <div class="relay-add">
+          <div class="field floating stretch">
+            <input id="relayInput" type="text" placeholder=" " />
+            <label for="relayInput">Relay URL</label>
+          </div>
+          <button id="addRelay" class="primary ghost">Add</button>
+        </div>
+        <span id="relayError" class="helper error"></span>
+        <div id="relayList" class="relay-list"></div>
       </div>
-      <div class="contact-form">
-        <div class="field floating">
-          <input id="contactPub" type="text" placeholder=" " />
-          <label for="contactPub">nPub or pubkey hex</label>
+
+      <div class="card tone-3">
+        <div class="card-header">
+          <div>
+            <h2>Contacts</h2>
+          </div>
         </div>
-        <div class="field floating">
-          <input id="contactNick" type="text" placeholder=" " />
-          <label for="contactNick">Nickname (optional)</label>
+        <div class="contact-form">
+          <div class="field floating">
+            <input id="contactPub" type="text" placeholder=" " />
+            <label for="contactPub">nPub or pubkey hex</label>
+          </div>
+          <div class="field floating">
+            <input id="contactNick" type="text" placeholder=" " />
+            <label for="contactNick">Nickname (optional)</label>
+          </div>
+          <button id="addContact" class="primary ghost">Add Contact</button>
         </div>
-        <button id="addContact" class="primary ghost">Add Contact</button>
-      </div>
-      <span id="contactError" class="helper error"></span>
-      <div class="table-wrapper">
-        <table id="contactsTable">
-          <colgroup>
-            <col class="pubcol" />
-            <col class="nickcol" />
-            <col class="delcol" />
-          </colgroup>
-          <thead>
-            <tr><th class="pubcol">Pubkey</th><th class="nickcol">Nickname</th><th class="delcol"></th></tr>
-          </thead>
-          <tbody id="contactsBody"></tbody>
-        </table>
+        <span id="contactError" class="helper error"></span>
+        <div class="table-wrapper">
+          <table id="contactsTable">
+            <colgroup>
+              <col class="pubcol" />
+              <col class="nickcol" />
+              <col class="delcol" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th class="pubcol">Pubkey</th>
+                <th class="nickcol">Nickname</th>
+                <th class="delcol"></th>
+              </tr>
+            </thead>
+            <tbody id="contactsBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
-  </div>
-  <div class="save-fab">
-    <button id="save" class="primary" disabled>Save</button>
-  </div>
-  <footer class="settings-footer">
-    <span id="settingsVersion"></span>
-  </footer>
-  <script type="module" src="options.js"></script>
-</body>
+    <div class="save-fab">
+      <button id="save" class="primary" disabled>Save</button>
+    </div>
+    <footer class="settings-footer">
+      <span id="settingsVersion"></span>
+    </footer>
+    <script type="module" src="options.js"></script>
+  </body>
 </html>

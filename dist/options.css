@@ -242,6 +242,10 @@ button.danger {
   margin-bottom: 8px;
 }
 
+.action-cluster .helper {
+  margin-top: 8px;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -312,6 +316,9 @@ button.danger {
 }
 
 .select-field label {
+  top: -6px;
+  font-size: 11px;
+  color: var(--accent);
   background: var(--panel);
 }
 
