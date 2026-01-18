@@ -6357,6 +6357,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           color: Colors.greenAccent.shade200,
                         ),
                       ),
+                      suffixIcon: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
+                        child: showProfileSave
+                            ? IconButton.filled(
+                                key: const ValueKey('save_profile'),
+                                onPressed: _saveSettings,
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.greenAccent.shade400,
+                                  foregroundColor: Colors.black,
+                                  shape: const CircleBorder(),
+                                  padding: const EdgeInsets.all(8),
+                                ),
+                                icon: const Icon(Icons.check, size: 18),
+                                tooltip: 'Save profile',
+                              )
+                            : const SizedBox(
+                                key: ValueKey('save_profile_empty'),
+                                width: 36,
+                                height: 36,
+                              ),
+                      ),
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 8,
@@ -6369,31 +6390,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _markDirty(schedule: false);
                       }
                     },
-                  ),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 150),
-                      child: showProfileSave
-                          ? IconButton.filled(
-                              key: const ValueKey('save_profile'),
-                              onPressed: _saveSettings,
-                              style: IconButton.styleFrom(
-                                backgroundColor: Colors.greenAccent.shade400,
-                                foregroundColor: Colors.black,
-                                shape: const CircleBorder(),
-                                padding: const EdgeInsets.all(10),
-                              ),
-                              icon: const Icon(Icons.check, size: 22),
-                              tooltip: 'Save profile',
-                            )
-                          : const SizedBox(
-                              key: ValueKey('save_profile_empty'),
-                              width: 40,
-                              height: 40,
-                            ),
-                    ),
                   ),
                   const SizedBox(height: 6),
                 ],
