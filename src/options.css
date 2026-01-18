@@ -316,6 +316,9 @@ button.danger {
 }
 
 .select-field label {
+  top: -6px;
+  font-size: 11px;
+  color: var(--accent);
   background: var(--panel);
 }
 
