@@ -2775,8 +2775,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       onPressed: _showMyNpubQr,
                     ),
+                    IconButton(
+                      icon: const Icon(Icons.settings, size: 28),
+                      tooltip: 'Settings',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 52,
+                        height: 52,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showSettings(context);
+                      },
+                    ),
                   ],
                 ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add contact'),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _addContact(context);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan QR'),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _scanContactQr();
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
             for (final contact in contacts)
@@ -2847,31 +2888,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
               ),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text('Add contact'),
-              onTap: () {
-                Navigator.pop(context);
-                _addContact(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.qr_code_scanner),
-              title: const Text('Scan QR'),
-              onTap: () {
-                Navigator.pop(context);
-                _scanContactQr();
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
-              onTap: () {
-                Navigator.pop(context);
-                _showSettings(context);
-              },
-            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
