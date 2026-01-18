@@ -305,47 +305,62 @@ async function handleMessage(msg) {
 }
 
 async function importProfileBackup(backup) {
-  const profile = backup.profile || {};
-  const nsec = profile.nsec;
-  if (!nsec || typeof nsec !== "string") {
-    return { ok: false, error: "missing nsec" };
-  }
-  settings.nsec = nsec;
-  addKeyToList(settings.nsec);
-  loadMessagesForCurrent();
-  quietNotifications();
+  const entries = Array.isArray(backup.profiles)
+    ? backup.profiles
+    : backup.profile
+      ? [{ profile: backup.profile, contacts: backup.contacts || [] }]
+      : [backup];
+  let imported = 0;
 
-  const priv = currentPrivkeyHex();
-  const pub = priv ? nt.getPublicKey(priv) : null;
-  if (pub && profile.nickname) {
-    settings.keys = settings.keys || [];
-    settings.keys = settings.keys.map((k) =>
-      k.pubkey === pub ? { ...k, nickname: profile.nickname } : k
-    );
-  }
+  for (const entry of entries) {
+    const profile = entry.profile || {};
+    const nsec = profile.nsec;
+    if (!nsec || typeof nsec !== "string") continue;
+    addKeyToList(nsec);
+    const pub = (() => {
+      try {
+        const decoded = nt.nip19.decode(nsec);
+        const priv = decoded.type === "nsec" ? decoded.data : nsec;
+        return nt.getPublicKey(priv);
+      } catch (_) {
+        try {
+          return nt.getPublicKey(nsec);
+        } catch (err) {
+          return null;
+        }
+      }
+    })();
+    if (pub && profile.nickname) {
+      settings.keys = settings.keys || [];
+      settings.keys = settings.keys.map((k) =>
+        k.pubkey === pub ? { ...k, nickname: profile.nickname } : k
+      );
+    }
 
-  const contacts = Array.isArray(backup.contacts) ? backup.contacts : [];
-  if (contacts.length) {
-    setRecipientsForCurrent(
-      contacts.map((c) => ({
+    const contacts = Array.isArray(entry.contacts) ? entry.contacts : [];
+    if (contacts.length) {
+      const list = contacts.map((c) => ({
         pubkey: c.pubkey,
         nickname: c.nickname || ""
-      }))
-    );
-    if (!settings.lastRecipient && contacts[0]?.pubkey) {
-      try {
-        settings.lastRecipient = normalizePubkey(contacts[0].pubkey);
-      } catch (_) {
-        settings.lastRecipient = contacts[0].pubkey;
+      }));
+      const activePub = currentPubkey();
+      if (activePub && pub === activePub) {
+        setRecipientsForCurrent(list);
+      } else {
+        setRecipientsForKey(pub, list);
       }
     }
+    imported++;
   }
 
+  if (!imported) {
+    return { ok: false, error: "missing nsec" };
+  }
   await persistSettings();
   await connect();
   await setupContextMenus();
   syncRecipientsForCurrent();
-  return { ok: true };
+  return { ok: true, imported };
 }
 
 function buildProfileBackup() {
@@ -360,12 +375,16 @@ function buildProfileBackup() {
     type: "pushstr_profile_backup",
     version: 1,
     created_at: new Date().toISOString(),
-    profile: {
-      nsec: settings.nsec || null,
-      npub,
-      nickname: keyEntry?.nickname || ""
-    },
-    contacts
+    profiles: [
+      {
+        profile: {
+          nsec: settings.nsec || null,
+          npub,
+          nickname: keyEntry?.nickname || ""
+        },
+        contacts
+      }
+    ]
   };
 }
 
@@ -1481,6 +1500,13 @@ function setRecipientsForCurrent(list) {
   } else {
     settings.recipients = normalized;
   }
+}
+
+function setRecipientsForKey(pubkey, list) {
+  const normalized = normalizeRecipients(list);
+  settings.recipientsByKey = settings.recipientsByKey || {};
+  if (!pubkey) return;
+  settings.recipientsByKey[pubkey] = normalized;
 }
 
 function syncRecipientsForCurrent() {

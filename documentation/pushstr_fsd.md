@@ -112,6 +112,8 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Manage relay preferences in settings (editable list stored locally).
 - Display status/errors in-app.
 - Display app/extension version numbers at the bottom of settings.
+- Settings are grouped into Actions, Key Management, Backup and Restore, and Connectivity.
+- Stay connected toggle runs a foreground service for faster relay catch-up.
 - Custom toast/notification bars.
 
 ### 6.9 Logging & Diagnostics
