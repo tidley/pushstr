@@ -6331,7 +6331,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       IconButton.filled(
                         onPressed: _generateProfile,
                         style: IconButton.styleFrom(
-                          backgroundColor: Colors.grey.shade800,
+                          backgroundColor: Colors.black,
                           foregroundColor: Colors.greenAccent.shade200,
                           shape: const CircleBorder(),
                           padding: const EdgeInsets.all(10),
@@ -6414,7 +6414,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: const Text('Show QR'),
                   ),
                 ]),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 actionGroup('Key Management', [
                   SizedBox(
                     width: 260,
@@ -6592,7 +6592,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ]),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 actionGroup('Backup and Restore', [
                   ElevatedButton.icon(
                     style: textButtonStyle,
