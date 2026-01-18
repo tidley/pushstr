@@ -6328,70 +6328,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      IconButton(
-                        icon: const Icon(Icons.add),
-                        tooltip: 'New profile',
+                      IconButton.filled(
                         onPressed: _generateProfile,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.grey.shade800,
+                          foregroundColor: Colors.greenAccent.shade200,
+                          shape: const CircleBorder(),
+                          padding: const EdgeInsets.all(10),
+                        ),
+                        icon: const Icon(Icons.add, size: 22),
+                        tooltip: 'New profile',
                       ),
                     ],
                   ),
                   const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: nicknameCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'Profile nickname (optional)',
-                            filled: true,
-                            fillColor: Colors.black.withOpacity(0.35),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.greenAccent.shade200,
-                              ),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                          ),
-                          onChanged: (value) {
-                            if (profiles.isNotEmpty &&
-                                selectedProfileIndex < profiles.length) {
-                              profiles[selectedProfileIndex]['nickname'] =
-                                  value;
-                              _markDirty(schedule: false);
-                            }
-                          },
+                  TextField(
+                    controller: nicknameCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Profile nickname (optional)',
+                      filled: true,
+                      fillColor: Colors.black.withOpacity(0.35),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: Colors.greenAccent.shade200,
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 150),
-                        child: showProfileSave
-                            ? IconButton.filled(
-                                key: const ValueKey('save_profile'),
-                                onPressed: _saveSettings,
-                                style: IconButton.styleFrom(
-                                  backgroundColor: Colors.greenAccent.shade400,
-                                  foregroundColor: Colors.black,
-                                  shape: const CircleBorder(),
-                                  padding: const EdgeInsets.all(10),
-                                ),
-                                icon: const Icon(Icons.check, size: 22),
-                                tooltip: 'Save profile',
-                              )
-                            : const SizedBox(
-                                key: ValueKey('save_profile_empty'),
-                                width: 40,
-                                height: 40,
-                              ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
                       ),
-                    ],
+                    ),
+                    onChanged: (value) {
+                      if (profiles.isNotEmpty &&
+                          selectedProfileIndex < profiles.length) {
+                        profiles[selectedProfileIndex]['nickname'] = value;
+                        _markDirty(schedule: false);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 150),
+                      child: showProfileSave
+                          ? IconButton.filled(
+                              key: const ValueKey('save_profile'),
+                              onPressed: _saveSettings,
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.greenAccent.shade400,
+                                foregroundColor: Colors.black,
+                                shape: const CircleBorder(),
+                                padding: const EdgeInsets.all(10),
+                              ),
+                              icon: const Icon(Icons.check, size: 22),
+                              tooltip: 'Save profile',
+                            )
+                          : const SizedBox(
+                              key: ValueKey('save_profile_empty'),
+                              width: 40,
+                              height: 40,
+                            ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                 ],
