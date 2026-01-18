@@ -1659,8 +1659,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _ensureSelectedContact() {
-    if (selectedContact != null &&
-        contacts.any((c) => c['pubkey'] == selectedContact)) {
+    if (contacts.isEmpty) {
+      if (mounted && selectedContact != null) {
+        setState(() {
+          selectedContact = null;
+        });
+        _persistVisibleState();
+      }
       return;
     }
     String? best;
@@ -1678,7 +1683,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     best ??= contacts.isNotEmpty ? contacts.first['pubkey'] : null;
-    if (best != null && mounted) {
+    if (best != null && mounted && best != selectedContact) {
       setState(() {
         selectedContact = best;
       });
@@ -6005,87 +6010,101 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 12),
                 if (profiles.isNotEmpty &&
                     selectedProfileIndex < profiles.length) ...[
-                  InputDecorator(
-                    decoration: InputDecoration(
-                      labelText: 'Active profile',
-                      filled: true,
-                      fillColor: Colors.black.withOpacity(0.35),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 3,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: Colors.greenAccent.shade200,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: 'Active profile',
+                            filled: true,
+                            fillColor: Colors.black.withOpacity(0.35),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 3,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: Colors.greenAccent.shade200,
+                              ),
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: selectedProfileIndex,
+                              isExpanded: true,
+                              items: profiles.asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final profile = entry.value;
+                                final fullNpub =
+                                    (idx < profileNpubs.length &&
+                                        profileNpubs[idx].isNotEmpty)
+                                    ? profileNpubs[idx]
+                                    : '';
+                                final shortNpub = fullNpub.isNotEmpty
+                                    ? _shortNpub(fullNpub)
+                                    : 'Profile ${idx + 1}';
+                                final nickname =
+                                    (profile['nickname'] ?? '').trim();
+                                final label = nickname.isNotEmpty
+                                    ? '$shortNpub - $nickname'
+                                    : shortNpub;
+
+                                return DropdownMenuItem(
+                                  value: idx,
+                                  child: Text(label),
+                                );
+                              }).toList(),
+                              selectedItemBuilder: (ctx) {
+                                return profiles.asMap().entries.map((entry) {
+                                  final idx = entry.key;
+                                  final fullNpub =
+                                      (idx < profileNpubs.length &&
+                                          profileNpubs[idx].isNotEmpty)
+                                      ? profileNpubs[idx]
+                                      : '';
+                                  final shortNpub = fullNpub.isNotEmpty
+                                      ? _shortNpub(fullNpub)
+                                      : 'Profile ${idx + 1}';
+                                  return Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(shortNpub),
+                                  );
+                                }).toList();
+                              },
+                              onChanged: (idx) async {
+                                if (idx != null &&
+                                    idx < profiles.length &&
+                                    idx != selectedProfileIndex) {
+                                  setState(() {
+                                    selectedProfileIndex = idx;
+                                    profileNickname =
+                                        profiles[idx]['nickname'] ?? '';
+                                    nicknameCtrl.text = profileNickname;
+                                    if (idx < profileNpubs.length) {
+                                      currentNpub = profileNpubs[idx];
+                                    }
+                                  });
+                                  _markDirty();
+                                  await _saveSettings();
+                                  final nsec = profiles[idx]['nsec'] ?? '';
+                                  unawaited(_primeProfileData(nsec));
+                                }
+                              },
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: selectedProfileIndex,
-                        isExpanded: true,
-                        items: profiles.asMap().entries.map((entry) {
-                          final idx = entry.key;
-                          final profile = entry.value;
-                          final fullNpub =
-                              (idx < profileNpubs.length &&
-                                  profileNpubs[idx].isNotEmpty)
-                              ? profileNpubs[idx]
-                              : '';
-                          final shortNpub = fullNpub.isNotEmpty
-                              ? _shortNpub(fullNpub)
-                              : 'Profile ${idx + 1}';
-                          final nickname = (profile['nickname'] ?? '').trim();
-                          final label = nickname.isNotEmpty
-                              ? '$shortNpub - $nickname'
-                              : shortNpub;
-
-                          return DropdownMenuItem(
-                            value: idx,
-                            child: Text(label),
-                          );
-                        }).toList(),
-                        selectedItemBuilder: (ctx) {
-                          return profiles.asMap().entries.map((entry) {
-                            final idx = entry.key;
-                            final fullNpub =
-                                (idx < profileNpubs.length &&
-                                    profileNpubs[idx].isNotEmpty)
-                                ? profileNpubs[idx]
-                                : '';
-                            final shortNpub = fullNpub.isNotEmpty
-                                ? _shortNpub(fullNpub)
-                                : 'Profile ${idx + 1}';
-                            return Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(shortNpub),
-                            );
-                          }).toList();
-                        },
-                        onChanged: (idx) async {
-                          if (idx != null &&
-                              idx < profiles.length &&
-                              idx != selectedProfileIndex) {
-                            setState(() {
-                              selectedProfileIndex = idx;
-                              profileNickname = profiles[idx]['nickname'] ?? '';
-                              nicknameCtrl.text = profileNickname;
-                              if (idx < profileNpubs.length) {
-                                currentNpub = profileNpubs[idx];
-                              }
-                            });
-                            _markDirty();
-                            await _saveSettings();
-                            final nsec = profiles[idx]['nsec'] ?? '';
-                            unawaited(_primeProfileData(nsec));
-                          }
-                        },
+                      const SizedBox(width: 10),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        tooltip: 'New profile',
+                        onPressed: _generateProfile,
                       ),
-                    ),
+                    ],
                   ),
                   const SizedBox(height: 14),
                   Row(
@@ -6183,68 +6202,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 12),
                 ],
-                actionGroup('Management', [
-                  ElevatedButton.icon(
-                    style: textButtonStyle,
-                    onPressed: _generateProfile,
-                    icon: const Icon(Icons.add, size: 22),
-                    label: const Text('New Profile'),
-                  ),
-                  ElevatedButton.icon(
-                    style: textButtonStyle,
-                    onPressed: _addProfile,
-                    icon: const Icon(Icons.input_outlined, size: 20),
-                    label: const Text('Import Profile (nSec)'),
-                  ),
-                ]),
-                const SizedBox(height: 8),
-                actionGroup('Utilities', [
-                  Builder(
-                    builder: (context) {
-                      final holdActive = _holdActive['copy_nsec'] ?? false;
-                      final progress = _holdProgress['copy_nsec'] ?? 0.0;
-                      final remainingMs = (_holdMillis * (1 - progress)).clamp(
-                        0.0,
-                        _holdMillis.toDouble(),
-                      );
-                      final remainingSeconds = (remainingMs / 1000).ceil();
-                      final label = _nsecCopied
-                          ? 'Copied'
-                          : holdActive
-                          ? 'Hold ${remainingSeconds}s to copy profile secret (nSec)'
-                          : 'Hold 5s to copy profile secret (nSec)';
-                      return GestureDetector(
-                        onLongPressStart: (_) => _startHoldAction(
-                          'copy_nsec',
-                          () async {
-                            await _exportCurrentKey();
-                            _setCopyState(nsec: true);
-                            _cancelHoldAction('copy_nsec');
-                          },
-                          countdownLabel: 'copy profile secret (nSec)',
-                        ),
-                        onLongPressEnd: (_) => _cancelHoldAction('copy_nsec'),
-                        onTap: () {},
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 120),
-                          opacity: 1.0,
-                          child: ElevatedButton.icon(
-                            style: textButtonStyle,
-                            onPressed: null,
-                            icon: const Icon(Icons.vpn_key_outlined, size: 20),
-                            label: Text(label),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                actionGroup('Actions', [
                   ElevatedButton.icon(
                     style: textButtonStyle,
                     onPressed: () async {
                       await _copyNpub();
                       _setCopyState(npub: true);
                     },
-                    icon: const Icon(Icons.mail_outline, size: 22),
+                    icon: const Icon(Icons.content_copy, size: 20),
                     label: Text(_npubCopied ? 'Copied' : 'Copy nPub'),
                   ),
                   ElevatedButton.icon(
@@ -6253,6 +6218,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: const Icon(Icons.qr_code_2, size: 20),
                     label: const Text('Show QR'),
                   ),
+                ]),
+                const SizedBox(height: 8),
+                actionGroup('Key Management', [
+                  SizedBox(
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (context) {
+                            final holdActive =
+                                _holdActive['copy_nsec'] ?? false;
+                            final progress = _holdProgress['copy_nsec'] ?? 0.0;
+                            final remainingMs = (_holdMillis * (1 - progress))
+                                .clamp(0.0, _holdMillis.toDouble());
+                            final remainingSeconds =
+                                (remainingMs / 1000).ceil();
+                            final label = _nsecCopied
+                                ? 'Copied'
+                                : holdActive
+                                ? 'Hold ${remainingSeconds}s to copy nSec'
+                                : 'Hold 5s to copy nSec';
+                            return GestureDetector(
+                              onLongPressStart: (_) => _startHoldAction(
+                                'copy_nsec',
+                                () async {
+                                  await _exportCurrentKey();
+                                  _setCopyState(nsec: true);
+                                  _cancelHoldAction('copy_nsec');
+                                },
+                                countdownLabel: 'copy nSec',
+                              ),
+                              onLongPressEnd: (_) =>
+                                  _cancelHoldAction('copy_nsec'),
+                              onTap: () {},
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 120),
+                                opacity: 1.0,
+                                child: ElevatedButton.icon(
+                                  style: textButtonStyle,
+                                  onPressed: null,
+                                  icon: const Icon(
+                                    Icons.vpn_key_outlined,
+                                    size: 20,
+                                  ),
+                                  label: Text(label),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Never share this key',
+                          style: TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _addProfile,
+                    icon: const Icon(Icons.input_outlined, size: 20),
+                    label: const Text('Import nSec'),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                actionGroup('Backup and Restore', [
                   ElevatedButton.icon(
                     style: textButtonStyle,
                     onPressed: _backupCurrentProfile,
@@ -6266,11 +6299,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     label: const Text('Import Profile (JSON)'),
                   ),
                 ]),
-                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            decoration: sectionDecoration,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Connectivity',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
                 SwitchListTile(
-                  title: const Text('Stay connected (foreground)'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Stay connected'),
                   subtitle: const Text(
-                    'Runs an opt-in foreground service for quicker catch-up',
+                    'Runs a foreground service for faster relay catch-up',
                   ),
                   value: _foregroundEnabled,
                   onChanged: (val) async {
@@ -6314,22 +6362,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     }
                   },
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          Container(
-            decoration: sectionDecoration,
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                const SizedBox(height: 10),
                 const Text(
-                  'Relays',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  'RELAYS',
+                  style: TextStyle(
+                    fontSize: 13,
+                    letterSpacing: 0.4,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 6),
-                const SizedBox(height: 10),
                 Row(
                   children: [
                     Expanded(
