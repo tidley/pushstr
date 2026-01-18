@@ -1134,9 +1134,9 @@ async function exportNpub() {
   }
   try {
     await navigator.clipboard.writeText(res.npub);
-    status('Copied npub to clipboard');
+    status('Copied nPub to clipboard');
   } catch (err) {
-    prompt('Your npub:', res.npub);
+    prompt('My nPub:', res.npub);
     status('Copy failed; shown in prompt');
   }
 }
@@ -1342,7 +1342,7 @@ async function showQrDialog() {
   wrapper.appendChild(label);
   wrapper.appendChild(text);
   wrapper.appendChild(copyBtn);
-  showInfoModal('Your npub', wrapper);
+  showInfoModal('My nPub', wrapper);
 }
 async function showAddContactDialog() {
   const wrapper = document.createElement('div');
