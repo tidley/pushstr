@@ -116,6 +116,7 @@ Pushstr is a private, relay-backed messenger built on Nostr. It enables secure, 
 - Stay connected toggle runs a foreground service for faster relay catch-up.
 - Extension settings entry sits in the contacts header alongside QR, with inline contact edit actions.
 - Mobile settings layout: Profile card (active profile + nickname), then Actions (copy nPub, show QR), Key Management (copy/import nSec, delete profile), Backup and Restore (JSON backup/import), then Connectivity (stay connected toggle + relays). Contacts are managed separately from settings.
+- Extension settings mirror the same section order, with buttons for active/all profile backups and profile management.
 - Custom toast/notification bars.
 
 ### 6.9 Logging & Diagnostics
