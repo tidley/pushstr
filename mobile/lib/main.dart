@@ -22,6 +22,7 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:workmanager/workmanager.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
@@ -4899,7 +4900,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const String _appVersion = '0.0.3';
+  String _appVersion = '0.0.7';
   static const MethodChannel _storageChannel = MethodChannel(
     'com.pushstr.storage',
   );
@@ -4948,6 +4949,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     relayInputCtrl.addListener(_updateRelayValidity);
     _loadSettings();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _appVersion = info.version);
+    } catch (_) {
+      // Fall back to the default version string.
+    }
   }
 
   @override

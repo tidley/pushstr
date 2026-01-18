@@ -3,7 +3,7 @@ description: 'Pushstr mobile app - Nostr Giftwrapped DMs and data sharing'
 
 publish_to: 'none'
 
-version: 0.0.6
+version: 0.0.7
 
 environment:
   sdk: ^3.10.1
@@ -28,6 +28,7 @@ dependencies:
   url_launcher: ^6.3.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.1.4
+  package_info_plus: ^8.0.2
   permission_handler: ^11.3.1
   record: ^6.1.2
   flutter_local_notifications: ^17.1.2
