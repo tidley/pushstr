@@ -16,6 +16,9 @@
 - Message normalization and receipt parsing moved into Rust outputs.
 - Extension history rendering, DM mode badges, and read receipt badges now show immediately.
 - Reduced visual noise: toned down history accent green and tightened sent bubble spacing.
+- Settings layout reorganized (Actions, Key Management, Backup/Restore, Connectivity).
+- App version display pulled from mobile build metadata.
+- Profile switches focus the most recent contact and clear history when none exist.
 
 ### Fixed
 - Duplicate notifications for already-received messages.

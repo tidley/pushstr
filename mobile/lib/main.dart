@@ -193,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   static const String _pushstrClientTag = '[pushstr:client]';
   static const Color _historyAccentGreen = Color(0xFF2F8F62);
-// Color.fromARGB(255, 18, 113, 53);
+  // Color.fromARGB(255, 18, 113, 53);
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
@@ -2773,7 +2773,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     IconButton(
                       icon: const Icon(Icons.qr_code_2, size: 32),
-                      tooltip: 'Show my npub QR',
+                      tooltip: 'Show my nPub QR',
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints.tightFor(
                         width: 52,
@@ -2955,7 +2955,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     for (final m in convo) {
       if (m['direction'] == 'in' && m['from'] == selectedContact) {
         final seq = _messageSeq(m);
-        if (seq != null && lastIncomingSeq != null && seq > lastIncomingSeq + 1) {
+        if (seq != null &&
+            lastIncomingSeq != null &&
+            seq > lastIncomingSeq + 1) {
           display.add({
             'direction': 'gap',
             'missing_from': lastIncomingSeq + 1,
@@ -3018,7 +3020,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
                 tooltip: 'Resend',
-                visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                visualDensity: const VisualDensity(
+                  horizontal: -4,
+                  vertical: -4,
+                ),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                 onPressed: () => _resendMessage(m),
@@ -3191,9 +3196,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final id = message['id']?.toString() ?? '';
     final isLocal = id.startsWith('local_');
     final color = hasRead ? _historyAccentGreen : Colors.grey.shade500;
-    final tooltip = hasRead
-        ? 'Read'
-        : (isLocal ? 'Sending' : 'Sent');
+    final tooltip = hasRead ? 'Read' : (isLocal ? 'Sending' : 'Sent');
     return Tooltip(
       message: tooltip,
       child: Icon(
@@ -3506,7 +3509,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'My npub',
+                  'My nPub',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
@@ -5178,6 +5181,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (selectedProfileIndex < profileNpubs.length) {
           setState(() => currentNpub = profileNpubs[selectedProfileIndex]);
         }
+      } else {
+        await prefs.remove('nostr_nsec');
       }
 
       await prefs.setStringList('relays', relays);
@@ -5348,8 +5353,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'type': 'pushstr_profile_backup',
       'version': 1,
       'created_at': DateTime.now().toIso8601String(),
-      'profile': {'nsec': nsec, 'npub': npub, 'nickname': nickname},
-      'contacts': contacts,
+      'profiles': [
+        {
+          'profile': {'nsec': nsec, 'npub': npub, 'nickname': nickname},
+          'contacts': contacts,
+        },
+      ],
     };
     final json = jsonEncode(payload);
     final bytes = Uint8List.fromList(utf8.encode(json));
@@ -5397,6 +5406,169 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await file.writeAsBytes(bytes);
     if (!mounted) return;
     _showThemedToast('Backup saved to $selectedDir', preferTop: true);
+  }
+
+  Future<void> _backupAllProfiles() async {
+    if (profiles.isEmpty) {
+      _showThemedToast('No profiles to backup', preferTop: true);
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final profileEntries = <Map<String, dynamic>>[];
+    for (var i = 0; i < profiles.length; i++) {
+      final nsec = profiles[i]['nsec'] ?? '';
+      if (nsec.isEmpty) continue;
+      final nickname = profiles[i]['nickname'] ?? '';
+      final npub = (i < profileNpubs.length) ? profileNpubs[i] : '';
+      final contactsKey = _contactsKeyFor(nsec);
+      final savedContacts = prefs.getStringList(contactsKey) ?? [];
+      final contacts = savedContacts
+          .map((entry) {
+            final parts = entry.split('|');
+            return {
+              'nickname': parts.isNotEmpty ? parts[0] : '',
+              'pubkey': parts.length > 1 ? parts[1] : '',
+            };
+          })
+          .where((c) => (c['pubkey'] ?? '').toString().isNotEmpty)
+          .toList();
+      profileEntries.add({
+        'profile': {'nsec': nsec, 'npub': npub, 'nickname': nickname},
+        'contacts': contacts,
+      });
+    }
+    if (profileEntries.isEmpty) {
+      _showThemedToast('No profiles to backup', preferTop: true);
+      return;
+    }
+    final payload = {
+      'type': 'pushstr_profile_backup',
+      'version': 1,
+      'created_at': DateTime.now().toIso8601String(),
+      'profiles': profileEntries,
+    };
+    final json = jsonEncode(payload);
+    final bytes = Uint8List.fromList(utf8.encode(json));
+    final filename =
+        'pushstr_profiles_backup_${DateTime.now().millisecondsSinceEpoch}.json';
+
+    if (Platform.isAndroid) {
+      final uri = await _storageChannel.invokeMethod<String>(
+        'saveToDownloads',
+        {'bytes': bytes, 'mime': 'application/json', 'filename': filename},
+      );
+      if (!mounted) return;
+      if (uri == null) {
+        _showThemedToast('Backup failed', preferTop: true);
+      } else {
+        _showThemedToast('Backup saved to Downloads', preferTop: true);
+      }
+      return;
+    }
+
+    if (Platform.isIOS) {
+      final file = await _writeTempBackupFile(bytes, filename);
+      final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+        'path': file.path,
+        'mime': 'application/json',
+        'filename': filename,
+      });
+      if (!mounted) return;
+      if (ok != true) {
+        _showThemedToast('Backup failed', preferTop: true);
+      }
+      return;
+    }
+
+    final selectedDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose where to save backup',
+    );
+    if (selectedDir == null) {
+      if (mounted) {
+        _showThemedToast('Backup cancelled', preferTop: true);
+      }
+      return;
+    }
+    final file = File('$selectedDir/$filename');
+    await file.writeAsBytes(bytes);
+    if (!mounted) return;
+    _showThemedToast('Backup saved to $selectedDir', preferTop: true);
+  }
+
+  Future<void> _deleteProfileData(
+    SharedPreferences prefs,
+    String profileNsec,
+  ) async {
+    if (profileNsec.isEmpty) return;
+    final keys = [
+      _contactsKeyFor(profileNsec),
+      _messagesKeyFor(profileNsec),
+      _pendingDmsKeyFor(profileNsec),
+      _dmModesKeyFor(profileNsec),
+      _dmOverridesKeyFor(profileNsec),
+      _dmGiftwrapKeyFor(profileNsec),
+      _lastSeenKeyFor(profileNsec),
+      'last_notified_ts_$profileNsec',
+    ];
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
+  }
+
+  Future<void> _deleteProfileAt(int index) async {
+    if (index < 0 || index >= profiles.length) return;
+    final prefs = await SharedPreferences.getInstance();
+    final nsec = profiles[index]['nsec'] ?? '';
+    await _deleteProfileData(prefs, nsec);
+
+    setState(() {
+      profiles.removeAt(index);
+      if (index < profileNpubs.length) {
+        profileNpubs.removeAt(index);
+      }
+      if (selectedProfileIndex >= profiles.length) {
+        selectedProfileIndex = profiles.isEmpty ? 0 : profiles.length - 1;
+      } else if (selectedProfileIndex > index) {
+        selectedProfileIndex = selectedProfileIndex - 1;
+      }
+      profileNickname = profiles.isNotEmpty
+          ? (profiles[selectedProfileIndex]['nickname'] ?? '')
+          : '';
+      nicknameCtrl.text = profileNickname;
+      currentNpub =
+          (profiles.isNotEmpty && selectedProfileIndex < profileNpubs.length)
+          ? profileNpubs[selectedProfileIndex]
+          : '';
+    });
+    _hasPendingChanges = false;
+    await _saveSettings();
+    if (profiles.isNotEmpty) {
+      await _refreshProfileNpubs();
+    }
+  }
+
+  Future<void> _deleteAllProfiles() async {
+    if (profiles.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    for (final profile in profiles) {
+      final nsec = profile['nsec'] ?? '';
+      await _deleteProfileData(prefs, nsec);
+    }
+    await prefs.remove('profiles');
+    await prefs.remove('profile_npubs_cache');
+    await prefs.remove('selected_profile_index');
+    await prefs.remove('nostr_nsec');
+
+    setState(() {
+      profiles = [];
+      profileNpubs = [];
+      selectedProfileIndex = 0;
+      profileNickname = '';
+      nicknameCtrl.text = '';
+      currentNpub = '';
+    });
+    _hasPendingChanges = false;
+    await _saveSettings();
   }
 
   Future<void> _copyNpub() async {
@@ -5602,7 +5774,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'My npub',
+                  'My nPub',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
@@ -5676,6 +5848,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
   String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+  String _pendingDmsKeyFor(String profileNsec) => 'pending_dms_$profileNsec';
+  String _dmModesKeyFor(String profileNsec) => 'dm_modes_$profileNsec';
+  String _dmOverridesKeyFor(String profileNsec) => 'dm_overrides_$profileNsec';
+  String _dmGiftwrapKeyFor(String profileNsec) =>
+      'dm_giftwrap_formats_$profileNsec';
   String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
 
   String _normalizeBackupPubkey(String value) {
@@ -5713,48 +5890,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _showThemedToast('Import failed: invalid JSON', preferTop: true);
         return;
       }
-      final profile = decoded['profile'];
-      if (profile is! Map || profile['nsec'] is! String) {
+      final rawEntries = <Map<String, dynamic>>[];
+      if (decoded['profiles'] is List) {
+        for (final entry in decoded['profiles'] as List) {
+          if (entry is Map) {
+            rawEntries.add(Map<String, dynamic>.from(entry));
+          }
+        }
+      } else if (decoded['profile'] is Map) {
+        rawEntries.add({
+          'profile': Map<String, dynamic>.from(decoded['profile'] as Map),
+          'contacts': decoded['contacts'],
+        });
+      }
+      if (rawEntries.isEmpty) {
+        _showThemedToast('Import failed: no profiles found', preferTop: true);
+        return;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final updatedProfiles = profiles
+          .map((p) => Map<String, String>.from(p))
+          .toList();
+      var importedCount = 0;
+      var activeNicknameUpdated = false;
+
+      for (final entry in rawEntries) {
+        final profile = entry['profile'];
+        if (profile is! Map) continue;
+        final rawNsec = profile['nsec'];
+        if (rawNsec is! String) continue;
+        final nsec = rawNsec.trim();
+        if (nsec.isEmpty) continue;
+        final nickname = (profile['nickname'] ?? '').toString().trim();
+        final contactsJson = entry['contacts'];
+        if (contactsJson is List) {
+          final entries = <String>[];
+          final seen = <String>{};
+          for (final contact in contactsJson) {
+            if (contact is! Map) continue;
+            final rawPubkey = contact['pubkey']?.toString() ?? '';
+            final pubkey = _normalizeBackupPubkey(rawPubkey);
+            if (pubkey.isEmpty || seen.contains(pubkey)) continue;
+            seen.add(pubkey);
+            final nick = contact['nickname']?.toString() ?? '';
+            entries.add('$nick|$pubkey');
+          }
+          if (entries.isNotEmpty) {
+            await prefs.setStringList(_contactsKeyFor(nsec), entries);
+          }
+        }
+
+        final idx = updatedProfiles.indexWhere((p) => p['nsec'] == nsec);
+        if (idx == -1) {
+          updatedProfiles.add({'nsec': nsec, 'nickname': nickname});
+        } else if (nickname.isNotEmpty) {
+          updatedProfiles[idx]['nickname'] = nickname;
+          if (idx == selectedProfileIndex) {
+            activeNicknameUpdated = true;
+          }
+        }
+        importedCount++;
+      }
+
+      if (importedCount == 0) {
         _showThemedToast('Import failed: missing nsec', preferTop: true);
         return;
       }
-      final nsec = (profile['nsec'] as String).trim();
-      if (nsec.isEmpty) {
-        _showThemedToast('Import failed: empty nsec', preferTop: true);
-        return;
-      }
-      final nickname = (profile['nickname'] ?? '').toString().trim();
-
-      final prefs = await SharedPreferences.getInstance();
-      final contactsKey = _contactsKeyFor(nsec);
-      final contactsJson = decoded['contacts'];
-      if (contactsJson is List) {
-        final entries = <String>[];
-        final seen = <String>{};
-        for (final entry in contactsJson) {
-          if (entry is! Map) continue;
-          final rawPubkey = entry['pubkey']?.toString() ?? '';
-          final pubkey = _normalizeBackupPubkey(rawPubkey);
-          if (pubkey.isEmpty || seen.contains(pubkey)) continue;
-          seen.add(pubkey);
-          final nick = entry['nickname']?.toString() ?? '';
-          entries.add('$nick|$pubkey');
-        }
-        if (entries.isNotEmpty) {
-          await prefs.setStringList(contactsKey, entries);
-        }
-      }
 
       setState(() {
-        profiles.add({'nsec': nsec, 'nickname': nickname});
-        selectedProfileIndex = profiles.length - 1;
-        profileNickname = nickname;
-        nicknameCtrl.text = nickname;
+        profiles = updatedProfiles;
+        if (activeNicknameUpdated) {
+          profileNickname =
+              profiles[selectedProfileIndex]['nickname'] ?? profileNickname;
+          nicknameCtrl.text = profileNickname;
+        }
       });
       _markDirty();
       await _saveSettings();
       await _refreshProfileNpubs();
-      _showThemedToast('Profile imported', preferTop: true);
+      _showThemedToast(
+        importedCount > 1 ? 'Profiles imported' : 'Profile imported',
+        preferTop: true,
+      );
     } catch (e) {
       _showThemedToast('Import failed: $e', preferTop: true);
     }
@@ -5790,8 +6008,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final contactsList = <String>[];
       for (final message in messages) {
         final direction = message['direction']?.toString();
-        final pubkey =
-            (direction == 'out')
+        final pubkey = (direction == 'out')
             ? message['to']?.toString()
             : message['from']?.toString();
         if (pubkey == null || pubkey.isEmpty) continue;
@@ -6059,8 +6276,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 final shortNpub = fullNpub.isNotEmpty
                                     ? _shortNpub(fullNpub)
                                     : 'Profile ${idx + 1}';
-                                final nickname =
-                                    (profile['nickname'] ?? '').trim();
+                                final nickname = (profile['nickname'] ?? '')
+                                    .trim();
                                 final label = nickname.isNotEmpty
                                     ? '$shortNpub - $nickname'
                                     : shortNpub;
@@ -6168,46 +6385,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 icon: const Icon(Icons.check, size: 22),
                                 tooltip: 'Save profile',
                               )
-                            : _HoldDeleteIcon(
-                                active: _holdActive['delete_profile'] ?? false,
-                                progress: _holdProgressFor('delete_profile'),
-                                onTap: () => _showHoldWarning(
-                                  'Hold 5s to delete profile',
-                                ),
-                                onHoldStart: () {
-                                  if (_isSaving || profiles.length <= 1) return;
-                                  _startHoldAction(
-                                    'delete_profile',
-                                    () async {
-                                      final removing = selectedProfileIndex;
-                                      setState(() {
-                                        profiles.removeAt(removing);
-                                        if (removing < profileNpubs.length) {
-                                          profileNpubs.removeAt(removing);
-                                        }
-                                        if (selectedProfileIndex >=
-                                            profiles.length) {
-                                          selectedProfileIndex =
-                                              profiles.isEmpty
-                                              ? 0
-                                              : profiles.length - 1;
-                                        }
-                                        profileNickname = profiles.isNotEmpty
-                                            ? (profiles[selectedProfileIndex]['nickname'] ??
-                                                  '')
-                                            : '';
-                                        nicknameCtrl.text = profileNickname;
-                                      });
-                                      _hasPendingChanges = false;
-                                      await _saveSettings();
-                                      await _refreshProfileNpubs();
-                                      _cancelHoldAction('delete_profile');
-                                    },
-                                    countdownLabel: 'delete profile',
-                                  );
-                                },
-                                onHoldEnd: () =>
-                                    _cancelHoldAction('delete_profile'),
+                            : const SizedBox(
+                                key: ValueKey('save_profile_empty'),
+                                width: 40,
+                                height: 40,
                               ),
                       ),
                     ],
@@ -6245,23 +6426,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             final progress = _holdProgress['copy_nsec'] ?? 0.0;
                             final remainingMs = (_holdMillis * (1 - progress))
                                 .clamp(0.0, _holdMillis.toDouble());
-                            final remainingSeconds =
-                                (remainingMs / 1000).ceil();
+                            final remainingSeconds = (remainingMs / 1000)
+                                .ceil();
                             final label = _nsecCopied
                                 ? 'Copied'
                                 : holdActive
                                 ? 'Hold ${remainingSeconds}s to copy nSec'
                                 : 'Hold 5s to copy nSec';
                             return GestureDetector(
-                              onLongPressStart: (_) => _startHoldAction(
-                                'copy_nsec',
-                                () async {
-                                  await _exportCurrentKey();
-                                  _setCopyState(nsec: true);
-                                  _cancelHoldAction('copy_nsec');
-                                },
-                                countdownLabel: 'copy nSec',
-                              ),
+                              onLongPressStart: (_) =>
+                                  _startHoldAction('copy_nsec', () async {
+                                    await _exportCurrentKey();
+                                    _setCopyState(nsec: true);
+                                    _cancelHoldAction('copy_nsec');
+                                  }, countdownLabel: 'copy nSec'),
                               onLongPressEnd: (_) =>
                                   _cancelHoldAction('copy_nsec'),
                               onTap: () {},
@@ -6295,6 +6473,122 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: const Icon(Icons.input_outlined, size: 20),
                     label: const Text('Import nSec'),
                   ),
+                  SizedBox(
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (context) {
+                            final holdActive =
+                                _holdActive['delete_profile'] ?? false;
+                            final progress =
+                                _holdProgress['delete_profile'] ?? 0.0;
+                            final remainingMs = (_holdMillis * (1 - progress))
+                                .clamp(0.0, _holdMillis.toDouble());
+                            final remainingSeconds = (remainingMs / 1000)
+                                .ceil();
+                            final label = holdActive
+                                ? 'Hold ${remainingSeconds}s to delete active profile'
+                                : 'Hold 5s to delete active profile';
+                            return GestureDetector(
+                              onLongPressStart: (_) => _startHoldAction(
+                                'delete_profile',
+                                () async {
+                                  if (_isSaving || profiles.isEmpty) {
+                                    _cancelHoldAction('delete_profile');
+                                    return;
+                                  }
+                                  await _deleteProfileAt(selectedProfileIndex);
+                                  _cancelHoldAction('delete_profile');
+                                },
+                                countdownLabel: 'delete active profile',
+                              ),
+                              onLongPressEnd: (_) =>
+                                  _cancelHoldAction('delete_profile'),
+                              onTap: () {},
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 120),
+                                opacity: profiles.isEmpty ? 0.4 : 1.0,
+                                child: ElevatedButton.icon(
+                                  style: textButtonStyle,
+                                  onPressed: null,
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 20,
+                                  ),
+                                  label: Text(label),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Profile, contacts and messages will be deleted from device',
+                          style: TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Builder(
+                          builder: (context) {
+                            final holdActive =
+                                _holdActive['delete_all_profiles'] ?? false;
+                            final progress =
+                                _holdProgress['delete_all_profiles'] ?? 0.0;
+                            final remainingMs = (_holdMillis * (1 - progress))
+                                .clamp(0.0, _holdMillis.toDouble());
+                            final remainingSeconds = (remainingMs / 1000)
+                                .ceil();
+                            final label = holdActive
+                                ? 'Hold ${remainingSeconds}s to delete all profiles'
+                                : 'Hold 5s to delete all profiles';
+                            return GestureDetector(
+                              onLongPressStart: (_) => _startHoldAction(
+                                'delete_all_profiles',
+                                () async {
+                                  if (_isSaving || profiles.isEmpty) {
+                                    _cancelHoldAction('delete_all_profiles');
+                                    return;
+                                  }
+                                  await _deleteAllProfiles();
+                                  _cancelHoldAction('delete_all_profiles');
+                                },
+                                countdownLabel: 'delete all profiles',
+                              ),
+                              onLongPressEnd: (_) =>
+                                  _cancelHoldAction('delete_all_profiles'),
+                              onTap: () {},
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 120),
+                                opacity: profiles.isEmpty ? 0.4 : 1.0,
+                                child: ElevatedButton.icon(
+                                  style: textButtonStyle,
+                                  onPressed: null,
+                                  icon: const Icon(
+                                    Icons.delete_sweep_outlined,
+                                    size: 20,
+                                  ),
+                                  label: Text(label),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Profile, contacts and messages will be deleted from device',
+                          style: TextStyle(fontSize: 11, color: Colors.white54),
+                        ),
+                      ],
+                    ),
+                  ),
                 ]),
                 const SizedBox(height: 8),
                 actionGroup('Backup and Restore', [
@@ -6302,7 +6596,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: textButtonStyle,
                     onPressed: _backupCurrentProfile,
                     icon: const Icon(Icons.save_alt, size: 20),
-                    label: const Text('Backup Profile (JSON)'),
+                    label: const Text('Backup Active Profile (JSON)'),
+                  ),
+                  ElevatedButton.icon(
+                    style: textButtonStyle,
+                    onPressed: _backupAllProfiles,
+                    icon: const Icon(Icons.all_inbox, size: 20),
+                    label: const Text('Backup All Profiles (JSON)'),
                   ),
                   ElevatedButton.icon(
                     style: textButtonStyle,
