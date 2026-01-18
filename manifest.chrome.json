@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Pushstr Gift DM",
-  "description": "Pushbullet-style notifier over Nostr DMs.",
+  "name": "Pushstr DM Client",
+  "description": "Nostr DMs for mobile and browser extension.",
   "version": "0.0.7",
   "icons": {
     "48": "pushstr_48.png",

@@ -1,7 +1,7 @@
 identifier: com.pushstr.mobile
 name: Pushstr
 summary: Private Nostr-based messaging across browser and mobile
-description: Pushbullet-style messaging over Nostr using NIP-44 encrypted, gift-wrapped DMs. Generate or import profiles, keep separate keys per contact or group, and move chats or attachments between the browser extension and Android/iOS apps within seconds.
+description: Nostr DMs for mobile and browser extension with NIP-44 encrypted giftwraps, multi-profile keys, and fast device-to-device chat + attachment sync.
 repository: https://gittr.space/npub19at4nqjjymca2lh3v546vcg5ktun3al4c5xu2pts3ewckv0y70ys0gupzr/pushstr
 release_repository: https://github.com/tidley/pushstr/releases
 homepage: https://github.com/tidley/pushstr
