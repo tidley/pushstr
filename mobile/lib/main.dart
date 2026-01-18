@@ -5209,10 +5209,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (nsec.isNotEmpty) {
                 setState(() {
                   profiles.add({'nsec': nsec, 'nickname': nickname});
+                  selectedProfileIndex = profiles.length - 1;
+                  profileNickname = nickname;
+                  nicknameCtrl.text = nickname;
                 });
                 _markDirty();
                 await _saveSettings();
                 await _refreshProfileNpubs();
+                unawaited(_primeProfileData(nsec));
               }
               Navigator.pop(ctx);
             },
@@ -5245,10 +5249,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final nickname = nicknameDialogCtrl.text.trim();
               setState(() {
                 profiles.add({'nsec': nsec, 'nickname': nickname});
+                selectedProfileIndex = profiles.length - 1;
+                profileNickname = nickname;
+                nicknameCtrl.text = nickname;
               });
               _markDirty();
               await _saveSettings();
               await _refreshProfileNpubs();
+              unawaited(_primeProfileData(nsec));
               Navigator.pop(ctx);
             },
             child: const Text('Generate'),
@@ -5633,6 +5641,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
+  String _messagesKeyFor(String profileNsec) => 'messages_$profileNsec';
+  String _lastSeenKeyFor(String profileNsec) => 'last_seen_ts_$profileNsec';
 
   String _normalizeBackupPubkey(String value) {
     final trimmed = value.trim();
@@ -5713,6 +5723,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showThemedToast('Profile imported', preferTop: true);
     } catch (e) {
       _showThemedToast('Import failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _primeProfileData(String nsec) async {
+    if (nsec.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dmsJson = await RustSyncWorker.fetchRecentDms(
+        nsec: nsec,
+        limit: 100,
+        sinceTimestamp: 0,
+      );
+      if (dmsJson == null || dmsJson.isEmpty) return;
+      await prefs.setString(_messagesKeyFor(nsec), dmsJson);
+      final List<dynamic> dmsList = jsonDecode(dmsJson);
+      final messages = dmsList.cast<Map<String, dynamic>>();
+      final maxSeen = messages.fold<int>(0, (acc, m) {
+        final raw = m['created_at'];
+        if (raw is int && raw > acc) return raw;
+        if (raw is double && raw > acc) return raw.round();
+        if (raw is String) {
+          final parsed = int.tryParse(raw);
+          if (parsed != null && parsed > acc) return parsed;
+        }
+        return acc;
+      });
+      if (maxSeen > 0) {
+        await prefs.setInt(_lastSeenKeyFor(nsec), maxSeen);
+      }
+      final contactSet = <String>{};
+      final contactsList = <String>[];
+      for (final message in messages) {
+        final direction = message['direction']?.toString();
+        final pubkey =
+            (direction == 'out')
+            ? message['to']?.toString()
+            : message['from']?.toString();
+        if (pubkey == null || pubkey.isEmpty) continue;
+        if (contactSet.add(pubkey)) {
+          contactsList.add('|$pubkey');
+        }
+      }
+      if (contactsList.isNotEmpty) {
+        await prefs.setStringList(_contactsKeyFor(nsec), contactsList);
+      }
+    } catch (e) {
+      print('Failed to prime profile data: $e');
     }
   }
 
@@ -5996,15 +6053,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           if (idx != null &&
                               idx < profiles.length &&
                               idx != selectedProfileIndex) {
-                            final nsec = profiles[idx]['nsec'] ?? '';
-                            if (nsec.isNotEmpty) {
-                              // Switch the active key in Rust
-                              try {
-                                api.initNostr(nsec: nsec);
-                              } catch (e) {
-                                print('Failed to switch profile: $e');
-                              }
-                            }
                             setState(() {
                               selectedProfileIndex = idx;
                               profileNickname = profiles[idx]['nickname'] ?? '';
@@ -6015,6 +6063,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             });
                             _markDirty();
                             await _saveSettings();
+                            final nsec = profiles[idx]['nsec'] ?? '';
+                            unawaited(_primeProfileData(nsec));
                           }
                         },
                       ),
