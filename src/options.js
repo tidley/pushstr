@@ -145,7 +145,7 @@ async function init() {
     renderContacts(recipients, true);
     renderRelays(relays, true);
     populateKeys(keys, state.pubkey);
-    fillKeyNickname(keys, state.pubkey);
+    fillKeyNickname(keys, state.pubkey, keySelect.value);
     saveBtn.disabled = true;
     saveBtn.textContent = "Save";
     syncFloatingState(keySelect);
@@ -154,12 +154,14 @@ async function init() {
     syncFloatingState(contactPub);
     syncFloatingState(contactNick);
     setDirty(false);
-    if (state.pubkey) {
-      pubkeyLabel.textContent = `Current npub: ${shortKey(state.pubkey)}`;
-      pubkeyLabel.title = toNpub(state.pubkey);
-    } else {
-      pubkeyLabel.textContent = "";
-      pubkeyLabel.title = "";
+    if (pubkeyLabel) {
+      if (state.pubkey) {
+        pubkeyLabel.textContent = `Current npub: ${shortKey(state.pubkey)}`;
+        pubkeyLabel.title = toNpub(state.pubkey);
+      } else {
+        pubkeyLabel.textContent = "";
+        pubkeyLabel.title = "";
+      }
     }
   } catch (err) {
     console.error("[pushstr][options] render failed", err, state);
@@ -173,7 +175,9 @@ async function init() {
       status("Unable to initialize key");
     }
   }
-  pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
+  if (pubkeyLabel) {
+    pubkeyLabel.textContent = state.pubkey ? `Current nPub: ${shortKey(state.pubkey)}` : "";
+  }
   if (settingsVersion) {
     try {
       const manifest = browser.runtime.getManifest();
@@ -557,8 +561,10 @@ function populateKeys(keys = [], currentPub) {
     opt.textContent = toNpub(currentPub);
     keySelect.appendChild(opt);
     keySelect.title = toNpub(currentPub);
-    pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
-    pubkeyLabel.title = toNpub(currentPub);
+    if (pubkeyLabel) {
+      pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
+      pubkeyLabel.title = toNpub(currentPub);
+    }
     return;
   }
   unique.forEach((k) => {
@@ -571,8 +577,10 @@ function populateKeys(keys = [], currentPub) {
   if (!keySelect.value && unique[0]) keySelect.value = unique[0].nsec;
   if (currentPub) {
     keySelect.title = toNpub(currentPub);
-    pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
-    pubkeyLabel.title = toNpub(currentPub);
+    if (pubkeyLabel) {
+      pubkeyLabel.textContent = `Current nPub: ${shortKey(currentPub)}`;
+      pubkeyLabel.title = toNpub(currentPub);
+    }
   }
   syncFloatingState(keySelect);
 }
@@ -631,8 +639,10 @@ function shortKey(pk) {
   return `${npub.slice(0, 8)}...${npub.slice(-4)}`;
 }
 
-function fillKeyNickname(keys, currentPub) {
-  const entry = (keys || []).find((k) => k.pubkey === currentPub);
+function fillKeyNickname(keys, currentPub, currentNsec) {
+  const entry = (keys || []).find(
+    (k) => k.pubkey === currentPub || (currentNsec && k.nsec === currentNsec),
+  );
   keyNicknameEl.value = entry?.nickname || "";
   syncFloatingState(keyNicknameEl);
 }
