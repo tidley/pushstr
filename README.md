@@ -104,9 +104,9 @@ flutter install --use-application-binary build/app/outputs/flutter-apk/app-relea
 ## Images
 
 ### Desktop extension
-<img width="712" height="501" alt="image" src="https://github.com/user-attachments/assets/5d36d77a-59b0-4c53-938a-0648f456c59a" />
+<img width="727" height="489" alt="browser extension conversation window" src="https://github.com/user-attachments/assets/0e6d0c6b-ce03-4978-b01b-2eece68fc53b" />
 
 ### Mobile app
-<img width="540" height="1200" alt="image" src="https://github.com/user-attachments/assets/01a76f36-dbf2-417e-a616-f29e90bb7596" />
+<img width="540" height="1200" alt="mobile conversation window" src="https://github.com/user-attachments/assets/3d5d5c7f-5508-4072-95af-2bb54c144002" />
 
-<img width="540" height="1200" alt="image" src="https://github.com/user-attachments/assets/fdc65467-6848-4465-9ab6-b9cfab5a815e" />
+<img width="540" height="1200" alt="mobile settings" src="https://github.com/user-attachments/assets/c9e2a955-5ac1-4410-9bd5-73d6fcc1c1ff" />
