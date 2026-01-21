@@ -89,10 +89,16 @@ const BLOSSOM_SERVER = 'https://blossom.primal.net';
 let state = { messages: [], recipients: [], pubkey: null };
 let selectedContact = null;
 let pendingFile = null;
-const localPreviewCache = {};
+const localPreviewCache = new Map();
 let optimisticMessages = [];
 // Session cache for decrypted media (blob URLs)
 const decryptedMediaCache = new Map();
+const MAX_DECRYPTED_MEDIA_CACHE = 25;
+const MAX_PERSISTED_MEDIA_CACHE = 25;
+const MAX_PREVIEW_CACHE = 30;
+const MAX_DECRYPTED_MEDIA_BYTES = 8 * 1024 * 1024;
+const MAX_PERSISTED_MEDIA_BYTES = 2 * 1024 * 1024;
+const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 // Track messages received in current session
 const sessionMessages = new Set();
 const sessionStartTime = Date.now();
@@ -144,6 +150,10 @@ browser.runtime.onMessage.addListener((msg) => {
 });
 
 init();
+
+window.addEventListener('beforeunload', () => {
+  clearDecryptedMediaCache();
+});
 
 async function init() {
   try {
@@ -497,8 +507,8 @@ function renderEncryptedMedia(
 
   // Try to use cached preview for sender (check both in-memory and localStorage)
   const cached =
-    localPreviewCache[fallbackUrl] ||
-    localPreviewCache[media.url] ||
+    previewCacheGet(fallbackUrl) ||
+    previewCacheGet(media.url) ||
     localStorage.getItem(`pushstr_preview_${fallbackUrl}`) ||
     localStorage.getItem(`pushstr_preview_${media.url}`);
 
@@ -533,7 +543,7 @@ function renderEncryptedMedia(
   }
 
   // Check if already decrypted in this session
-  const cachedBlob = decryptedMediaCache.get(cacheKey);
+  const cachedBlob = cacheGet(decryptedMediaCache, cacheKey);
   if (cachedBlob) {
     displayDecryptedMedia(container, cachedBlob, media, fragMeta, downloadCtrl);
     return;
@@ -546,7 +556,7 @@ function renderEncryptedMedia(
     media.filename,
   );
   if (stored) {
-    decryptedMediaCache.set(cacheKey, stored);
+    cacheSet(decryptedMediaCache, cacheKey, stored, MAX_DECRYPTED_MEDIA_CACHE, evictCachedBlob);
     displayDecryptedMedia(container, stored, media, fragMeta, downloadCtrl);
     return;
   }
@@ -629,16 +639,28 @@ async function decryptAndCache(
       type: res.mime || media.mime || 'application/octet-stream',
     });
     const blobUrl = URL.createObjectURL(blob);
+    const byteLength = bytes.length;
+    const shouldCache = byteLength <= MAX_DECRYPTED_MEDIA_BYTES;
+    const shouldPersist = byteLength <= MAX_PERSISTED_MEDIA_BYTES;
 
     // Cache the decrypted blob URL
     const cached = {
       blobUrl,
       mime: res.mime || media.mime,
       filename: media.filename,
-      base64: res.base64,
     };
-    decryptedMediaCache.set(cacheKey, cached);
-    persistDecryptedMedia(cacheKey, res.base64, cached.mime, cached.filename);
+    if (shouldCache) {
+      cacheSet(
+        decryptedMediaCache,
+        cacheKey,
+        cached,
+        MAX_DECRYPTED_MEDIA_CACHE,
+        evictCachedBlob,
+      );
+    }
+    if (shouldPersist) {
+      persistDecryptedMedia(cacheKey, res.base64, cached.mime, cached.filename);
+    }
 
     displayDecryptedMedia(container, cached, media, fragMeta, downloadCtrl);
   } catch (err) {
@@ -814,6 +836,11 @@ function b64ToBytes(b64) {
   return out;
 }
 
+function estimateBase64Bytes(b64) {
+  if (!b64) return 0;
+  return Math.floor((b64.length * 3) / 4);
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -825,6 +852,7 @@ function blobToDataUrl(blob) {
 
 function persistDecryptedMedia(cacheKey, base64, mime, filename) {
   if (!cacheKey || !base64) return;
+  if (estimateBase64Bytes(base64) > MAX_PERSISTED_MEDIA_BYTES) return;
   const payload = {
     b64: base64,
     mime: mime || 'application/octet-stream',
@@ -832,6 +860,7 @@ function persistDecryptedMedia(cacheKey, base64, mime, filename) {
   };
   try {
     localStorage.setItem(`pushstr_media_${cacheKey}`, JSON.stringify(payload));
+    updateStorageIndex('pushstr_media_index', cacheKey, MAX_PERSISTED_MEDIA_CACHE, 'pushstr_media_');
   } catch (_) {
     // ignore quota errors
   }
@@ -844,6 +873,10 @@ function loadPersistedMedia(cacheKey, fallbackMime, fallbackFilename) {
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data?.b64) return null;
+    if (estimateBase64Bytes(data.b64) > MAX_PERSISTED_MEDIA_BYTES) {
+      localStorage.removeItem(`pushstr_media_${cacheKey}`);
+      return null;
+    }
     const bytes = b64ToBytes(data.b64);
     const mime = data.mime || fallbackMime || 'application/octet-stream';
     const blob = new Blob([bytes], { type: mime });
@@ -856,6 +889,83 @@ function loadPersistedMedia(cacheKey, fallbackMime, fallbackFilename) {
   } catch (_) {
     return null;
   }
+}
+
+function cacheGet(cache, key) {
+  if (!key) return null;
+  if (!cache.has(key)) return null;
+  const value = cache.get(key);
+  cache.delete(key);
+  cache.set(key, value);
+  return value;
+}
+
+function cacheSet(cache, key, value, maxItems, onEvict) {
+  if (!key) return;
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > maxItems) {
+    const oldestKey = cache.keys().next().value;
+    const oldest = cache.get(oldestKey);
+    cache.delete(oldestKey);
+    if (onEvict) onEvict(oldestKey, oldest);
+  }
+}
+
+function previewCacheGet(key) {
+  if (!key) return null;
+  return cacheGet(localPreviewCache, key);
+}
+
+function previewCacheSet(key, value) {
+  cacheSet(localPreviewCache, key, value, MAX_PREVIEW_CACHE);
+}
+
+function evictCachedBlob(_key, entry) {
+  if (!entry?.blobUrl) return;
+  if (entry.blobUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(entry.blobUrl);
+  }
+}
+
+function clearDecryptedMediaCache() {
+  decryptedMediaCache.forEach((entry) => evictCachedBlob(null, entry));
+  decryptedMediaCache.clear();
+}
+
+function readStorageIndex(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    return list.filter((item) => typeof item === 'string' && item.length);
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeStorageIndex(storageKey, list) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(list));
+  } catch (_) {
+    // ignore storage errors
+  }
+}
+
+function updateStorageIndex(storageKey, itemKey, maxItems, itemPrefix) {
+  if (!itemKey) return;
+  const list = readStorageIndex(storageKey).filter((entry) => entry !== itemKey);
+  list.push(itemKey);
+  while (list.length > maxItems) {
+    const removed = list.shift();
+    try {
+      localStorage.removeItem(`${itemPrefix}${removed}`);
+    } catch (_) {
+      // ignore
+    }
+  }
+  writeStorageIndex(storageKey, list);
 }
 
 function filenameFromUrl(url, mime) {
@@ -1037,11 +1147,12 @@ async function send() {
       // Cache preview for images (check both file type and returned mime type)
       const isImage =
         fileToSend.type?.startsWith('image') || res.mime?.startsWith('image');
-      if (isImage) {
+      if (isImage && fileToSend.size <= MAX_PREVIEW_BYTES) {
         const dataUrl = await fileToDataUrl(fileToSend);
-        localPreviewCache[res.url] = dataUrl;
+        previewCacheSet(res.url, dataUrl);
         try {
           localStorage.setItem(`pushstr_preview_${res.url}`, dataUrl);
+          updateStorageIndex('pushstr_preview_index', res.url, MAX_PREVIEW_CACHE, 'pushstr_preview_');
         } catch (_) {
           // ignore storage errors
         }

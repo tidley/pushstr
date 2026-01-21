@@ -3727,6 +3727,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 color: Colors.white,
                 onPressed: () => _saveMedia(bytes, mime),
               ),
+              IconButton(
+                icon: const Icon(Icons.share, size: 20),
+                color: Colors.white,
+                onPressed: () => _shareMediaBytes(
+                  bytes,
+                  mime,
+                  filename: media['filename']?.toString(),
+                ),
+              ),
               if (!isImage)
                 IconButton(
                   icon: const Icon(Icons.copy, size: 20),
@@ -3832,6 +3841,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Clipboard.setData(ClipboardData(text: url));
                   _showThemedToast('Link copied', preferTop: true);
                 },
+              ),
+              IconButton(
+                icon: const Icon(Icons.share, size: 20),
+                color: Colors.white,
+                onPressed: () => _shareMediaLink(url),
               ),
             ],
           ),
@@ -3974,7 +3988,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       if (Platform.isIOS) {
-        final file = await _writeTempMediaFile(bytes, mime);
+        final file = await _writeTempMediaFile(bytes, mime, filename: filename);
         final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
           'path': file.path,
           'mime': mime,
@@ -4010,11 +4024,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<File> _writeTempMediaFile(Uint8List bytes, String mime) async {
+  Future<void> _shareMediaBytes(
+    Uint8List bytes,
+    String mime, {
+    String? filename,
+  }) async {
+    try {
+      final file = await _writeTempMediaFile(
+        bytes,
+        mime,
+        filename: filename,
+      );
+      final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
+        'path': file.path,
+        'mime': mime,
+        'filename': filename ?? file.uri.pathSegments.last,
+      });
+      if (!mounted) return;
+      if (ok != true) {
+        _showThemedToast('Share failed', preferTop: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showThemedToast('Share failed: $e', preferTop: true);
+    }
+  }
+
+  Future<void> _shareMediaLink(String url) async {
+    try {
+      final ok = await _storageChannel.invokeMethod<bool>('shareText', {
+        'text': url,
+      });
+      if (!mounted) return;
+      if (ok != true) {
+        await Clipboard.setData(ClipboardData(text: url));
+        _showThemedToast('Link copied', preferTop: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: url));
+      _showThemedToast('Link copied', preferTop: true);
+    }
+  }
+
+  Future<File> _writeTempMediaFile(
+    Uint8List bytes,
+    String mime, {
+    String? filename,
+  }) async {
     final dir = await getTemporaryDirectory();
     final ext = extensionFromMime(mime);
-    final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
-    final file = File('${dir.path}/$filename');
+    final rawName = (filename != null && filename.trim().isNotEmpty)
+        ? filename.trim()
+        : 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final safeName = rawName.replaceAll(RegExp(r'[\\/:]'), '_');
+    final finalName =
+        safeName.contains('.') ? safeName : '$safeName.$ext';
+    final file = File('${dir.path}/$finalName');
     await file.writeAsBytes(bytes, flush: true);
     return file;
   }
