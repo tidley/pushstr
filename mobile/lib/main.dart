@@ -230,12 +230,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _holdMillis = 4000;
   static const String _pushstrMediaStart = '[pushstr:media]';
   static const String _pushstrMediaEnd = '[/pushstr:media]';
+  static const Duration _relayResendDelay = Duration(seconds: 30);
+  static const int _relayResendMaxAttempts = 1;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
   // Session-based decryption caching
   final Map<String, Uint8List> _decryptedMediaCache = {};
   final Set<String> _sessionMessages = {};
+  final Map<String, Timer> _relayResendTimers = {};
+  final Map<String, int> _relayResendAttempts = {};
   bool _showScrollToBottom = false;
   bool _hasNewMessages = false;
   bool _encryptPendingAttachment = true;
@@ -285,6 +289,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       t.cancel();
     }
     for (final t in _holdTimersHome.values) {
+      t.cancel();
+    }
+    for (final t in _relayResendTimers.values) {
       t.cancel();
     }
     _toastTimer?.cancel();
@@ -940,6 +947,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // ignore pending errors
       }
 
+      final relaySeenIds = fetchedMessages
+          .where((m) => m['direction'] == 'out')
+          .map((m) => m['id']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
+          .toSet();
+
       // Auto-add contacts from incoming messages
       final incomingPubkeys = fetchedMessages
           .where((m) => m['direction'] == 'in')
@@ -968,6 +982,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
       _applyPendingReceiptsToList(merged);
+      _markRelaySeen(merged, relaySeenIds);
       final added = merged.length > existingLen;
       setState(() {
         messages = merged;
@@ -1295,6 +1310,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         lastError = 'Resend failed: $e';
       });
+    }
+  }
+
+  Future<void> _silentResendMessage(Map<String, dynamic> message) async {
+    if (nsec == null || nsec!.isEmpty) return;
+    final recipient = message['to']?.toString() ?? '';
+    if (recipient.isEmpty) return;
+    final currentId = message['id']?.toString() ?? '';
+    if (currentId.isEmpty) return;
+
+    try {
+      final built = _buildResendPayload(message);
+      final payload = built['payload'] as String;
+      final dmKind = (message['dm_kind'] ?? 'nip59').toString();
+      final useLegacyDm = dmKind == 'nip04';
+      String? eventId;
+      if (useLegacyDm) {
+        eventId = await RustSyncWorker.sendLegacyDm(
+          recipient: recipient,
+          message: payload,
+          nsec: nsec!,
+        );
+      } else {
+        eventId = await RustSyncWorker.sendGiftDm(
+          recipient: recipient,
+          content: payload,
+          nsec: nsec!,
+          useNip44: true,
+        );
+      }
+      if (eventId != null && eventId.isNotEmpty) {
+        _replaceLocalMessageId(currentId, eventId);
+      }
+    } catch (_) {
+      // silent retry
     }
   }
 
@@ -1959,6 +2009,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ..addAll(remaining);
   }
 
+  Map<String, dynamic>? _findMessageById(String id) {
+    for (final message in messages) {
+      if (message['id'] == id) return message;
+    }
+    return null;
+  }
+
+  void _cancelRelayResend(String messageId) {
+    _relayResendTimers.remove(messageId)?.cancel();
+    _relayResendAttempts.remove(messageId);
+  }
+
+  void _markRelaySeen(List<Map<String, dynamic>> list, Set<String> relayIds) {
+    if (relayIds.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    for (final message in list) {
+      final id = message['id']?.toString() ?? '';
+      if (id.isEmpty || !relayIds.contains(id)) continue;
+      if (message['direction'] != 'out') continue;
+      if (message['relay_seen'] == true) continue;
+      message['relay_seen'] = true;
+      message['relay_seen_at'] = now;
+      _cancelRelayResend(id);
+    }
+  }
+
+  void _scheduleRelayResend(String messageId) {
+    final message = _findMessageById(messageId);
+    if (message == null) return;
+    if (message['direction'] != 'out') return;
+    if (message['relay_seen'] == true) return;
+    final attempts = _relayResendAttempts[messageId] ?? 0;
+    if (attempts >= _relayResendMaxAttempts) return;
+    _relayResendTimers[messageId]?.cancel();
+    _relayResendTimers[messageId] = Timer(_relayResendDelay, () async {
+      if (!mounted) return;
+      final current = _findMessageById(messageId);
+      if (current == null) {
+        _cancelRelayResend(messageId);
+        return;
+      }
+      if (current['relay_seen'] == true) {
+        _cancelRelayResend(messageId);
+        return;
+      }
+      final attempts = _relayResendAttempts[messageId] ?? 0;
+      if (attempts >= _relayResendMaxAttempts) {
+        _cancelRelayResend(messageId);
+        return;
+      }
+      _relayResendAttempts[messageId] = attempts + 1;
+      await _silentResendMessage(current);
+    });
+  }
+
   void _replaceLocalMessageId(String localId, String eventId) {
     bool updated = false;
     for (final message in messages) {
@@ -1970,6 +2075,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_sessionMessages.remove(localId)) {
       _sessionMessages.add(eventId);
     }
+    if (_relayResendAttempts.containsKey(localId)) {
+      _relayResendAttempts[eventId] = _relayResendAttempts.remove(localId) ?? 0;
+    }
+    if (_relayResendTimers.containsKey(localId)) {
+      _relayResendTimers.remove(localId)?.cancel();
+    }
     if (updated) {
       _applyPendingReceiptsToList(messages);
       if (mounted) {
@@ -1977,6 +2088,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       unawaited(_saveMessages());
     }
+    _scheduleRelayResend(eventId);
   }
 
   Future<void> _maybeSendReadReceipt(Map<String, dynamic> message) async {
