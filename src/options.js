@@ -56,6 +56,7 @@ const contactsBody = document.getElementById("contactsBody");
 const keySelect = document.getElementById("keySelect");
 const keyNicknameEl = document.getElementById("keyNickname");
 const saveBtn = document.getElementById("save");
+const cancelBtn = document.getElementById("cancel");
 const copyNsecBtn = document.getElementById("export");
 const copyNpubBtn = document.getElementById("exportNpub");
 const backupProfileBtn = document.getElementById("backupProfile");
@@ -88,6 +89,7 @@ async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
 
 function setDirty(flag) {
   document.body.classList.toggle("dirty", !!flag);
+  if (cancelBtn) cancelBtn.disabled = !flag;
 }
 
 function syncFloatingState(el) {
@@ -99,6 +101,7 @@ function syncFloatingState(el) {
 }
 
 saveBtn.addEventListener("click", save);
+cancelBtn?.addEventListener("click", cancelChanges);
 document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
@@ -239,6 +242,26 @@ async function save() {
     saveBtn.textContent = "Save";
     saveBtn.disabled = false;
     setDirty(true);
+  }
+}
+
+async function cancelChanges() {
+  if (!cancelBtn || cancelBtn.disabled) return;
+  const originalLabel = cancelBtn.textContent;
+  cancelBtn.textContent = "Resetting...";
+  cancelBtn.disabled = true;
+  relayError.textContent = "";
+  contactError.textContent = "";
+  relayInput.value = "";
+  contactPub.value = "";
+  contactNick.value = "";
+  syncFloatingState(relayInput);
+  syncFloatingState(contactPub);
+  syncFloatingState(contactNick);
+  try {
+    await init();
+  } finally {
+    cancelBtn.textContent = originalLabel;
   }
 }
 
