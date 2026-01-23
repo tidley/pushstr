@@ -374,7 +374,7 @@ function renderHistory() {
       const resendBtn = document.createElement('button');
       resendBtn.className = 'resend-btn';
       resendBtn.title = 'Resend';
-      resendBtn.textContent = '↻';
+      resendBtn.innerHTML = '<span class="resend-icon">↻</span>RESEND';
       resendBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         try {
