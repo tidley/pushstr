@@ -8883,6 +8883,30 @@ var sessionStartTime = Date.now();
 var params = new URLSearchParams(window.location.search);
 var isPopout = params.get("popout") === "1";
 document.body.classList.add(isPopout ? "popout" : "popup");
+var ensureConnectLastAtByContact = /* @__PURE__ */ new Map();
+var ENSURE_CONNECT_COOLDOWN_MS = 5e3;
+function maybeEnsureConnect(contactId) {
+  if (!contactId)
+    return;
+  const now = Date.now();
+  const last = ensureConnectLastAtByContact.get(contactId) || 0;
+  if (now - last < ENSURE_CONNECT_COOLDOWN_MS)
+    return;
+  ensureConnectLastAtByContact.set(contactId, now);
+  browser.runtime.sendMessage({ type: "ensure-connect" }).catch(() => {
+  });
+}
+var refreshTimer = null;
+function scheduleRefreshState() {
+  if (refreshTimer)
+    return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refreshState().catch((err) => {
+      console.error("[pushstr][popup] refreshState failed (scheduled)", err);
+    });
+  }, 100);
+}
 document.getElementById("send").addEventListener("click", send);
 document.getElementById("attach").addEventListener("click", attachFile);
 var popoutBtn = document.getElementById("popout");
@@ -8915,14 +8939,10 @@ browser.runtime.onMessage.addListener((msg) => {
       selectedContact = other;
     if (msg.event.id)
       sessionMessages.add(msg.event.id);
-    refreshState().catch((err) => {
-      console.error("[pushstr][popup] refreshState failed after incoming", err);
-    });
+    scheduleRefreshState();
   }
   if (msg.type === "receipt") {
-    refreshState().catch((err) => {
-      console.error("[pushstr][popup] refreshState failed after receipt", err);
-    });
+    scheduleRefreshState();
   }
 });
 init();
@@ -9080,8 +9100,7 @@ function renderHistory() {
           missing_from: lastIncomingSeq + 1,
           missing_to: seq - 1
         });
-        browser.runtime.sendMessage({ type: "ensure-connect" }).catch(() => {
-        });
+        maybeEnsureConnect(selectedContact);
       }
       if (seq != null)
         lastIncomingSeq = seq;

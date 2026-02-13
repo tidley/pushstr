@@ -759,29 +759,33 @@ function parseReadReceipt(content) {
   return null;
 }
 
-async function applyReadReceipt(receiptId) {
-  if (!receiptId) return false;
-  let updated = false;
-  const now = Math.floor(Date.now() / 1000);
-  for (const msg of messages) {
-    if (msg.id !== receiptId) continue;
-    if (msg.direction !== "out") continue;
-    if (!msg.read_at) {
-      msg.read_at = now;
-      msg.read = true;
-      updated = true;
-    }
-  }
-  if (!updated) {
-    pendingReceipts.add(receiptId);
-    return false;
-  }
-  settings.messagesByKey = settings.messagesByKey || {};
-  const pub = currentPubkey();
-  if (pub) settings.messagesByKey[pub] = messages;
-  await persistSettings();
-  return true;
-}
+	async function applyReadReceipt(receiptId) {
+	  if (!receiptId) return false;
+	  let foundOutgoing = false;
+	  let updated = false;
+	  const now = Math.floor(Date.now() / 1000);
+	  for (const msg of messages) {
+	    if (msg.id !== receiptId) continue;
+	    if (msg.direction !== "out") continue;
+	    foundOutgoing = true;
+	    if (!msg.read_at) {
+	      msg.read_at = now;
+	      msg.read = true;
+	      updated = true;
+	    }
+	  }
+	  if (!updated) {
+	    // Only keep as pending if we haven't recorded the outgoing message yet.
+	    // If it's already marked read, don't re-add to pending (avoids sync thrash on duplicate receipts).
+	    if (!foundOutgoing) pendingReceipts.add(receiptId);
+	    return false;
+	  }
+	  settings.messagesByKey = settings.messagesByKey || {};
+	  const pub = currentPubkey();
+	  if (pub) settings.messagesByKey[pub] = messages;
+	  await persistSettings();
+	  return true;
+	}
 
 async function sendReadReceipt(recipientHex, messageId, dmKind) {
   if (!recipientHex || !messageId) return;
@@ -980,12 +984,15 @@ async function handleGiftEvent(event) {
     });
     const dmKind = event.kind === 1059 ? "nip17" : (targetEvent.kind === 4 ? "nip04" : "nip17");
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
-    const receiptId = parseReadReceipt(message);
-    if (receiptId) {
-      await applyReadReceipt(receiptId);
-      browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {});
-      return;
-    }
+	    const receiptId = parseReadReceipt(message);
+	    if (receiptId) {
+	      const changed = await applyReadReceipt(receiptId);
+	      // Only wake the UI when the receipt actually updates local state.
+	      if (changed) {
+	        browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {});
+	      }
+	      return;
+	    }
     const isPushstrClient = hasPushstrClientTag(message);
     const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
