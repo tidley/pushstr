@@ -12464,6 +12464,7 @@ function parseReadReceipt(content) {
 async function applyReadReceipt(receiptId) {
   if (!receiptId)
     return false;
+  let foundOutgoing = false;
   let updated = false;
   const now2 = Math.floor(Date.now() / 1e3);
   for (const msg of messages2) {
@@ -12471,6 +12472,7 @@ async function applyReadReceipt(receiptId) {
       continue;
     if (msg.direction !== "out")
       continue;
+    foundOutgoing = true;
     if (!msg.read_at) {
       msg.read_at = now2;
       msg.read = true;
@@ -12478,7 +12480,8 @@ async function applyReadReceipt(receiptId) {
     }
   }
   if (!updated) {
-    pendingReceipts.add(receiptId);
+    if (!foundOutgoing)
+      pendingReceipts.add(receiptId);
     return false;
   }
   settings.messagesByKey = settings.messagesByKey || {};
@@ -12695,9 +12698,11 @@ async function handleGiftEvent(event) {
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
     const receiptId = parseReadReceipt(message);
     if (receiptId) {
-      await applyReadReceipt(receiptId);
-      browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {
-      });
+      const changed = await applyReadReceipt(receiptId);
+      if (changed) {
+        browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {
+        });
+      }
       return;
     }
     const isPushstrClient = hasPushstrClientTag(message);

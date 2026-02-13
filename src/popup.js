@@ -106,6 +106,30 @@ const params = new URLSearchParams(window.location.search);
 const isPopout = params.get('popout') === '1';
 document.body.classList.add(isPopout ? 'popout' : 'popup');
 
+// Avoid thrashing the background with repeated reconnect requests during render loops.
+const ensureConnectLastAtByContact = new Map();
+const ENSURE_CONNECT_COOLDOWN_MS = 5000;
+function maybeEnsureConnect(contactId) {
+  if (!contactId) return;
+  const now = Date.now();
+  const last = ensureConnectLastAtByContact.get(contactId) || 0;
+  if (now - last < ENSURE_CONNECT_COOLDOWN_MS) return;
+  ensureConnectLastAtByContact.set(contactId, now);
+  browser.runtime.sendMessage({ type: 'ensure-connect' }).catch(() => {});
+}
+
+// Coalesce refresh triggers (e.g. multiple receipts) into a single refresh.
+let refreshTimer = null;
+function scheduleRefreshState() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refreshState().catch((err) => {
+      console.error('[pushstr][popup] refreshState failed (scheduled)', err);
+    });
+  }, 100);
+}
+
 document.getElementById('send').addEventListener('click', send);
 document.getElementById('attach').addEventListener('click', attachFile);
 const popoutBtn = document.getElementById('popout');
@@ -138,14 +162,10 @@ browser.runtime.onMessage.addListener((msg) => {
     if (!selectedContact) selectedContact = other;
     // Mark as session message (received while app is running)
     if (msg.event.id) sessionMessages.add(msg.event.id);
-    refreshState().catch((err) => {
-      console.error('[pushstr][popup] refreshState failed after incoming', err);
-    });
+    scheduleRefreshState();
   }
   if (msg.type === 'receipt') {
-    refreshState().catch((err) => {
-      console.error('[pushstr][popup] refreshState failed after receipt', err);
-    });
+    scheduleRefreshState();
   }
 });
 
@@ -308,14 +328,14 @@ function renderHistory() {
   for (const m of convo) {
     if (m.direction === 'in' && m.from === selectedContact) {
       const seq = messageSeq(m);
-      if (seq != null && lastIncomingSeq != null && seq > lastIncomingSeq + 1) {
-        display.push({
-          direction: 'gap',
-          missing_from: lastIncomingSeq + 1,
-          missing_to: seq - 1,
-        });
-        browser.runtime.sendMessage({ type: 'ensure-connect' }).catch(() => {});
-      }
+        if (seq != null && lastIncomingSeq != null && seq > lastIncomingSeq + 1) {
+          display.push({
+            direction: 'gap',
+            missing_from: lastIncomingSeq + 1,
+            missing_to: seq - 1,
+          });
+          maybeEnsureConnect(selectedContact);
+        }
       if (seq != null) lastIncomingSeq = seq;
     }
     display.push(m);
