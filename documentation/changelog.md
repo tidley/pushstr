@@ -1,5 +1,21 @@
 # Pushstr Changelog
 
+## 0.0.8
+
+### Added
+- Attachment and link sharing from the mobile app, including decrypted media shares.
+- Automatic mobile resend for outbound messages that do not come back from relays.
+- Cancel/reset control in extension settings to discard unsaved edits.
+
+### Improved
+- Extension popout notifications now focus the existing chat window instead of opening duplicates.
+- Extension media caching now uses bounded in-memory and persisted caches to reduce popup memory/storage use.
+- Extension resend action is more visible in chat history.
+
+### Fixed
+- Extension read receipts no longer trigger repeated refresh/resync loops when duplicates arrive.
+- Gap recovery reconnect requests are throttled to avoid repeated background sync churn.
+
 ## 0.0.7
 
 ### Added
