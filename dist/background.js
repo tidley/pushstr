@@ -12855,7 +12855,7 @@ function notify(title, message) {
 if (browser?.notifications?.onClicked) {
   browser.notifications.onClicked.addListener(async (notificationId) => {
     try {
-      await focusOrOpenChat();
+      await focusPopoutIfOpen();
     } catch (err2) {
       console.warn("[pushstr] notification click failed", err2);
     } finally {
@@ -12866,7 +12866,7 @@ if (browser?.notifications?.onClicked) {
     }
   });
 }
-async function focusOrOpenChat() {
+async function focusPopoutIfOpen() {
   const url = browser.runtime.getURL("popup.html?popout=1");
   try {
     const tabs = await browser.tabs.query({ url: `${url}*` });
@@ -12876,20 +12876,12 @@ async function focusOrOpenChat() {
         await browser.tabs.update(tab.id, { active: true });
       if (tab.windowId)
         await browser.windows.update(tab.windowId, { focused: true });
-      return;
+      return true;
     }
   } catch (err2) {
-    console.warn("[pushstr] failed to focus existing chat window, opening new one", err2);
+    console.warn("[pushstr] failed to focus existing chat window", err2);
   }
-  try {
-    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
-  } catch (err2) {
-    console.warn("[pushstr] unable to open chat window", err2);
-    try {
-      await browser.tabs.create({ url });
-    } catch (_) {
-    }
-  }
+  return false;
 }
 function normalizePubkey(input) {
   if (!input)

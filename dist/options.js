@@ -8847,6 +8847,7 @@ var contactsBody = document.getElementById("contactsBody");
 var keySelect = document.getElementById("keySelect");
 var keyNicknameEl = document.getElementById("keyNickname");
 var saveBtn = document.getElementById("save");
+var cancelBtn = document.getElementById("cancel");
 var copyNsecBtn = document.getElementById("export");
 var copyNpubBtn = document.getElementById("exportNpub");
 var backupProfileBtn = document.getElementById("backupProfile");
@@ -8878,6 +8879,8 @@ async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
 }
 function setDirty(flag) {
   document.body.classList.toggle("dirty", !!flag);
+  if (cancelBtn)
+    cancelBtn.disabled = !flag;
 }
 function syncFloatingState(el) {
   if (!el)
@@ -8891,6 +8894,7 @@ function syncFloatingState(el) {
     field.classList.remove("filled");
 }
 saveBtn.addEventListener("click", save);
+cancelBtn?.addEventListener("click", cancelChanges);
 document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
@@ -9030,6 +9034,26 @@ async function save() {
     saveBtn.textContent = "Save";
     saveBtn.disabled = false;
     setDirty(true);
+  }
+}
+async function cancelChanges() {
+  if (!cancelBtn || cancelBtn.disabled)
+    return;
+  const originalLabel = cancelBtn.textContent;
+  cancelBtn.textContent = "Resetting...";
+  cancelBtn.disabled = true;
+  relayError.textContent = "";
+  contactError.textContent = "";
+  relayInput.value = "";
+  contactPub.value = "";
+  contactNick.value = "";
+  syncFloatingState(relayInput);
+  syncFloatingState(contactPub);
+  syncFloatingState(contactNick);
+  try {
+    await init();
+  } finally {
+    cancelBtn.textContent = originalLabel;
   }
 }
 function status(msg, tone = "warn") {
