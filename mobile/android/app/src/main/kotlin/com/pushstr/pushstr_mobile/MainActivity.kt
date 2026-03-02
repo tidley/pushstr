@@ -16,6 +16,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.content.ContentValues
 import android.provider.MediaStore
+import androidx.core.content.FileProvider
 
 class MainActivity : FlutterActivity() {
     private val channelName = "com.pushstr.share"
@@ -53,6 +54,24 @@ class MainActivity : FlutterActivity() {
                         result.error("missing_bytes", "Missing bytes", null)
                     } else {
                         result.success(saveToDownloads(bytes, mime, filename))
+                    }
+                }
+                "shareFile" -> {
+                    val path = call.argument<String>("path")
+                    val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                    val filename = call.argument<String>("filename") ?: "pushstr_share"
+                    if (path == null) {
+                        result.error("missing_path", "Missing path", null)
+                    } else {
+                        result.success(shareFile(path, mime, filename))
+                    }
+                }
+                "shareText" -> {
+                    val text = call.argument<String>("text")
+                    if (text == null) {
+                        result.error("missing_text", "Missing text", null)
+                    } else {
+                        result.success(shareText(text))
                     }
                 }
                 "clearPrefsBackup" -> result.success(clearPrefsBackup())
@@ -197,6 +216,41 @@ class MainActivity : FlutterActivity() {
             }
         } catch (e: Exception) {
             null
+        }
+    }
+
+    private fun shareFile(path: String, mime: String, filename: String): Boolean {
+        return try {
+            val file = File(path)
+            if (!file.exists()) return false
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, filename)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, "Share"))
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun shareText(text: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(intent, "Share"))
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 

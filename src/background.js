@@ -759,29 +759,33 @@ function parseReadReceipt(content) {
   return null;
 }
 
-async function applyReadReceipt(receiptId) {
-  if (!receiptId) return false;
-  let updated = false;
-  const now = Math.floor(Date.now() / 1000);
-  for (const msg of messages) {
-    if (msg.id !== receiptId) continue;
-    if (msg.direction !== "out") continue;
-    if (!msg.read_at) {
-      msg.read_at = now;
-      msg.read = true;
-      updated = true;
-    }
-  }
-  if (!updated) {
-    pendingReceipts.add(receiptId);
-    return false;
-  }
-  settings.messagesByKey = settings.messagesByKey || {};
-  const pub = currentPubkey();
-  if (pub) settings.messagesByKey[pub] = messages;
-  await persistSettings();
-  return true;
-}
+	async function applyReadReceipt(receiptId) {
+	  if (!receiptId) return false;
+	  let foundOutgoing = false;
+	  let updated = false;
+	  const now = Math.floor(Date.now() / 1000);
+	  for (const msg of messages) {
+	    if (msg.id !== receiptId) continue;
+	    if (msg.direction !== "out") continue;
+	    foundOutgoing = true;
+	    if (!msg.read_at) {
+	      msg.read_at = now;
+	      msg.read = true;
+	      updated = true;
+	    }
+	  }
+	  if (!updated) {
+	    // Only keep as pending if we haven't recorded the outgoing message yet.
+	    // If it's already marked read, don't re-add to pending (avoids sync thrash on duplicate receipts).
+	    if (!foundOutgoing) pendingReceipts.add(receiptId);
+	    return false;
+	  }
+	  settings.messagesByKey = settings.messagesByKey || {};
+	  const pub = currentPubkey();
+	  if (pub) settings.messagesByKey[pub] = messages;
+	  await persistSettings();
+	  return true;
+	}
 
 async function sendReadReceipt(recipientHex, messageId, dmKind) {
   if (!recipientHex || !messageId) return;
@@ -980,12 +984,15 @@ async function handleGiftEvent(event) {
     });
     const dmKind = event.kind === 1059 ? "nip17" : (targetEvent.kind === 4 ? "nip04" : "nip17");
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
-    const receiptId = parseReadReceipt(message);
-    if (receiptId) {
-      await applyReadReceipt(receiptId);
-      browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {});
-      return;
-    }
+	    const receiptId = parseReadReceipt(message);
+	    if (receiptId) {
+	      const changed = await applyReadReceipt(receiptId);
+	      // Only wake the UI when the receipt actually updates local state.
+	      if (changed) {
+	        browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {});
+	      }
+	      return;
+	    }
     const isPushstrClient = hasPushstrClientTag(message);
     const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
@@ -1144,7 +1151,7 @@ function notify(title, message) {
 if (browser?.notifications?.onClicked) {
   browser.notifications.onClicked.addListener(async (notificationId) => {
     try {
-      await focusOrOpenChat();
+      await focusPopoutIfOpen();
     } catch (err) {
       console.warn("[pushstr] notification click failed", err);
     } finally {
@@ -1157,7 +1164,7 @@ if (browser?.notifications?.onClicked) {
   });
 }
 
-async function focusOrOpenChat() {
+async function focusPopoutIfOpen() {
   const url = browser.runtime.getURL("popup.html?popout=1");
   try {
     const tabs = await browser.tabs.query({ url: `${url}*` });
@@ -1165,21 +1172,12 @@ async function focusOrOpenChat() {
       const tab = tabs[0];
       if (tab.id) await browser.tabs.update(tab.id, { active: true });
       if (tab.windowId) await browser.windows.update(tab.windowId, { focused: true });
-      return;
+      return true;
     }
   } catch (err) {
-    console.warn("[pushstr] failed to focus existing chat window, opening new one", err);
+    console.warn("[pushstr] failed to focus existing chat window", err);
   }
-  try {
-    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
-  } catch (err) {
-    console.warn("[pushstr] unable to open chat window", err);
-    try {
-      await browser.tabs.create({ url });
-    } catch (_) {
-      // final fallback ignored
-    }
-  }
+  return false;
 }
 
 function normalizePubkey(input) {

@@ -32,6 +32,19 @@ import UIKit
             controller.present(activity, animated: true)
             result(true)
           }
+        case "shareText":
+          guard
+            let args = call.arguments as? [String: Any],
+            let text = args["text"] as? String
+          else {
+            result(false)
+            return
+          }
+          DispatchQueue.main.async {
+            let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+            controller.present(activity, animated: true)
+            result(true)
+          }
         default:
           result(FlutterMethodNotImplemented)
         }

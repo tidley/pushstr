@@ -12464,6 +12464,7 @@ function parseReadReceipt(content) {
 async function applyReadReceipt(receiptId) {
   if (!receiptId)
     return false;
+  let foundOutgoing = false;
   let updated = false;
   const now2 = Math.floor(Date.now() / 1e3);
   for (const msg of messages2) {
@@ -12471,6 +12472,7 @@ async function applyReadReceipt(receiptId) {
       continue;
     if (msg.direction !== "out")
       continue;
+    foundOutgoing = true;
     if (!msg.read_at) {
       msg.read_at = now2;
       msg.read = true;
@@ -12478,7 +12480,8 @@ async function applyReadReceipt(receiptId) {
     }
   }
   if (!updated) {
-    pendingReceipts.add(receiptId);
+    if (!foundOutgoing)
+      pendingReceipts.add(receiptId);
     return false;
   }
   settings.messagesByKey = settings.messagesByKey || {};
@@ -12695,9 +12698,11 @@ async function handleGiftEvent(event) {
     console.info("[pushstr] received DM", { from: sender, kind: targetEvent.kind, outerKind: event.kind, message });
     const receiptId = parseReadReceipt(message);
     if (receiptId) {
-      await applyReadReceipt(receiptId);
-      browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {
-      });
+      const changed = await applyReadReceipt(receiptId);
+      if (changed) {
+        browser.runtime.sendMessage({ type: "receipt", id: receiptId, from: sender }).catch(() => {
+        });
+      }
       return;
     }
     const isPushstrClient = hasPushstrClientTag(message);
@@ -12850,7 +12855,7 @@ function notify(title, message) {
 if (browser?.notifications?.onClicked) {
   browser.notifications.onClicked.addListener(async (notificationId) => {
     try {
-      await focusOrOpenChat();
+      await focusPopoutIfOpen();
     } catch (err2) {
       console.warn("[pushstr] notification click failed", err2);
     } finally {
@@ -12861,7 +12866,7 @@ if (browser?.notifications?.onClicked) {
     }
   });
 }
-async function focusOrOpenChat() {
+async function focusPopoutIfOpen() {
   const url = browser.runtime.getURL("popup.html?popout=1");
   try {
     const tabs = await browser.tabs.query({ url: `${url}*` });
@@ -12871,20 +12876,12 @@ async function focusOrOpenChat() {
         await browser.tabs.update(tab.id, { active: true });
       if (tab.windowId)
         await browser.windows.update(tab.windowId, { focused: true });
-      return;
+      return true;
     }
   } catch (err2) {
-    console.warn("[pushstr] failed to focus existing chat window, opening new one", err2);
+    console.warn("[pushstr] failed to focus existing chat window", err2);
   }
-  try {
-    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
-  } catch (err2) {
-    console.warn("[pushstr] unable to open chat window", err2);
-    try {
-      await browser.tabs.create({ url });
-    } catch (_) {
-    }
-  }
+  return false;
 }
 function normalizePubkey(input) {
   if (!input)
