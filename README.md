@@ -95,6 +95,8 @@ flutter run -d linux
 Linux build notes:
 - Linux uses the same Flutter app and Rust core, but desktop-only controls hide camera, video, record, and QR scan actions.
 - If attachments fail to decrypt, make sure both sides are on the current `k` + `nonce` attachment format.
+- Linux startup now keeps Nostr init off the UI thread, so the app should no longer trip the desktop "Not Responding" dialog on launch.
+- If Linux still warns about notifications, make sure the app is using the current Linux notification settings path; the Android share hook is not active on Linux.
 
 APK build:
 ```bash
@@ -106,6 +108,7 @@ flutter install --use-application-binary build/app/outputs/flutter-apk/app-relea
 - If messages do not appear, reload extension, verify relays and check background logs (`background.js`).
 - If giftwrap appears but content is missing, confirm inner kind 14 is plaintext (NIP-59 compatible).
 - If Linux shows a Rust/Dart bridge hash mismatch, rebuild the Rust shared library and restart the app.
+- If Linux shows a startup freeze or "Not Responding" prompt, restart after rebuilding so the UI-isolate init change takes effect.
 - If the extension shows a new npub after reload, the extension ID likely changed.
 
 ## Documentation

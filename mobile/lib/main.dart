@@ -444,7 +444,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         npub = initResult['npub'];
         isConnected = true;
       });
-      await _ensureMainIsolateNostrInitialized();
       unawaited(
         _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true),
       );
@@ -3578,7 +3577,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         isConnected = true;
       }
     });
-    await _ensureMainIsolateNostrInitialized();
 
     if (didProfileChange) {
       await _loadLocalProfileData(

@@ -19,6 +19,8 @@
 - Automatic relay resend behavior was disabled to avoid duplicate sends.
 - Manual resend is blocked once a message already has a read receipt.
 - Read-state handling now avoids stale resend prompts after acknowledgements.
+- Linux startup no longer runs the Nostr init path on the UI isolate, which avoids the desktop "Not Responding" stall.
+- Linux notifications now initialize with Linux settings, and the Android share listener is skipped on Linux.
 - Default relay list expanded with `wss://nip17.com` and `wss://nip17.tomdwyer.uk`.
 - Client identification marker was made less obvious by replacing the plaintext body tag.
 
