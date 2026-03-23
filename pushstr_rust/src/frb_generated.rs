@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1183898731;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1217561698;
 
 // Section: executor
 
@@ -250,38 +250,6 @@ fn wire__crate__api__generate_new_key_impl(
         },
     )
 }
-fn wire__crate__api__publish_relay_list_impl(
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "publish_relay_list",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_relays = <Vec<String>>::sse_decode(&mut deserializer);
-            deserializer.end();
-            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                (move || {
-                    let output_ok = crate::api::publish_relay_list(api_relays)?;
-                    Ok(output_ok)
-                })(),
-            )
-        },
-    )
-}
 fn wire__crate__api__get_npub_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -434,6 +402,38 @@ fn wire__crate__api__npub_to_hex_impl(
             transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                 (move || {
                     let output_ok = crate::api::npub_to_hex(api_npub)?;
+                    Ok(output_ok)
+                })(),
+            )
+        },
+    )
+}
+fn wire__crate__api__publish_relay_list_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "publish_relay_list",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_relays = <Vec<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                (move || {
+                    let output_ok = crate::api::publish_relay_list(api_relays)?;
                     Ok(output_ok)
                 })(),
             )
@@ -823,19 +823,19 @@ fn pde_ffi_dispatcher_sync_impl(
         4 => wire__crate__api__encrypt_media_impl(ptr, rust_vec_len, data_len),
         5 => wire__crate__api__fetch_recent_dms_impl(ptr, rust_vec_len, data_len),
         6 => wire__crate__api__generate_new_key_impl(ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__publish_relay_list_impl(ptr, rust_vec_len, data_len),
         7 => wire__crate__api__get_npub_impl(ptr, rust_vec_len, data_len),
         8 => wire__crate__api__get_nsec_impl(ptr, rust_vec_len, data_len),
         9 => wire__crate__api__hex_to_npub_impl(ptr, rust_vec_len, data_len),
         10 => wire__crate__api__init_nostr_impl(ptr, rust_vec_len, data_len),
         11 => wire__crate__api__npub_to_hex_impl(ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__send_dm_impl(ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__send_gift_dm_impl(ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__send_legacy_gift_dm_impl(ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__unwrap_gift_impl(ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__upload_media_unencrypted_impl(ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__wait_for_new_dms_impl(ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__wrap_gift_impl(ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__publish_relay_list_impl(ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__send_dm_impl(ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__send_gift_dm_impl(ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__send_legacy_gift_dm_impl(ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__unwrap_gift_impl(ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__upload_media_unencrypted_impl(ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__wait_for_new_dms_impl(ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__wrap_gift_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

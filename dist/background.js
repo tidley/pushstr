@@ -11796,6 +11796,8 @@ var activeRelays = [];
 var DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://relay.primal.net",
+  "wss://nip17.com",
+  "wss://nip17.tomdwyer.uk",
   "wss://nos.lol",
   "wss://nostr.mom",
   "wss://relay.nostr.band",
@@ -11919,6 +11921,10 @@ async function handleMessage(msg) {
     settings.lastRecipient = normalizePubkey(msg.recipient);
     await persistSettings();
     return { ok: true };
+  }
+  if (msg.type === "publish-relay-list") {
+    const relays = normalizeRelayList(msg.relays || settings.relays);
+    return publishRelayListForCurrent(relays);
   }
   if (msg.type === "resend-message") {
     const payload = msg.content || msg.message?.content;
@@ -12562,7 +12568,14 @@ async function sendReadReceipt(recipientHex, messageId, dmKind) {
   await publishWithRetry(relayList, signedGift, "receipt-giftwrap");
 }
 function hasPushstrClientTag(content) {
-  return typeof content === "string" && content.includes(PUSHSTR_CLIENT_TAG);
+  if (typeof content === "string") {
+    return content.includes(PUSHSTR_CLIENT_TAG);
+  }
+  if (!Array.isArray(content))
+    return false;
+  return content.some(
+    (tag) => Array.isArray(tag) && tag.length >= 2 && tag[0] === "c" && tag[1] === "1"
+  );
 }
 function stripPushstrClientTag(content) {
   if (typeof content !== "string")
@@ -12572,15 +12585,8 @@ function stripPushstrClientTag(content) {
   const pattern = /(^|\n)\[pushstr:client\](\n|$)/g;
   return content.replace(pattern, "\n").trim();
 }
-function appendPushstrClientTag(content) {
-  if (typeof content !== "string")
-    return content;
-  if (content.includes(PUSHSTR_CLIENT_TAG))
-    return content;
-  if (!content.length)
-    return PUSHSTR_CLIENT_TAG;
-  return `${content}
-${PUSHSTR_CLIENT_TAG}`;
+function pushstrClientTag() {
+  return ["c", "1"];
 }
 async function handleGiftEvent(event) {
   try {
@@ -12705,7 +12711,7 @@ async function handleGiftEvent(event) {
       }
       return;
     }
-    const isPushstrClient = hasPushstrClientTag(message);
+    const isPushstrClient = hasPushstrClientTag(message) || hasPushstrClientTag(targetEvent.tags) || hasPushstrClientTag(event.tags);
     const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
     const isGiftwrap = event.kind === 1059;
@@ -12738,6 +12744,43 @@ async function handleGiftEvent(event) {
     console.warn("Failed to unwrap gift/DM", err2);
   }
 }
+function normalizeRelayList(relays) {
+  return Array.from(
+    new Set(
+      (Array.isArray(relays) ? relays : []).map((relay) => typeof relay === "string" ? relay.trim() : "").filter((relay) => relay.startsWith("ws://") || relay.startsWith("wss://"))
+    )
+  );
+}
+async function publishRelayListForCurrent(relays) {
+  const pub = currentPubkey();
+  const priv = currentPrivkeyHex();
+  if (!pub || !priv) {
+    return { ok: false, error: "no active profile" };
+  }
+  const relayList = normalizeRelayList(relays);
+  if (!relayList.length) {
+    return { ok: false, error: "no relays available" };
+  }
+  const event = finalizeEvent2(
+    {
+      kind: 10002,
+      created_at: Math.floor(Date.now() / 1e3),
+      pubkey: pub,
+      tags: relayList.map((relay) => ["r", relay]),
+      content: ""
+    },
+    priv
+  );
+  const pubRes = await publishWithRetry(relayList, event, "relay-list");
+  if (!pubRes.ok) {
+    return pubRes;
+  }
+  console.info("[pushstr] published relay list", {
+    pubkey: pub,
+    relays: relayList
+  });
+  return { ok: true, eventId: event.id, relays: relayList };
+}
 async function sendGift(recipient, content, modeOverride = null) {
   const priv = currentPrivkeyHex();
   if (!priv)
@@ -12750,14 +12793,13 @@ async function sendGift(recipient, content, modeOverride = null) {
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1e3);
-  const taggedContent = appendPushstrClientTag(content);
   const seq = nextSendSeq(recipientHex);
   if (dmMode === "nip04") {
-    const cipherText = await nip04_exports.encrypt(priv, recipientHex, taggedContent);
+    const cipherText = await nip04_exports.encrypt(priv, recipientHex, content);
     const dm = {
       kind: 4,
       created_at,
-      tags: [["p", recipientHex], ["seq", seq.toString()]],
+      tags: [["p", recipientHex], ["seq", seq.toString()], pushstrClientTag()],
       content: cipherText
     };
     const signedDm = finalizeEvent2(dm, priv);
@@ -12772,7 +12814,7 @@ async function sendGift(recipient, content, modeOverride = null) {
       direction: "out",
       from: currentPubkey(),
       to: recipientHex,
-      content: taggedContent,
+      content,
       created_at,
       outerKind: 4,
       dm_kind: "nip04",
@@ -12788,9 +12830,10 @@ async function sendGift(recipient, content, modeOverride = null) {
     tags: [
       ["p", recipientHex],
       ["seq", seq.toString()],
-      ["alt", "Direct message"]
+      ["alt", "Direct message"],
+      pushstrClientTag()
     ],
-    content: taggedContent
+    content
   };
   const innerSigned = finalizeEvent2(inner, priv);
   const rumor = { ...innerSigned };
@@ -12831,7 +12874,7 @@ async function sendGift(recipient, content, modeOverride = null) {
     direction: "out",
     from: senderPubkey,
     to: recipientHex,
-    content: taggedContent,
+    content,
     created_at,
     outerKind: 1059,
     dm_kind: "nip17",
@@ -12855,7 +12898,7 @@ function notify(title, message) {
 if (browser?.notifications?.onClicked) {
   browser.notifications.onClicked.addListener(async (notificationId) => {
     try {
-      await focusOrOpenChat();
+      await focusPopoutIfOpen();
     } catch (err2) {
       console.warn("[pushstr] notification click failed", err2);
     } finally {
@@ -12866,7 +12909,7 @@ if (browser?.notifications?.onClicked) {
     }
   });
 }
-async function focusOrOpenChat() {
+async function focusPopoutIfOpen() {
   const url = browser.runtime.getURL("popup.html?popout=1");
   try {
     const tabs = await browser.tabs.query({ url: `${url}*` });
@@ -12876,20 +12919,12 @@ async function focusOrOpenChat() {
         await browser.tabs.update(tab.id, { active: true });
       if (tab.windowId)
         await browser.windows.update(tab.windowId, { focused: true });
-      return;
+      return true;
     }
   } catch (err2) {
-    console.warn("[pushstr] failed to focus existing chat window, opening new one", err2);
+    console.warn("[pushstr] failed to focus existing chat window", err2);
   }
-  try {
-    await browser.windows.create({ url, type: "popup", width: 820, height: 640, focused: true });
-  } catch (err2) {
-    console.warn("[pushstr] unable to open chat window", err2);
-    try {
-      await browser.tabs.create({ url });
-    } catch (_) {
-    }
-  }
+  return false;
 }
 function normalizePubkey(input) {
   if (!input)

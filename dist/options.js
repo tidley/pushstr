@@ -8847,6 +8847,7 @@ var contactsBody = document.getElementById("contactsBody");
 var keySelect = document.getElementById("keySelect");
 var keyNicknameEl = document.getElementById("keyNickname");
 var saveBtn = document.getElementById("save");
+var cancelBtn = document.getElementById("cancel");
 var copyNsecBtn = document.getElementById("export");
 var copyNpubBtn = document.getElementById("exportNpub");
 var backupProfileBtn = document.getElementById("backupProfile");
@@ -8855,6 +8856,7 @@ var importProfileBtn = document.getElementById("importProfile");
 var relayInput = document.getElementById("relayInput");
 var relayError = document.getElementById("relayError");
 var relayList = document.getElementById("relayList");
+var publishRelaysBtn = document.getElementById("publishRelays");
 var contactPub = document.getElementById("contactPub");
 var contactNick = document.getElementById("contactNick");
 var contactError = document.getElementById("contactError");
@@ -8878,6 +8880,8 @@ async function safeSend(message, { attempts = 3, delayMs = 150 } = {}) {
 }
 function setDirty(flag) {
   document.body.classList.toggle("dirty", !!flag);
+  if (cancelBtn)
+    cancelBtn.disabled = !flag;
 }
 function syncFloatingState(el) {
   if (!el)
@@ -8891,6 +8895,7 @@ function syncFloatingState(el) {
     field.classList.remove("filled");
 }
 saveBtn.addEventListener("click", save);
+cancelBtn?.addEventListener("click", cancelChanges);
 document.getElementById("regen").addEventListener("click", regen);
 document.getElementById("import").addEventListener("click", importNsec);
 copyNsecBtn.addEventListener("click", exportNsec);
@@ -8902,6 +8907,7 @@ document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
 document.getElementById("addContact").addEventListener("click", addContactFromForm);
 document.getElementById("addRelay").addEventListener("click", addRelayFromInput);
+publishRelaysBtn?.addEventListener("click", publishRelayList);
 keySelect.addEventListener("change", async () => {
   const nsec = keySelect.value;
   if (nsec)
@@ -9030,6 +9036,60 @@ async function save() {
     saveBtn.textContent = "Save";
     saveBtn.disabled = false;
     setDirty(true);
+  }
+}
+async function publishRelayList() {
+  const btn = publishRelaysBtn;
+  if (!btn)
+    return;
+  const relays = readRelays();
+  if (!relays.length) {
+    relayError.textContent = "Add at least one relay before publishing";
+    return;
+  }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Publishing...";
+  relayError.textContent = "";
+  try {
+    const res = await safeSend({
+      type: "publish-relay-list",
+      relays
+    });
+    if (res?.ok) {
+      btn.textContent = "Published";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 2e3);
+      return;
+    }
+    throw new Error(res?.error || "publish failed");
+  } catch (err) {
+    console.error("[pushstr][options] publish-relay-list failed", err);
+    relayError.textContent = err?.message || "publish failed";
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+}
+async function cancelChanges() {
+  if (!cancelBtn || cancelBtn.disabled)
+    return;
+  const originalLabel = cancelBtn.textContent;
+  cancelBtn.textContent = "Resetting...";
+  cancelBtn.disabled = true;
+  relayError.textContent = "";
+  contactError.textContent = "";
+  relayInput.value = "";
+  contactPub.value = "";
+  contactNick.value = "";
+  syncFloatingState(relayInput);
+  syncFloatingState(contactPub);
+  syncFloatingState(contactNick);
+  try {
+    await init();
+  } finally {
+    cancelBtn.textContent = originalLabel;
   }
 }
 function status(msg, tone = "warn") {
