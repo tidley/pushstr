@@ -1673,9 +1673,8 @@ function renderBubbleContent(
       },
     );
     actionHolder.appendChild(downloadCtrl.btn);
-    // Check if media is encrypted (has encryption marker and IV)
-    const isEncrypted =
-      (media.encryption === 'aes-gcm' || media.cipher_sha256) && media.iv;
+    // Check if media is encrypted (supports current and legacy descriptors)
+    const isEncrypted = mediaLooksEncrypted(media);
     result.hasMedia = true;
     result.mediaEncrypted = isEncrypted;
     if (isEncrypted) {
@@ -1911,6 +1910,16 @@ function buildLockBadge(encrypted) {
   return badge;
 }
 
+function mediaLooksEncrypted(media = {}) {
+  return Boolean(
+    media &&
+      (media.encryption === 'aes-gcm' ||
+        media.encryption === 'xchacha20poly1305' ||
+        media.cipher_sha256) &&
+      (media.k || media.nonce || media.iv),
+  );
+}
+
 function attachFile() {
   if (!isPopout) {
     // Attachments are more reliable in the popout; open it and let the user retry there.
@@ -2114,7 +2123,7 @@ function parseFragmentMeta(frag) {
 
 function isBlossomLink(url, meta = {}) {
   const hasMeta = Boolean(
-    meta.sha256 || meta.mime || meta.size || meta.iv || meta.cipher_sha256,
+    meta.sha256 || meta.mime || meta.size || meta.k || meta.nonce || meta.iv || meta.cipher_sha256,
   );
   if (!url) return false;
   try {
