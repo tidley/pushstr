@@ -241,6 +241,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, bool> _holdActiveHome = {};
   final Map<String, int> _holdLastSecondHome = {};
   static const int _holdMillis = 4000;
+  static const Duration _dmListenerWait = Duration(seconds: 10);
+  static const Duration _dmListenerEmptyDelay = Duration(seconds: 2);
+  static const Duration _dmListenerActiveDelay = Duration(seconds: 1);
   static const String _pushstrMediaStart = '[pushstr:media]';
   static const String _pushstrMediaEnd = '[/pushstr:media]';
   OverlayEntry? _toastEntry;
@@ -1599,11 +1602,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       try {
         final result = await RustSyncWorker.waitForNewDms(
           nsec: nsec ?? '',
-          wait: const Duration(seconds: 3),
+          wait: _dmListenerWait,
         );
         // If the call short-circuited (mutex busy, init failure, or no data), avoid a tight loop.
         if (result == null || result.isEmpty || result == '[]') {
-          await Future.delayed(const Duration(milliseconds: 250));
+          await Future.delayed(_dmListenerEmptyDelay);
           continue;
         }
         final List<dynamic> list = jsonDecode(result);
@@ -1665,6 +1668,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           } else {
             _flagNewMessageWhileScrolledBack();
           }
+          await Future.delayed(_dmListenerActiveDelay);
         }
       } catch (e) {
         if (!mounted) break;

@@ -1,6 +1,6 @@
 # Pushstr
 
-Private, relay-backed messaging over Nostr. Pushstr ships as a browser extension (Firefox/Chrome) and a Flutter mobile app backed by a Rust core.
+Private, relay-backed messaging over Nostr. Pushstr ships as a browser extension (Firefox/Chrome), a Flutter mobile app, and a Linux desktop build backed by a Rust core.
 
 ## Features
 - NIP-04 DMs (kind 4).
@@ -9,16 +9,20 @@ Private, relay-backed messaging over Nostr. Pushstr ships as a browser extension
 - Read receipts (between Pushstr clients).
 - Ordered delivery hints via per-recipient sequence tags and gap placeholders.
 - Encrypted attachments via Blossom-compatible uploads with inline previews.
+- Desktop attachment saves preserve the original filename and can open the save folder.
 - Per-contact DM mode toggle (04 vs giftwrap).
 - Multi-relay delivery with retry/backoff and relay cooldown.
+- Manual relay-list publishing for the active profile.
 - JSON profile backup/import (mobile + extension).
 - Optimistic send in extension UI.
+- Linux desktop compose shortcuts: Enter sends, Shift+Enter inserts a newline.
+- Linux desktop attachment flow opens the file picker directly.
 - Streamlined settings: actions, key management, backup/restore, connectivity toggle.
 - Extension sidebar refresh (settings in header, edit nickname, wider contacts pane).
 - Extension settings aligned to mobile sections with active/all profile backups.
 
 ## Architecture
-- UI: Flutter (mobile), HTML/CSS/JS (extension).
+- UI: Flutter (mobile + Linux desktop), HTML/CSS/JS (extension).
 - Crypto/relays: Rust (nostr-sdk), exposed via flutter_rust_bridge.
 - Extension crypto: WASM bundle (built from `wasm_crypto`).
 - Rust handles message normalization, receipt parsing, and FIFO send ordering; Dart/JS focus on UI.
@@ -74,6 +78,7 @@ Optional Rust rebuild (FFI + native libs):
 ```bash
 flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
 cd pushstr_rust
+cargo build
 cargo ndk -t arm64-v8a -t armeabi-v7a -o ../mobile/android/app/src/main/jniLibs build --release
 ```
 
@@ -81,8 +86,15 @@ Run Flutter:
 ```bash
 cd mobile
 flutter pub get
+# Mobile
 flutter run
+# Linux
+flutter run -d linux
 ```
+
+Linux build notes:
+- Linux uses the same Flutter app and Rust core, but desktop-only controls hide camera, video, record, and QR scan actions.
+- If attachments fail to decrypt, make sure both sides are on the current `k` + `nonce` attachment format.
 
 APK build:
 ```bash
@@ -93,6 +105,7 @@ flutter install --use-application-binary build/app/outputs/flutter-apk/app-relea
 ## Troubleshooting
 - If messages do not appear, reload extension, verify relays and check background logs (`background.js`).
 - If giftwrap appears but content is missing, confirm inner kind 14 is plaintext (NIP-59 compatible).
+- If Linux shows a Rust/Dart bridge hash mismatch, rebuild the Rust shared library and restart the app.
 - If the extension shows a new npub after reload, the extension ID likely changed.
 
 ## Documentation

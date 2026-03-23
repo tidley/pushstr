@@ -1,5 +1,27 @@
 # Pushstr Changelog
 
+## 0.1.0
+
+### Added
+- Linux desktop support for the mobile app, including a native `pushstr` app name and bundle wiring.
+- Manual relay-list publishing for the active profile on both mobile and extension.
+- Linux desktop compose shortcuts: Enter sends, Shift+Enter inserts a newline.
+- Linux attach flow now opens the file picker directly and hides camera/video/record options.
+
+### Improved
+- Attachment descriptors now use a clean `k` + `nonce` format across Rust, mobile, and extension.
+- Desktop attachment saves preserve the original filename and the saved-folder toast can open the file browser.
+- Message text uses a lighter weight on desktop for a cleaner conversation view.
+- The error banner can now be dismissed with a close button.
+
+### Fixed
+- Attachment decryption compatibility between Linux/mobile and the browser extension.
+- Automatic relay resend behavior was disabled to avoid duplicate sends.
+- Manual resend is blocked once a message already has a read receipt.
+- Read-state handling now avoids stale resend prompts after acknowledgements.
+- Default relay list expanded with `wss://nip17.com` and `wss://nip17.tomdwyer.uk`.
+- Client identification marker was made less obvious by replacing the plaintext body tag.
+
 ## 0.0.8
 
 ### Added
