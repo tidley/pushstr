@@ -102,6 +102,16 @@ sudo cp -a mobile/build/linux/x64/release/bundle /opt/pushstr
 /opt/pushstr/pushstr
 ```
 
+To make it show up like a normal pinnable app in your desktop shell:
+```bash
+mobile/linux/install_desktop.sh mobile/build/linux/x64/release/bundle
+```
+
+If you want a system-wide install instead of the default per-user install:
+```bash
+sudo mobile/linux/install_desktop.sh mobile/build/linux/x64/release/bundle /usr/local
+```
+
 ### Browser Extension
 
 From repo root:
@@ -153,6 +163,7 @@ Linux build notes:
 - Linux startup now keeps Nostr init off the UI thread, so the app should no longer trip the desktop "Not Responding" dialog on launch.
 - If Linux still warns about notifications, make sure the app is using the current Linux notification settings path; the Android share hook is not active on Linux.
 - The Linux bundle now includes `share/applications/pushstr.desktop` and `share/icons/hicolor/1024x1024/apps/pushstr.png`. If you want a real desktop install, copy those into `~/.local/share/applications` and `~/.local/share/icons/hicolor/1024x1024/apps` or the system-wide equivalents.
+- To get the shell icon and pinning behavior, install the desktop file and icon with `mobile/linux/install_desktop.sh` after building the Linux bundle.
 
 APK build:
 ```bash
