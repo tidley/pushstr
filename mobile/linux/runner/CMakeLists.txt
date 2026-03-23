@@ -24,3 +24,19 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Copy the Rust shared library into the Linux bundle so FRB can load it.
+set(PUSHSTR_RUST_LIB_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/../../../pushstr_rust/target/debug/libpushstr_rust.so")
+set(PUSHSTR_RUST_LIB_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/../../../pushstr_rust/target/release/libpushstr_rust.so")
+if(CMAKE_BUILD_TYPE MATCHES "Debug")
+  set(PUSHSTR_RUST_LIB_SOURCE "${PUSHSTR_RUST_LIB_DEBUG}")
+else()
+  set(PUSHSTR_RUST_LIB_SOURCE "${PUSHSTR_RUST_LIB_RELEASE}")
+endif()
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bundle/lib"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${PUSHSTR_RUST_LIB_SOURCE}"
+    "${CMAKE_BINARY_DIR}/bundle/lib/libpushstr_rust.so"
+  VERBATIM
+)
