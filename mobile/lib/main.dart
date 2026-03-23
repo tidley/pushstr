@@ -27,6 +27,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'bridge_generated.dart/api.dart' as api;
 import 'bridge_generated.dart/frb_generated.dart';
 import 'notifications.dart';
+import 'profile_storage.dart';
 import 'sync/rust_sync_worker.dart';
 import 'sync/sync_controller.dart';
 
@@ -227,7 +228,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _foregroundEnabled = false;
   bool _startingForeground = false;
   bool _appVisible = true;
-  String? _mainIsolateNsec;
   final ImagePicker _imagePicker = ImagePicker();
   late final AudioRecorder _recorder;
   // StreamSubscription? _intentDataStreamSubscription;
@@ -369,22 +369,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       profileNsec = parts.isNotEmpty ? parts[0] : null;
     }
     profileNsec ??= savedNsec.isNotEmpty ? savedNsec : null;
-    final contactsKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _contactsKeyFor(profileNsec)
-        : 'contacts';
-    final messagesKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _messagesKeyFor(profileNsec)
-        : 'messages';
-    final pendingKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _pendingDmsKeyFor(profileNsec)
-        : 'pending_dms';
-    final savedContacts =
-        prefs.getStringList(contactsKey) ??
-        prefs.getStringList('contacts') ??
-        [];
-    final savedMessages =
-        prefs.getString(messagesKey) ?? prefs.getString('messages');
-    final pendingMessagesJson = prefs.getString(pendingKey);
+    final hasProfileNsec = profileNsec != null && profileNsec.isNotEmpty;
+    final contactsKey = profileScopedKey(
+      profileNsec,
+      'contacts',
+      _contactsKeyFor,
+    );
+    final messagesKey = profileScopedKey(
+      profileNsec,
+      'messages',
+      _messagesKeyFor,
+    );
+    final pendingKey = profileScopedKey(
+      profileNsec,
+      'pending_dms',
+      _pendingDmsKeyFor,
+    );
+    final savedContacts = hasProfileNsec
+        ? (prefs.getStringList(contactsKey) ?? [])
+        : (prefs.getStringList(contactsKey) ??
+            prefs.getStringList('contacts') ??
+            []);
+    final savedMessages = hasProfileNsec
+        ? prefs.getString(messagesKey)
+        : (prefs.getString(messagesKey) ?? prefs.getString('messages'));
+    final pendingMessagesJson = hasProfileNsec
+        ? prefs.getString(pendingKey)
+        : prefs.getString(pendingKey);
     List<Map<String, dynamic>> loadedMessages = [];
     List<Map<String, dynamic>> pendingMessages = [];
     if (savedMessages != null && savedMessages.isNotEmpty) {
@@ -1034,7 +1045,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       await _ensureRustInitialized();
-      await _ensureMainIsolateNostrInitialized();
       final attachment = _pendingAttachment;
       String payload = text;
       Map<String, dynamic>? localMedia;
@@ -1768,28 +1778,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } else {
       profileNsec = nsec;
     }
-    final contactsKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _contactsKeyFor(profileNsec)
-        : 'contacts';
-    final messagesKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _messagesKeyFor(profileNsec)
-        : 'messages';
-    final pendingKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _pendingDmsKeyFor(profileNsec)
-        : 'pending_dms';
-    final dmModesKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _dmModesKeyFor(profileNsec)
-        : 'dm_modes';
-    final dmOverridesKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _dmOverridesKeyFor(profileNsec)
-        : 'dm_overrides';
-    final dmGiftwrapKey = profileNsec != null && profileNsec.isNotEmpty
-        ? _dmGiftwrapKeyFor(profileNsec)
-        : 'dm_giftwrap_formats';
+    final hasProfileNsec = profileNsec != null && profileNsec.isNotEmpty;
+    final contactsKey = profileScopedKey(
+      profileNsec,
+      'contacts',
+      _contactsKeyFor,
+    );
+    final messagesKey = profileScopedKey(
+      profileNsec,
+      'messages',
+      _messagesKeyFor,
+    );
+    final pendingKey = profileScopedKey(
+      profileNsec,
+      'pending_dms',
+      _pendingDmsKeyFor,
+    );
+    final dmModesKey = profileScopedKey(profileNsec, 'dm_modes', _dmModesKeyFor);
+    final dmOverridesKey = profileScopedKey(
+      profileNsec,
+      'dm_overrides',
+      _dmOverridesKeyFor,
+    );
+    final dmGiftwrapKey = profileScopedKey(
+      profileNsec,
+      'dm_giftwrap_formats',
+      _dmGiftwrapKeyFor,
+    );
 
-    final savedContacts = prefs.getStringList(contactsKey) ?? [];
-    final savedMessages = prefs.getString(messagesKey);
-    final pendingMessagesJson = prefs.getString(pendingKey);
+    final savedContacts = hasProfileNsec
+        ? (prefs.getStringList(contactsKey) ?? [])
+        : (prefs.getStringList(contactsKey) ??
+            prefs.getStringList('contacts') ??
+            []);
+    final savedMessages = hasProfileNsec
+        ? prefs.getString(messagesKey)
+        : (prefs.getString(messagesKey) ?? prefs.getString('messages'));
+    final pendingMessagesJson = hasProfileNsec
+        ? prefs.getString(pendingKey)
+        : prefs.getString(pendingKey);
     final dmModesJson = prefs.getString(dmModesKey);
     final dmOverridesJson = prefs.getString(dmOverridesKey);
     final dmGiftwrapJson = prefs.getString(dmGiftwrapKey);
@@ -2702,6 +2729,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  String _selectedProfileNpub() {
+    if (npub != null && npub!.isNotEmpty) return npub!;
+    final secret = nsec ?? '';
+    if (secret.isEmpty) return '';
+    try {
+      final derived = api.deriveNpubs(nsecs: [secret]);
+      return derived.isNotEmpty ? derived.first : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   Future<void> _ensureRustInitialized() async {
     if (_didInitRust) return;
     try {
@@ -2716,16 +2755,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       _didInitRust = true;
     }
-  }
-
-  Future<void> _ensureMainIsolateNostrInitialized() async {
-    final currentNsec = nsec;
-    if (currentNsec == null || currentNsec.isEmpty || _mainIsolateNsec == currentNsec) {
-      return;
-    }
-    await _ensureRustInitialized();
-    api.initNostr(nsec: currentNsec);
-    _mainIsolateNsec = currentNsec;
   }
 
   void _initForegroundTask() {
@@ -3477,6 +3506,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               keyboardType: TextInputType.multiline,
                               minLines: 1,
                               maxLines: null, // allow scrolling inside the field
+                              style: TextStyle(
+                                fontWeight: Platform.isLinux
+                                    ? FontWeight.w300
+                                    : FontWeight.w400,
+                              ),
                               decoration: const InputDecoration(
                                 hintText: 'Message',
                                 filled: true,
@@ -3554,23 +3588,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         isConnected = false;
         lastError = null;
+        selectedContact = null;
+        messages = [];
+        contacts = [];
       });
     }
 
     var newNpub = cachedNpub;
     if (newNpub.isEmpty && currentNsec.isNotEmpty) {
       try {
-        newNpub = api.initNostr(nsec: currentNsec);
+        final derived = api.deriveNpubs(nsecs: [currentNsec]);
+        if (derived.isNotEmpty) {
+          newNpub = derived.first;
+        }
       } catch (_) {
         newNpub = '';
-      }
-    }
-
-    if (newNpub.isEmpty) {
-      try {
-        newNpub = api.getNpub();
-      } catch (_) {
-        // ignore
       }
     }
 
@@ -3599,9 +3631,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _showMyNpubQr() async {
     try {
-      final npubValue = (npub != null && npub!.isNotEmpty)
-          ? npub!
-          : api.getNpub();
+      final npubValue = _selectedProfileNpub();
       if (!mounted) return;
       if (npubValue.isEmpty) {
         _showThemedToast('No npub available', preferTop: true);
@@ -5322,16 +5352,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setStringList('relays', loadedRelays);
     }
 
-    var npub = '';
-    try {
-      npub = api.getNpub();
-    } catch (_) {
-      npub = '';
-    }
-    _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
-
     // Load cached npubs to avoid recomputing on every load
     final cachedNpubs = prefs.getStringList('profile_npubs_cache') ?? [];
+    final npub = cachedNpubs.length > selectedIndex && cachedNpubs[selectedIndex].isNotEmpty
+        ? cachedNpubs[selectedIndex]
+        : (loadedProfiles.isNotEmpty && selectedIndex < loadedProfiles.length
+            ? (() {
+                final nsec = loadedProfiles[selectedIndex]['nsec'] ?? '';
+                if (nsec.isEmpty) return '';
+                try {
+                  final derived = api.deriveNpubs(nsecs: [nsec]);
+                  return derived.isNotEmpty ? derived.first : '';
+                } catch (_) {
+                  return '';
+                }
+              })()
+            : '');
+    _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
 
     setState(() {
       profiles = loadedProfiles;
@@ -5994,7 +6031,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showNpubQr() async {
-    // Use cached currentNpub which reflects the selected profile
     final npubToShow = currentNpub.isNotEmpty
         ? currentNpub
         : (selectedProfileIndex < profileNpubs.length
