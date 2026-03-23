@@ -40,3 +40,7 @@ add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
     "${CMAKE_BINARY_DIR}/bundle/lib/libpushstr_rust.so"
   VERBATIM
 )
+
+install(FILES "${PUSHSTR_RUST_LIB_SOURCE}"
+  DESTINATION "lib"
+  COMPONENT Runtime)
