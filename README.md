@@ -83,6 +83,25 @@ cd mobile
 flutter build linux --release
 ```
 
+To run it:
+```bash
+cd build/linux/x64/release/bundle
+./pushstr
+```
+
+If you want a single distributable artifact, tar the bundle:
+```bash
+cd ..
+tar -czf pushstr-linux-x64-v0.1.0.tar.gz bundle
+```
+
+To run it locally:
+```bash
+sudo mkdir -p /opt/pushstr
+sudo cp -a mobile/build/linux/x64/release/bundle /opt/pushstr
+/opt/pushstr/pushstr
+```
+
 ### Browser Extension
 
 From repo root:
@@ -133,6 +152,7 @@ Linux build notes:
 - If attachments fail to decrypt, make sure both sides are on the current `k` + `nonce` attachment format.
 - Linux startup now keeps Nostr init off the UI thread, so the app should no longer trip the desktop "Not Responding" dialog on launch.
 - If Linux still warns about notifications, make sure the app is using the current Linux notification settings path; the Android share hook is not active on Linux.
+- The Linux bundle now includes `share/applications/pushstr.desktop` and `share/icons/hicolor/1024x1024/apps/pushstr.png`. If you want a real desktop install, copy those into `~/.local/share/applications` and `~/.local/share/icons/hicolor/1024x1024/apps` or the system-wide equivalents.
 
 APK build:
 ```bash

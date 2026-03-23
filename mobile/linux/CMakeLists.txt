@@ -88,6 +88,21 @@ install(CODE "
   file(REMOVE_RECURSE \"${BUILD_BUNDLE_DIR}/\")
   " COMPONENT Runtime)
 
+# Generate and install a desktop entry and icon so Linux shells can show the
+# Pushstr name and logo consistently when the app is installed.
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/pushstr.desktop.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/pushstr.desktop"
+  @ONLY
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/pushstr.desktop"
+  DESTINATION "share/applications"
+  COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/icon.png"
+  DESTINATION "share/icons/hicolor/1024x1024/apps"
+  RENAME "pushstr.png"
+  COMPONENT Runtime)
+
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
