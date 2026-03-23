@@ -146,6 +146,18 @@ void main() async {
     externalLibrary = ExternalLibrary.open(
       'Frameworks/pushstr_rust.framework/pushstr_rust',
     );
+  } else if (Platform.isLinux) {
+    final exeDir = File(Platform.resolvedExecutable).parent;
+    final bundleLib = File('${exeDir.path}/lib/libpushstr_rust.so');
+    final sourceDebug = File('../pushstr_rust/target/debug/libpushstr_rust.so');
+    final sourceRelease =
+        File('../pushstr_rust/target/release/libpushstr_rust.so');
+    final candidate = bundleLib.existsSync()
+        ? bundleLib
+        : (sourceDebug.existsSync()
+              ? sourceDebug
+              : (sourceRelease.existsSync() ? sourceRelease : bundleLib));
+    externalLibrary = ExternalLibrary.open(candidate.path);
   }
   await RustLib.init(externalLibrary: externalLibrary);
   if (Platform.isAndroid) {
