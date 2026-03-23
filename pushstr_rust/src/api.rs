@@ -637,12 +637,16 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
 const RELAYS: &[&str] = &[
     "wss://relay.damus.io",
     "wss://relay.primal.net",
+    "wss://nip17.com",
+    "wss://nip17.tomdwyer.uk",
     "wss://nos.lol",
     "wss://nostr.mom",
     "wss://relay.nostr.band",
 ];
 const DM_RELAYS: &[&str] = &[
     "wss://nos.lol",
+    "wss://nip17.com",
+    "wss://nip17.tomdwyer.uk",
     "wss://auth.nostr1.com",
     "wss://relay.0xchat.com",
 ];

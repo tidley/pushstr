@@ -59,6 +59,8 @@ let activeRelays = [];
 const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
   "wss://relay.primal.net",
+  "wss://nip17.com",
+  "wss://nip17.tomdwyer.uk",
   "wss://nos.lol",
   "wss://nostr.mom",
   "wss://relay.nostr.band",
