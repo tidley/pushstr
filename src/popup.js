@@ -1463,10 +1463,10 @@ async function showQrDialog() {
   copyBtn.textContent = 'Copy';
   copyBtn.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(uri);
+      await navigator.clipboard.writeText(npub);
       flashCopyButton(copyBtn);
     } catch (err) {
-      prompt('nostr:', uri);
+      prompt('npub:', npub);
     }
   });
   wrapper.appendChild(canvas);
@@ -1521,14 +1521,14 @@ async function showEditContactDialog(contact) {
     <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
       <label style="font-size:12px;color:#9ca3af;">Nickname</label>
       <input type="text" id="ec_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
-      <label style="font-size:12px;color:#9ca3af;">Pubkey</label>
+      <label style="font-size:12px;color:#9ca3af;">nPub</label>
       <input type="text" id="ec_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#9ca3af;" disabled>
     </div>
   `;
   const nickInput = wrapper.querySelector('#ec_nick');
   const pubInput = wrapper.querySelector('#ec_pub');
   if (nickInput) nickInput.value = contact.nickname || '';
-  if (pubInput) pubInput.value = contact.id || '';
+  if (pubInput) pubInput.value = toNpub(contact.id || '');
 
   const result = await showModal('Edit Contact', wrapper);
   if (!result) return;
