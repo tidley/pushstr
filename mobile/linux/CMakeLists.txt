@@ -95,12 +95,24 @@ configure_file(
   "${CMAKE_CURRENT_BINARY_DIR}/pushstr.desktop"
   @ONLY
 )
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/pushstr.desktop.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/${APPLICATION_ID}.desktop"
+  @ONLY
+)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/pushstr.desktop"
+  DESTINATION "share/applications"
+  COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${APPLICATION_ID}.desktop"
   DESTINATION "share/applications"
   COMPONENT Runtime)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/icon.png"
   DESTINATION "share/icons/hicolor/1024x1024/apps"
   RENAME "pushstr.png"
+  COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/icon.png"
+  DESTINATION "share/icons/hicolor/1024x1024/apps"
+  RENAME "${APPLICATION_ID}.png"
   COMPONENT Runtime)
 
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")

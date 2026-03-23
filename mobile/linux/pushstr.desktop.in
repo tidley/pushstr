@@ -7,4 +7,4 @@ Exec=@BINARY_NAME@
 Icon=pushstr
 Terminal=false
 Categories=Network;InstantMessaging;
-StartupWMClass=@APPLICATION_ID@
+StartupWMClass=pushstr

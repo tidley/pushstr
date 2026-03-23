@@ -19,8 +19,12 @@ install -d "$prefix/share/icons/hicolor/1024x1024/apps"
 
 install -m 0644 "$bundle_dir/share/applications/pushstr.desktop" \
   "$prefix/share/applications/pushstr.desktop"
+install -m 0644 "$bundle_dir/share/applications/com.pushstr.pushstr.desktop" \
+  "$prefix/share/applications/com.pushstr.pushstr.desktop"
 install -m 0644 "$bundle_dir/share/icons/hicolor/1024x1024/apps/pushstr.png" \
   "$prefix/share/icons/hicolor/1024x1024/apps/pushstr.png"
+install -m 0644 "$bundle_dir/share/icons/hicolor/1024x1024/apps/com.pushstr.pushstr.png" \
+  "$prefix/share/icons/hicolor/1024x1024/apps/com.pushstr.pushstr.png"
 
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$prefix/share/applications" >/dev/null 2>&1 || true
