@@ -227,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _foregroundEnabled = false;
   bool _startingForeground = false;
   bool _appVisible = true;
+  String? _mainIsolateNsec;
   final ImagePicker _imagePicker = ImagePicker();
   late final AudioRecorder _recorder;
   // StreamSubscription? _intentDataStreamSubscription;
@@ -242,8 +243,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _holdMillis = 4000;
   static const String _pushstrMediaStart = '[pushstr:media]';
   static const String _pushstrMediaEnd = '[/pushstr:media]';
-  static const Duration _relayResendDelay = Duration(seconds: 30);
-  static const int _relayResendMaxAttempts = 1;
   OverlayEntry? _toastEntry;
   Timer? _toastTimer;
 
@@ -440,6 +439,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         npub = initResult['npub'];
         isConnected = true;
       });
+      await _ensureMainIsolateNostrInitialized();
       unawaited(
         _loadLocalProfileData(profileIndex: profileIndex, overrideLoaded: true),
       );
@@ -661,6 +661,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (raw is double) return raw.round();
     if (raw is String) return int.tryParse(raw);
     return null;
+  }
+
+  bool _messageHasReadReceipt(Map<String, dynamic> message) {
+    return message['read_at'] != null || message['read'] == true;
   }
 
   void _requestMissingMessages(String contact) {
@@ -1026,6 +1030,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       await _ensureRustInitialized();
+      await _ensureMainIsolateNostrInitialized();
       final attachment = _pendingAttachment;
       String payload = text;
       Map<String, dynamic>? localMedia;
@@ -1231,6 +1236,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       return;
     }
+    if (_messageHasReadReceipt(message)) {
+      setState(() {
+        lastError = 'Message already read; resend is disabled.';
+      });
+      return;
+    }
     final recipient = message['to']?.toString() ?? selectedContact;
     if (recipient == null || recipient.isEmpty) {
       setState(() {
@@ -1297,41 +1308,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         lastError = 'Resend failed: $e';
       });
-    }
-  }
-
-  Future<void> _silentResendMessage(Map<String, dynamic> message) async {
-    if (nsec == null || nsec!.isEmpty) return;
-    final recipient = message['to']?.toString() ?? '';
-    if (recipient.isEmpty) return;
-    final currentId = message['id']?.toString() ?? '';
-    if (currentId.isEmpty) return;
-
-    try {
-      final built = _buildResendPayload(message);
-      final payload = built['payload'] as String;
-      final dmKind = (message['dm_kind'] ?? 'nip59').toString();
-      final useLegacyDm = dmKind == 'nip04';
-      String? eventId;
-      if (useLegacyDm) {
-        eventId = await RustSyncWorker.sendLegacyDm(
-          recipient: recipient,
-          message: payload,
-          nsec: nsec!,
-        );
-      } else {
-        eventId = await RustSyncWorker.sendGiftDm(
-          recipient: recipient,
-          content: payload,
-          nsec: nsec!,
-          useNip44: true,
-        );
-      }
-      if (eventId != null && eventId.isNotEmpty) {
-        _replaceLocalMessageId(currentId, eventId);
-      }
-    } catch (_) {
-      // silent retry
     }
   }
 
@@ -1405,15 +1381,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () async {
-              final scanned = await _scanQrRaw();
-              if (scanned != null && scanned.isNotEmpty) {
-                pubkeyCtrl.text = scanned;
-              }
-            },
-            child: const Text('Scan QR'),
-          ),
+          if (!Platform.isLinux)
+            TextButton(
+              onPressed: () async {
+                final scanned = await _scanQrRaw();
+                if (scanned != null && scanned.isNotEmpty) {
+                  pubkeyCtrl.text = scanned;
+                }
+              },
+              child: const Text('Scan QR'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
@@ -1996,13 +1973,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ..addAll(remaining);
   }
 
-  Map<String, dynamic>? _findMessageById(String id) {
-    for (final message in messages) {
-      if (message['id'] == id) return message;
-    }
-    return null;
-  }
-
   void _cancelRelayResend(String messageId) {
     _relayResendTimers.remove(messageId)?.cancel();
     _relayResendAttempts.remove(messageId);
@@ -2020,35 +1990,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       message['relay_seen_at'] = now;
       _cancelRelayResend(id);
     }
-  }
-
-  void _scheduleRelayResend(String messageId) {
-    final message = _findMessageById(messageId);
-    if (message == null) return;
-    if (message['direction'] != 'out') return;
-    if (message['relay_seen'] == true) return;
-    final attempts = _relayResendAttempts[messageId] ?? 0;
-    if (attempts >= _relayResendMaxAttempts) return;
-    _relayResendTimers[messageId]?.cancel();
-    _relayResendTimers[messageId] = Timer(_relayResendDelay, () async {
-      if (!mounted) return;
-      final current = _findMessageById(messageId);
-      if (current == null) {
-        _cancelRelayResend(messageId);
-        return;
-      }
-      if (current['relay_seen'] == true) {
-        _cancelRelayResend(messageId);
-        return;
-      }
-      final attempts = _relayResendAttempts[messageId] ?? 0;
-      if (attempts >= _relayResendMaxAttempts) {
-        _cancelRelayResend(messageId);
-        return;
-      }
-      _relayResendAttempts[messageId] = attempts + 1;
-      await _silentResendMessage(current);
-    });
   }
 
   void _replaceLocalMessageId(String localId, String eventId) {
@@ -2075,7 +2016,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       unawaited(_saveMessages());
     }
-    _scheduleRelayResend(eventId);
+    // Automatic relay resend is disabled for now to avoid duplicate sends.
   }
 
   Future<void> _maybeSendReadReceipt(Map<String, dynamic> message) async {
@@ -2760,6 +2701,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _ensureMainIsolateNostrInitialized() async {
+    final currentNsec = nsec;
+    if (currentNsec == null || currentNsec.isEmpty || _mainIsolateNsec == currentNsec) {
+      return;
+    }
+    await _ensureRustInitialized();
+    api.initNostr(nsec: currentNsec);
+    _mainIsolateNsec = currentNsec;
+  }
+
   void _initForegroundTask() {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
@@ -3122,7 +3073,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);
         final readReceiptBadge = _buildReadReceiptBadge(m);
-        final resendBtn = isOut
+        final hasReadReceipt = _messageHasReadReceipt(m);
+        final resendBtn = isOut && !hasReadReceipt
             ? IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
                 tooltip: 'Resend',
@@ -3459,46 +3411,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             children: [
               ValueListenableBuilder<TextEditingValue>(
-              valueListenable: messageCtrl,
-              builder: (context, value, _) {
-                final hasContent =
-                    value.text.trim().isNotEmpty ||
-                    _pendingAttachment != null;
-                final noContacts = contacts.isEmpty;
-                final canSend = selectedContact != null && !noContacts;
-                final isLinuxDesktop = Platform.isLinux;
-                return Row(
-                  children: [
+                valueListenable: messageCtrl,
+                builder: (context, value, _) {
+                  final hasContent =
+                      value.text.trim().isNotEmpty ||
+                      _pendingAttachment != null;
+                  final noContacts = contacts.isEmpty;
+                  final canSend = selectedContact != null && !noContacts;
+                  return Row(
+                    children: [
                       Expanded(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxHeight: 180),
-                          child: TextField(
-                            controller: messageCtrl,
-                            focusNode: _messageFocus,
-                            keyboardType: isLinuxDesktop
-                                ? TextInputType.text
-                                : TextInputType.multiline,
-                            textInputAction: isLinuxDesktop
-                                ? TextInputAction.send
-                                : TextInputAction.newline,
-                            onSubmitted: isLinuxDesktop
-                                ? (_) {
-                                    if (canSend) {
+                          child: Focus(
+                            onKeyEvent: Platform.isLinux
+                                ? (node, event) {
+                                    if (event is KeyDownEvent &&
+                                        event.logicalKey ==
+                                            LogicalKeyboardKey.enter &&
+                                        !HardwareKeyboard.instance.isShiftPressed &&
+                                        canSend) {
                                       unawaited(_sendMessage());
+                                      return KeyEventResult.handled;
                                     }
+                                    return KeyEventResult.ignored;
                                   }
                                 : null,
-                            minLines: 1,
-                            maxLines: isLinuxDesktop
-                                ? 1
-                                : null, // allow scrolling inside the field
-                            decoration: const InputDecoration(
-                              hintText: 'Message',
-                              filled: true,
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
+                            child: TextField(
+                              controller: messageCtrl,
+                              focusNode: _messageFocus,
+                              keyboardType: TextInputType.multiline,
+                              minLines: 1,
+                              maxLines: null, // allow scrolling inside the field
+                              decoration: const InputDecoration(
+                                hintText: 'Message',
+                                filled: true,
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
                               ),
                             ),
                           ),
@@ -3599,6 +3551,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         isConnected = true;
       }
     });
+    await _ensureMainIsolateNostrInitialized();
 
     if (didProfileChange) {
       await _loadLocalProfileData(
