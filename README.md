@@ -45,6 +45,44 @@ Private, relay-backed messaging over Nostr. Pushstr ships as a browser extension
 
 ## Build and Run
 
+### One-shot Full Rebuild
+
+From the repo root:
+```bash
+flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
+
+cd pushstr_rust
+cargo build
+cargo ndk -t arm64-v8a -t armeabi-v7a -o ../mobile/android/app/src/main/jniLibs build --release
+
+cd ..
+npm install
+cd wasm_crypto
+wasm-pack build --release --target web --out-dir ../src --out-name wasm_crypto
+npm run patch:wasm
+
+# Firefox (MV2)
+npm run package
+
+cd ..
+cd mobile
+flutter pub get
+```
+
+If you are also working on Linux desktop:
+```bash
+flutter run -d linux
+```
+
+If you want a release Linux build later:
+```bash
+cd pushstr_rust
+cargo build --release
+cd ..
+cd mobile
+flutter build linux --release
+```
+
 ### Browser Extension
 
 From repo root:
@@ -88,8 +126,6 @@ cd mobile
 flutter pub get
 # Mobile
 flutter run
-# Linux
-flutter run -d linux
 ```
 
 Linux build notes:

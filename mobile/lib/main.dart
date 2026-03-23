@@ -1499,6 +1499,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _scanContactQr() async {
+    if (Platform.isLinux) {
+      if (mounted) {
+        _showThemedToast('QR scanning is disabled on Linux', preferTop: true);
+      }
+      return;
+    }
     final scanned = await _scanQrRaw();
     if (scanned == null || scanned.trim().isEmpty) return;
     final inputRaw = scanned.trim();
@@ -1578,6 +1584,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<String?> _scanQrRaw() async {
+    if (Platform.isLinux) return null;
     final granted = await _ensureCameraPermission();
     if (!granted) {
       if (mounted) {
@@ -2880,16 +2887,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Scan QR'),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _scanContactQr();
-                      },
+                  if (!Platform.isLinux)
+                    Expanded(
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scan QR'),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _scanContactQr();
+                        },
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
