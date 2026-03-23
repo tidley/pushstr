@@ -1025,6 +1025,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     try {
+      await _ensureRustInitialized();
       final attachment = _pendingAttachment;
       String payload = text;
       Map<String, dynamic>? localMedia;
@@ -2633,6 +2634,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _showThemedToast('Select a contact first', preferTop: true);
       return;
     }
+    if (Platform.isLinux) {
+      await _attachFile();
+      return;
+    }
     await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.grey.shade900,
@@ -2650,33 +2655,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             childAspectRatio: 1.05,
             physics: const NeverScrollableScrollPhysics(),
             children: [
-              _buildAttachOption(
-                icon: Icons.photo_camera,
-                label: 'Camera',
-                color: Colors.redAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _attachImageFromCamera();
-                },
-              ),
-              _buildAttachOption(
-                icon: Icons.videocam,
-                label: 'Video Cam',
-                color: Colors.redAccent,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _attachVideo(ImageSource.camera);
-                },
-              ),
-              _buildAttachOption(
-                icon: Icons.mic,
-                label: 'Record',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showRecordAudioSheet();
-                },
-                color: Colors.redAccent,
-              ),
+              if (!Platform.isLinux)
+                _buildAttachOption(
+                  icon: Icons.photo_camera,
+                  label: 'Camera',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _attachImageFromCamera();
+                  },
+                ),
+              if (!Platform.isLinux)
+                _buildAttachOption(
+                  icon: Icons.videocam,
+                  label: 'Video Cam',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _attachVideo(ImageSource.camera);
+                  },
+                ),
+              if (!Platform.isLinux)
+                _buildAttachOption(
+                  icon: Icons.mic,
+                  label: 'Record',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showRecordAudioSheet();
+                  },
+                  color: Colors.redAccent,
+                ),
               _buildAttachOption(
                 icon: Icons.photo_library,
                 label: 'Gallery',
@@ -3451,24 +3459,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             children: [
               ValueListenableBuilder<TextEditingValue>(
-                valueListenable: messageCtrl,
-                builder: (context, value, _) {
-                  final hasContent =
-                      value.text.trim().isNotEmpty ||
-                      _pendingAttachment != null;
-                  final noContacts = contacts.isEmpty;
-                  final canSend = selectedContact != null && !noContacts;
-                  return Row(
-                    children: [
+              valueListenable: messageCtrl,
+              builder: (context, value, _) {
+                final hasContent =
+                    value.text.trim().isNotEmpty ||
+                    _pendingAttachment != null;
+                final noContacts = contacts.isEmpty;
+                final canSend = selectedContact != null && !noContacts;
+                final isLinuxDesktop = Platform.isLinux;
+                return Row(
+                  children: [
                       Expanded(
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxHeight: 180),
                           child: TextField(
                             controller: messageCtrl,
                             focusNode: _messageFocus,
-                            keyboardType: TextInputType.multiline,
+                            keyboardType: isLinuxDesktop
+                                ? TextInputType.text
+                                : TextInputType.multiline,
+                            textInputAction: isLinuxDesktop
+                                ? TextInputAction.send
+                                : TextInputAction.newline,
+                            onSubmitted: isLinuxDesktop
+                                ? (_) {
+                                    if (canSend) {
+                                      unawaited(_sendMessage());
+                                    }
+                                  }
+                                : null,
                             minLines: 1,
-                            maxLines: null, // allow scrolling inside the field
+                            maxLines: isLinuxDesktop
+                                ? 1
+                                : null, // allow scrolling inside the field
                             decoration: const InputDecoration(
                               hintText: 'Message',
                               filled: true,

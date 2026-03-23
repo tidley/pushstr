@@ -1,9 +1,9 @@
-name: pushstr_mobile
+name: pushstr
 description: 'Pushstr mobile app - Nostr Giftwrapped DMs and data sharing'
 
 publish_to: 'none'
 
-version: 0.0.7
+version: 0.2.0
 
 environment:
   sdk: ^3.10.1
