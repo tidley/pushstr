@@ -8856,6 +8856,7 @@ var importProfileBtn = document.getElementById("importProfile");
 var relayInput = document.getElementById("relayInput");
 var relayError = document.getElementById("relayError");
 var relayList = document.getElementById("relayList");
+var publishRelaysBtn = document.getElementById("publishRelays");
 var contactPub = document.getElementById("contactPub");
 var contactNick = document.getElementById("contactNick");
 var contactError = document.getElementById("contactError");
@@ -8906,6 +8907,7 @@ document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
 document.getElementById("addContact").addEventListener("click", addContactFromForm);
 document.getElementById("addRelay").addEventListener("click", addRelayFromInput);
+publishRelaysBtn?.addEventListener("click", publishRelayList);
 keySelect.addEventListener("change", async () => {
   const nsec = keySelect.value;
   if (nsec)
@@ -9034,6 +9036,40 @@ async function save() {
     saveBtn.textContent = "Save";
     saveBtn.disabled = false;
     setDirty(true);
+  }
+}
+async function publishRelayList() {
+  const btn = publishRelaysBtn;
+  if (!btn)
+    return;
+  const relays = readRelays();
+  if (!relays.length) {
+    relayError.textContent = "Add at least one relay before publishing";
+    return;
+  }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Publishing...";
+  relayError.textContent = "";
+  try {
+    const res = await safeSend({
+      type: "publish-relay-list",
+      relays
+    });
+    if (res?.ok) {
+      btn.textContent = "Published";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 2e3);
+      return;
+    }
+    throw new Error(res?.error || "publish failed");
+  } catch (err) {
+    console.error("[pushstr][options] publish-relay-list failed", err);
+    relayError.textContent = err?.message || "publish failed";
+    btn.textContent = original;
+    btn.disabled = false;
   }
 }
 async function cancelChanges() {

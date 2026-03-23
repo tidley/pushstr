@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `enqueue_send`, `ensure_recipient_dm_relays`, `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `is_read_receipt_content`, `next_send_seq`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `normalize_message_content`, `parse_pubkey`, `parse_read_receipt_id`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `send_dm_direct`, `send_gift_dm_direct`, `seq_from_event_tags`, `seq_from_tag_list`, `sha256_hex`, `start_send_worker`, `strip_pushstr_client_tag`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
+// These functions are ignored because they are not marked as `pub`: `enqueue_send`, `ensure_recipient_dm_relays`, `event_has_pushstr_client_tag`, `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `is_read_receipt_content`, `next_send_seq`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `normalize_message_content`, `normalize_relay_list`, `parse_pubkey`, `parse_read_receipt_id`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `send_dm_direct`, `send_gift_dm_direct`, `seq_from_event_tags`, `seq_from_tag_list`, `sha256_hex`, `start_send_worker`, `strip_pushstr_client_tag`, `tag_list_has_pushstr_client_tag`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Nip44MessageKeys`, `RumorData`, `SendKind`, `SendRequest`, `UnwrappedGift`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
@@ -83,8 +83,10 @@ MediaDescriptor encryptMedia({
 MediaDescriptor uploadMediaUnencrypted({required List<int> bytes, required String mime, String? filename}) =>
     RustLib.instance.api.crateApiUploadMediaUnencrypted(bytes: bytes, mime: mime, filename: filename);
 
-/// Decrypt media descriptor to raw bytes using provided or current key
-/// sender_pubkey: hex or npub of the message sender (for deriving shared secret)
+/// Decrypt media descriptor to raw bytes.
+///
+/// Clean-break format: the descriptor contains the symmetric key + nonce, so no Nostr keys
+/// (and no sender pubkey) are required for decryption.
 Uint8List decryptMedia({required String descriptorJson, required String senderPubkey, String? myNsec}) => RustLib
     .instance
     .api
@@ -95,12 +97,18 @@ void clearReturnedEventsCache() => RustLib.instance.api.crateApiClearReturnedEve
 
 class MediaDescriptor {
   final String url;
+
+  /// Base64-encoded 32-byte symmetric key.
   final String k;
+
+  /// Base64-encoded 24-byte XChaCha20-Poly1305 nonce.
   final String nonce;
   final String sha256;
   final String cipherSha256;
   final String mime;
   final BigInt size;
+
+  /// "xchacha20poly1305" | "none"
   final String encryption;
   final String? filename;
 

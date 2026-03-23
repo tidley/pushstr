@@ -60,7 +60,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1183898731;
+  int get rustContentHash => -1217561698;
 
   static const kDefaultExternalLibraryLoaderConfig = ExternalLibraryLoaderConfig(
     stem: 'pushstr_rust',
@@ -87,8 +87,6 @@ abstract class RustLibApi extends BaseApi {
 
   String crateApiGenerateNewKey();
 
-  String crateApiPublishRelayList({required List<String> relays});
-
   String crateApiGetNpub();
 
   String crateApiGetNsec();
@@ -98,6 +96,8 @@ abstract class RustLibApi extends BaseApi {
   String crateApiInitNostr({required String nsec});
 
   String crateApiNpubToHex({required String npub});
+
+  String crateApiPublishRelayList({required List<String> relays});
 
   String crateApiSendDm({required String recipient, required String message});
 
@@ -255,26 +255,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "generate_new_key", argNames: []);
 
   @override
-  String crateApiPublishRelayList({required List<String> relays}) {
-    return handler.executeSync(
-      SyncTask(
-        callFfi: () {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_list_String(relays, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19)!;
-        },
-        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
-        constMeta: kCrateApiPublishRelayListConstMeta,
-        argValues: [relays],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiPublishRelayListConstMeta =>
-      const TaskConstMeta(debugName: "publish_relay_list", argNames: ["relays"]);
-
-  @override
   String crateApiGetNpub() {
     return handler.executeSync(
       SyncTask(
@@ -368,6 +348,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiNpubToHexConstMeta => const TaskConstMeta(debugName: "npub_to_hex", argNames: ["npub"]);
 
   @override
+  String crateApiPublishRelayList({required List<String> relays}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_String(relays, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiPublishRelayListConstMeta,
+        argValues: [relays],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPublishRelayListConstMeta =>
+      const TaskConstMeta(debugName: "publish_relay_list", argNames: ["relays"]);
+
+  @override
   String crateApiSendDm({required String recipient, required String message}) {
     return handler.executeSync(
       SyncTask(
@@ -375,7 +375,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(recipient, serializer);
           sse_encode_String(message, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiSendDmConstMeta,
@@ -397,7 +397,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(recipient, serializer);
           sse_encode_String(content, serializer);
           sse_encode_bool(useNip44, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiSendGiftDmConstMeta,
@@ -418,7 +418,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(recipient, serializer);
           sse_encode_String(content, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiSendLegacyGiftDmConstMeta,
@@ -439,7 +439,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(giftJson, serializer);
           sse_encode_opt_String(myNsec, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiUnwrapGiftConstMeta,
@@ -461,7 +461,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_list_prim_u_8_loose(bytes, serializer);
           sse_encode_String(mime, serializer);
           sse_encode_opt_String(filename, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_media_descriptor, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiUploadMediaUnencryptedConstMeta,
@@ -481,7 +481,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_u_64(timeoutSecs, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 18)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiWaitForNewDmsConstMeta,
@@ -503,7 +503,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(innerJson, serializer);
           sse_encode_String(recipient, serializer);
           sse_encode_bool(useNip44, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 18)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19)!;
         },
         codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
         constMeta: kCrateApiWrapGiftConstMeta,
