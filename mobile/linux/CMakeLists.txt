@@ -60,6 +60,22 @@ add_subdirectory("runner")
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
+# Copy the Rust shared library into the bundle so the Flutter app can load it on Linux.
+set(PUSHSTR_RUST_LIB_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/../../pushstr_rust/target/debug/libpushstr_rust.so")
+set(PUSHSTR_RUST_LIB_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/../../pushstr_rust/target/release/libpushstr_rust.so")
+if(CMAKE_BUILD_TYPE MATCHES "Debug")
+  set(PUSHSTR_RUST_LIB_SOURCE "${PUSHSTR_RUST_LIB_DEBUG}")
+else()
+  set(PUSHSTR_RUST_LIB_SOURCE "${PUSHSTR_RUST_LIB_RELEASE}")
+endif()
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bundle/lib"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${PUSHSTR_RUST_LIB_SOURCE}"
+    "${CMAKE_BINARY_DIR}/bundle/lib/libpushstr_rust.so"
+  VERBATIM
+)
+
 # Only the install-generated bundle's copy of the executable will launch
 # correctly, since the resources must in the right relative locations. To avoid
 # people trying to run the unbundled copy, put it in a subdirectory instead of
