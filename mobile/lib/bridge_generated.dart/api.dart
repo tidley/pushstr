@@ -24,6 +24,10 @@ String getNsec() => RustLib.instance.api.crateApiGetNsec();
 /// Generate a new keypair and return nsec
 String generateNewKey() => RustLib.instance.api.crateApiGenerateNewKey();
 
+/// Publish the active profile relay list as a NIP-65 kind 10002 event.
+String publishRelayList({required List<String> relays}) =>
+    RustLib.instance.api.crateApiPublishRelayList(relays: relays);
+
 /// Send a giftwrapped DM (kind 1059 wrapping kind 4) using nip44 by default
 String sendGiftDm({required String recipient, required String content, required bool useNip44}) =>
     RustLib.instance.api.crateApiSendGiftDm(recipient: recipient, content: content, useNip44: useNip44);
@@ -91,7 +95,8 @@ void clearReturnedEventsCache() => RustLib.instance.api.crateApiClearReturnedEve
 
 class MediaDescriptor {
   final String url;
-  final String iv;
+  final String k;
+  final String nonce;
   final String sha256;
   final String cipherSha256;
   final String mime;
@@ -101,7 +106,8 @@ class MediaDescriptor {
 
   const MediaDescriptor({
     required this.url,
-    required this.iv,
+    required this.k,
+    required this.nonce,
     required this.sha256,
     required this.cipherSha256,
     required this.mime,
@@ -113,7 +119,8 @@ class MediaDescriptor {
   @override
   int get hashCode =>
       url.hashCode ^
-      iv.hashCode ^
+      k.hashCode ^
+      nonce.hashCode ^
       sha256.hashCode ^
       cipherSha256.hashCode ^
       mime.hashCode ^
@@ -127,7 +134,8 @@ class MediaDescriptor {
       other is MediaDescriptor &&
           runtimeType == other.runtimeType &&
           url == other.url &&
-          iv == other.iv &&
+          k == other.k &&
+          nonce == other.nonce &&
           sha256 == other.sha256 &&
           cipherSha256 == other.cipherSha256 &&
           mime == other.mime &&

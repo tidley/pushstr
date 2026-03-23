@@ -116,11 +116,15 @@ async fn enqueue_send(kind: SendKind) -> Result<String> {
 #[frb(non_opaque)]
 pub struct MediaDescriptor {
     pub url: String,
-    pub iv: String,
+    /// Base64-encoded 32-byte symmetric key.
+    pub k: String,
+    /// Base64-encoded 24-byte XChaCha20-Poly1305 nonce.
+    pub nonce: String,
     pub sha256: String,
     pub cipher_sha256: String,
     pub mime: String,
     pub size: usize,
+    /// "xchacha20poly1305" | "none"
     pub encryption: String,
     pub filename: Option<String>,
 }
@@ -301,6 +305,21 @@ async fn ensure_recipient_dm_relays(client: &Client, recipient_pk: &PublicKey) -
         eprintln!("[dm] no recipient relay list found");
     }
     Ok(())
+}
+
+fn normalize_relay_list(relays: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for relay in relays {
+        let trimmed = relay.trim();
+        if !(trimmed.starts_with("ws://") || trimmed.starts_with("wss://")) {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            out.push(trimmed.to_string());
+        }
+    }
+    out
 }
 
 // Helper function to derive NIP-44 conversation key
@@ -729,6 +748,59 @@ pub fn get_nsec() -> Result<String> {
 pub fn generate_new_key() -> Result<String> {
     let keys = Keys::generate();
     Ok(keys.secret_key().to_bech32()?)
+}
+
+/// Publish the active profile relay list as a NIP-65 kind 10002 event.
+#[frb(sync)]
+pub fn publish_relay_list(relays: Vec<String>) -> Result<String> {
+    run_block_on(async {
+        let (client, keys) = get_client_and_keys().await?;
+        let relay_list = normalize_relay_list(relays);
+        if relay_list.is_empty() {
+            anyhow::bail!("no relays available");
+        }
+
+        for relay in &relay_list {
+            let _ = client.add_relay(relay.clone()).await;
+        }
+        client.connect().await;
+
+        let mut builder = EventBuilder::new(Kind::Custom(10002), "");
+        for relay in &relay_list {
+            builder = builder.tag(Tag::custom(TagKind::Custom("r".into()), vec![relay.clone()]));
+        }
+        let event = builder.sign_with_keys(&keys)?;
+        let event_id = event.id.to_hex();
+        eprintln!("[relay-list] Publishing kind 10002 id={}", event_id);
+
+        let mut last_err = None;
+        for attempt in 1..=PUBLISH_RETRY_ATTEMPTS {
+            match client.send_event(&event).await {
+                Ok(_) => {
+                    eprintln!("[relay-list] Published kind 10002 id={}", event_id);
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    eprintln!(
+                        "[relay-list] Publish failed id={} attempt={} err={}",
+                        event_id,
+                        attempt,
+                        last_err.as_ref().unwrap()
+                    );
+                    if attempt < PUBLISH_RETRY_ATTEMPTS {
+                        let delay_ms = PUBLISH_RETRY_BASE_MS * (1u64 << (attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            return Err(err.into());
+        }
+        Ok(event_id)
+    })
 }
 
 async fn send_gift_dm_direct(
@@ -1320,53 +1392,47 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
 #[frb(sync)]
 pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: Option<String>) -> Result<MediaDescriptor> {
     eprintln!("[encrypt_media] Starting encryption for {} bytes", bytes.len());
-    let recipient_pk = parse_pubkey(&recipient)
-        .context(format!("Failed to parse recipient: {}", recipient))?;
-    eprintln!("[encrypt_media] Parsed recipient pubkey");
+    // recipient is kept for API symmetry with DM sending, but file encryption uses a random per-file key.
+    let _ = recipient;
 
-    // Get current keys for conversation key derivation
+    // Get current keys for Blossom auth event signing.
     let keys = run_block_on(async {
         let keys_lock = NOSTR_KEYS.lock().await;
         Ok::<Keys, anyhow::Error>(keys_lock.as_ref().context("Not initialized")?.clone())
     })?;
-    eprintln!("[encrypt_media] Got current keys");
 
-    // Derive shared secret using NIP-44's conversation key (32 bytes)
-    let key_bytes = get_nip44_conversation_key(keys.secret_key(), &recipient_pk)
-        .context("Failed to derive conversation key")?;
-    eprintln!("[encrypt_media] Derived conversation key (len: {})", key_bytes.len());
+    // Generate random 32-byte key and 24-byte nonce for XChaCha20-Poly1305
+    let mut key = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key);
+    let mut nonce = [0u8; 24];
+    rand::thread_rng().fill_bytes(&mut nonce);
 
-    // Generate random 12-byte IV for AES-GCM
-    let mut iv = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut iv);
-    eprintln!("[encrypt_media] Generated IV");
+    // Encrypt with XChaCha20-Poly1305
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 
-    // Encrypt with AES-GCM (no size limit)
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to create cipher: {}", e))?;
-    let nonce = Nonce::from_slice(&iv);
-    let ciphertext = cipher.encrypt(nonce, bytes.as_ref())
-        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
-    eprintln!("[encrypt_media] Encrypted: {} bytes", ciphertext.len());
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+    let ciphertext = cipher
+        .encrypt(XNonce::from_slice(&nonce), bytes.as_ref())
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {e:?}"))?;
 
     // Hash plaintext and ciphertext
     let plain_hash = sha256_hex(&bytes)?;
     let cipher_hash = sha256_hex(&ciphertext)?;
-    eprintln!("[encrypt_media] Hashed plain and cipher");
 
-    // Upload to Blossom
+    // Upload ciphertext to Blossom
     let url = upload_to_blossom(&ciphertext, &cipher_hash, &keys)
         .context("Failed to upload to Blossom")?;
-    eprintln!("[encrypt_media] Uploaded to: {}", url);
 
     Ok(MediaDescriptor {
         url,
-        iv: general_purpose::STANDARD.encode(&iv),
+        k: general_purpose::STANDARD.encode(&key),
+        nonce: general_purpose::STANDARD.encode(&nonce),
         sha256: plain_hash,
         cipher_sha256: cipher_hash,
         mime,
         size: bytes.len(),
-        encryption: "aes-gcm".to_string(),
+        encryption: "xchacha20poly1305".to_string(),
         filename,
     })
 }
@@ -1389,7 +1455,8 @@ pub fn upload_media_unencrypted(bytes: Vec<u8>, mime: String, filename: Option<S
 
     Ok(MediaDescriptor {
         url,
-        iv: String::new(),
+        k: String::new(),
+        nonce: String::new(),
         sha256: plain_hash,
         cipher_sha256: String::new(),
         mime,
@@ -1457,23 +1524,19 @@ fn upload_to_blossom(data: &[u8], hash: &str, keys: &Keys) -> Result<String> {
     }
 }
 
-/// Decrypt media descriptor to raw bytes using provided or current key
-/// sender_pubkey: hex or npub of the message sender (for deriving shared secret)
+/// Decrypt media descriptor to raw bytes.
+///
+/// Clean-break format: the descriptor contains the symmetric key + nonce, so no Nostr keys
+/// (and no sender pubkey) are required for decryption.
 #[frb(sync)]
-pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Option<String>) -> Result<Vec<u8>> {
+pub fn decrypt_media(
+    descriptor_json: String,
+    sender_pubkey: String,
+    my_nsec: Option<String>,
+) -> Result<Vec<u8>> {
+    let _ = sender_pubkey;
+    let _ = my_nsec;
     let descriptor: MediaDescriptor = serde_json::from_str(&descriptor_json)?;
-    let keys = if let Some(nsec) = my_nsec {
-        Keys::parse(&nsec)?
-    } else {
-        let guard = run_block_on(async { NOSTR_KEYS.lock().await });
-        if let Some(k) = guard.as_ref() {
-            k.clone()
-        } else {
-            anyhow::bail!("Nostr not initialized. Call init_nostr first.")
-        }
-    };
-
-    let sender_pk = parse_pubkey(&sender_pubkey)?;
 
     // Fetch encrypted data from URL
     let resp = reqwest::blocking::get(&descriptor.url)?;
@@ -1492,12 +1555,23 @@ pub fn decrypt_media(descriptor_json: String, sender_pubkey: String, my_nsec: Op
 
     // Decrypt based on encryption type
     let plaintext = if descriptor.encryption == "aes-gcm" {
-        // Derive shared secret using NIP-44's conversation key
-        let key_bytes = get_nip44_conversation_key(keys.secret_key(), &sender_pk)?;
-
-        let iv_bytes = general_purpose::STANDARD.decode(&descriptor.iv)?;
+        let key_bytes = general_purpose::STANDARD
+            .decode(&descriptor.k)
+            .context("Invalid media key")?;
+        if key_bytes.len() != 32 {
+            anyhow::bail!("Invalid media key length: expected 32 bytes, got {}", key_bytes.len());
+        }
+        let nonce_bytes = general_purpose::STANDARD
+            .decode(&descriptor.nonce)
+            .context("Invalid media nonce")?;
+        if nonce_bytes.len() != 12 {
+            anyhow::bail!(
+                "Invalid media nonce length: expected 12 bytes, got {}",
+                nonce_bytes.len()
+            );
+        }
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)?;
-        let nonce = Nonce::from_slice(&iv_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
 
         cipher.decrypt(nonce, ciphertext.as_ref())
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?

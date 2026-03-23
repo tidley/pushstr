@@ -82,6 +82,7 @@ export type RuntimeMessage =
   | { type: 'export-nsec' }
   | { type: 'export-npub' }
   | { type: 'set-last-recipient'; recipient: string }
+  | { type: 'publish-relay-list'; relays?: string[] }
   | { type: 'upload-blossom'; data: ArrayBuffer; recipient: string; mime: string }
   | { type: 'switch-key'; nsec: string }
   | { type: 'save-settings'; relays?: string[]; recipients?: Recipient[]; useGiftwrap?: boolean; useNip44?: boolean; keyNickname?: string; useExternalSigner?: boolean }
