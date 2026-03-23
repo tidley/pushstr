@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pushstr
+Comment=Private, relay-backed messaging over Nostr
+Exec=@BINARY_NAME@
+Icon=pushstr
+Terminal=false
+Categories=Network;InstantMessaging;
+StartupWMClass=@APPLICATION_ID@
