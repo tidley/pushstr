@@ -197,6 +197,11 @@ async function handleMessage(msg) {
     return { ok: true };
   }
 
+  if (msg.type === "publish-relay-list") {
+    const relays = normalizeRelayList(msg.relays || settings.relays);
+    return publishRelayListForCurrent(relays);
+  }
+
   if (msg.type === "resend-message") {
     const payload = msg.content || msg.message?.content;
     const recipientRaw = msg.recipient || msg.message?.to || msg.message?.recipient;
@@ -1026,6 +1031,49 @@ async function handleGiftEvent(event) {
   } catch (err) {
     console.warn("Failed to unwrap gift/DM", err);
   }
+}
+
+function normalizeRelayList(relays) {
+  return Array.from(
+    new Set(
+      (Array.isArray(relays) ? relays : [])
+        .map((relay) => (typeof relay === "string" ? relay.trim() : ""))
+        .filter((relay) => relay.startsWith("ws://") || relay.startsWith("wss://"))
+    )
+  );
+}
+
+async function publishRelayListForCurrent(relays) {
+  const pub = currentPubkey();
+  const priv = currentPrivkeyHex();
+  if (!pub || !priv) {
+    return { ok: false, error: "no active profile" };
+  }
+  const relayList = normalizeRelayList(relays);
+  if (!relayList.length) {
+    return { ok: false, error: "no relays available" };
+  }
+
+  const event = finalizeEvent(
+    {
+      kind: 10002,
+      created_at: Math.floor(Date.now() / 1000),
+      pubkey: pub,
+      tags: relayList.map((relay) => ["r", relay]),
+      content: ""
+    },
+    priv
+  );
+
+  const pubRes = await publishWithRetry(relayList, event, "relay-list");
+  if (!pubRes.ok) {
+    return pubRes;
+  }
+  console.info("[pushstr] published relay list", {
+    pubkey: pub,
+    relays: relayList
+  });
+  return { ok: true, eventId: event.id, relays: relayList };
 }
 
 async function sendGift(recipient, content, modeOverride = null) {

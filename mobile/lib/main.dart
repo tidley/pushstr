@@ -1059,7 +1059,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               );
         final descriptor = {
           'url': desc.url,
-          'iv': desc.iv,
+          'k': desc.k,
+          'nonce': desc.nonce,
           'sha256': desc.sha256,
           'cipher_sha256': desc.cipherSha256,
           'mime': desc.mime,
@@ -6223,6 +6224,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _probeRelay(relay);
   }
 
+  Future<void> _publishRelayList() async {
+    if (_isSaving) return;
+    final currentSecret = _selectedProfileSecret();
+    final currentRelays = List<String>.from(relays);
+    if (currentSecret.isEmpty) {
+      _showThemedToast('No active profile to publish', preferTop: true);
+      return;
+    }
+    if (currentRelays.isEmpty) {
+      _showThemedToast('Add at least one relay first', preferTop: true);
+      return;
+    }
+    _showThemedToast('Publishing relay list...', preferTop: true);
+    final eventId = await RustSyncWorker.publishRelayList(
+      nsec: currentSecret,
+      relays: currentRelays,
+    );
+    if (!mounted) return;
+    if (eventId == null || eventId.isEmpty) {
+      _showThemedToast('Publish failed', preferTop: true);
+      return;
+    }
+    _showThemedToast('Relay list published', preferTop: true);
+  }
+
+  String _selectedProfileSecret() {
+    if (profiles.isEmpty) return '';
+    if (selectedProfileIndex < 0 || selectedProfileIndex >= profiles.length) {
+      return '';
+    }
+    return profiles[selectedProfileIndex]['nsec'] ?? '';
+  }
+
   void _probeAllRelays(List<String> list) {
     for (final relay in list) {
       _probeRelay(relay);
@@ -6849,6 +6883,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     }
                   },
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  style: textButtonStyle,
+                  onPressed: _isSaving ? null : _publishRelayList,
+                  icon: const Icon(Icons.campaign_outlined, size: 20),
+                  label: const Text('Publish Relay List'),
                 ),
                 const SizedBox(height: 10),
                 const Text(

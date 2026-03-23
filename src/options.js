@@ -65,6 +65,7 @@ const importProfileBtn = document.getElementById("importProfile");
 const relayInput = document.getElementById("relayInput");
 const relayError = document.getElementById("relayError");
 const relayList = document.getElementById("relayList");
+const publishRelaysBtn = document.getElementById("publishRelays");
 const contactPub = document.getElementById("contactPub");
 const contactNick = document.getElementById("contactNick");
 const contactError = document.getElementById("contactError");
@@ -113,6 +114,7 @@ document.getElementById("showNpubQr").addEventListener("click", showNpubQr);
 document.getElementById("removeProfile").addEventListener("click", removeProfile);
 document.getElementById("addContact").addEventListener("click", addContactFromForm);
 document.getElementById("addRelay").addEventListener("click", addRelayFromInput);
+publishRelaysBtn?.addEventListener("click", publishRelayList);
 keySelect.addEventListener("change", async () => {
   const nsec = keySelect.value;
   if (nsec) await switchKey(nsec);
@@ -242,6 +244,40 @@ async function save() {
     saveBtn.textContent = "Save";
     saveBtn.disabled = false;
     setDirty(true);
+  }
+}
+
+async function publishRelayList() {
+  const btn = publishRelaysBtn;
+  if (!btn) return;
+  const relays = readRelays();
+  if (!relays.length) {
+    relayError.textContent = "Add at least one relay before publishing";
+    return;
+  }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Publishing...";
+  relayError.textContent = "";
+  try {
+    const res = await safeSend({
+      type: "publish-relay-list",
+      relays
+    });
+    if (res?.ok) {
+      btn.textContent = "Published";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 2000);
+      return;
+    }
+    throw new Error(res?.error || "publish failed");
+  } catch (err) {
+    console.error("[pushstr][options] publish-relay-list failed", err);
+    relayError.textContent = err?.message || "publish failed";
+    btn.textContent = original;
+    btn.disabled = false;
   }
 }
 

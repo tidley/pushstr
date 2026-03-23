@@ -250,6 +250,38 @@ fn wire__crate__api__generate_new_key_impl(
         },
     )
 }
+fn wire__crate__api__publish_relay_list_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "publish_relay_list",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_relays = <Vec<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                (move || {
+                    let output_ok = crate::api::publish_relay_list(api_relays)?;
+                    Ok(output_ok)
+                })(),
+            )
+        },
+    )
+}
 fn wire__crate__api__get_npub_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -698,7 +730,8 @@ impl SseDecode for crate::api::MediaDescriptor {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_url = <String>::sse_decode(deserializer);
-        let mut var_iv = <String>::sse_decode(deserializer);
+        let mut var_k = <String>::sse_decode(deserializer);
+        let mut var_nonce = <String>::sse_decode(deserializer);
         let mut var_sha256 = <String>::sse_decode(deserializer);
         let mut var_cipherSha256 = <String>::sse_decode(deserializer);
         let mut var_mime = <String>::sse_decode(deserializer);
@@ -707,7 +740,8 @@ impl SseDecode for crate::api::MediaDescriptor {
         let mut var_filename = <Option<String>>::sse_decode(deserializer);
         return crate::api::MediaDescriptor {
             url: var_url,
-            iv: var_iv,
+            k: var_k,
+            nonce: var_nonce,
             sha256: var_sha256,
             cipher_sha256: var_cipherSha256,
             mime: var_mime,
@@ -789,6 +823,7 @@ fn pde_ffi_dispatcher_sync_impl(
         4 => wire__crate__api__encrypt_media_impl(ptr, rust_vec_len, data_len),
         5 => wire__crate__api__fetch_recent_dms_impl(ptr, rust_vec_len, data_len),
         6 => wire__crate__api__generate_new_key_impl(ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__publish_relay_list_impl(ptr, rust_vec_len, data_len),
         7 => wire__crate__api__get_npub_impl(ptr, rust_vec_len, data_len),
         8 => wire__crate__api__get_nsec_impl(ptr, rust_vec_len, data_len),
         9 => wire__crate__api__hex_to_npub_impl(ptr, rust_vec_len, data_len),
@@ -812,7 +847,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::MediaDescriptor {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.url.into_into_dart().into_dart(),
-            self.iv.into_into_dart().into_dart(),
+            self.k.into_into_dart().into_dart(),
+            self.nonce.into_into_dart().into_dart(),
             self.sha256.into_into_dart().into_dart(),
             self.cipher_sha256.into_into_dart().into_dart(),
             self.mime.into_into_dart().into_dart(),
@@ -877,7 +913,8 @@ impl SseEncode for crate::api::MediaDescriptor {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.url, serializer);
-        <String>::sse_encode(self.iv, serializer);
+        <String>::sse_encode(self.k, serializer);
+        <String>::sse_encode(self.nonce, serializer);
         <String>::sse_encode(self.sha256, serializer);
         <String>::sse_encode(self.cipher_sha256, serializer);
         <String>::sse_encode(self.mime, serializer);

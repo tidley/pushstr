@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart';
-
 import '../bridge_generated.dart/api.dart' as api;
 import '../bridge_generated.dart/frb_generated.dart';
 
@@ -69,6 +67,37 @@ class RustSyncWorker {
     try {
       api.clearReturnedEventsCache();
     } catch (_) {}
+  }
+
+  /// Publishes the active profile relay list as a NIP-65 kind 10002 event.
+  static Future<String?> publishRelayList({
+    required String nsec,
+    required List<String> relays,
+  }) async {
+    if (nsec.isEmpty || relays.isEmpty) return null;
+    if (!await _mutex.tryAcquire()) return null;
+    try {
+      // ignore: avoid_print
+      print('[relay-list] publishRelayList start relays=${relays.length}');
+      final eventId = await Isolate.run(() async {
+        try {
+          await RustLib.init();
+          api.initNostr(nsec: nsec);
+          return api.publishRelayList(relays: relays);
+        } catch (e) {
+          // ignore: avoid_print
+          print('[relay-list] publishRelayList isolate error: $e');
+          return null;
+        }
+      });
+      if (eventId != null) {
+        // ignore: avoid_print
+        print('[relay-list] publishRelayList ok id=$eventId');
+      }
+      return eventId;
+    } finally {
+      _mutex.release();
+    }
   }
 
   /// Sends a DM on a background isolate to avoid blocking the UI.

@@ -87,6 +87,8 @@ abstract class RustLibApi extends BaseApi {
 
   String crateApiGenerateNewKey();
 
+  String crateApiPublishRelayList({required List<String> relays});
+
   String crateApiGetNpub();
 
   String crateApiGetNsec();
@@ -251,6 +253,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiGenerateNewKeyConstMeta =>
       const TaskConstMeta(debugName: "generate_new_key", argNames: []);
+
+  @override
+  String crateApiPublishRelayList({required List<String> relays}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_String(relays, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19)!;
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_AnyhowException),
+        constMeta: kCrateApiPublishRelayListConstMeta,
+        argValues: [relays],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPublishRelayListConstMeta =>
+      const TaskConstMeta(debugName: "publish_relay_list", argNames: ["relays"]);
 
   @override
   String crateApiGetNpub() {
@@ -534,16 +556,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MediaDescriptor dco_decode_media_descriptor(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8) throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9) throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return MediaDescriptor(
       url: dco_decode_String(arr[0]),
-      iv: dco_decode_String(arr[1]),
-      sha256: dco_decode_String(arr[2]),
-      cipherSha256: dco_decode_String(arr[3]),
-      mime: dco_decode_String(arr[4]),
-      size: dco_decode_usize(arr[5]),
-      encryption: dco_decode_String(arr[6]),
-      filename: dco_decode_opt_String(arr[7]),
+      k: dco_decode_String(arr[1]),
+      nonce: dco_decode_String(arr[2]),
+      sha256: dco_decode_String(arr[3]),
+      cipherSha256: dco_decode_String(arr[4]),
+      mime: dco_decode_String(arr[5]),
+      size: dco_decode_usize(arr[6]),
+      encryption: dco_decode_String(arr[7]),
+      filename: dco_decode_opt_String(arr[8]),
     );
   }
 
@@ -627,7 +650,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MediaDescriptor sse_decode_media_descriptor(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_url = sse_decode_String(deserializer);
-    var var_iv = sse_decode_String(deserializer);
+    var var_k = sse_decode_String(deserializer);
+    var var_nonce = sse_decode_String(deserializer);
     var var_sha256 = sse_decode_String(deserializer);
     var var_cipherSha256 = sse_decode_String(deserializer);
     var var_mime = sse_decode_String(deserializer);
@@ -636,7 +660,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_filename = sse_decode_opt_String(deserializer);
     return MediaDescriptor(
       url: var_url,
-      iv: var_iv,
+      k: var_k,
+      nonce: var_nonce,
       sha256: var_sha256,
       cipherSha256: var_cipherSha256,
       mime: var_mime,
@@ -731,7 +756,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_media_descriptor(MediaDescriptor self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.url, serializer);
-    sse_encode_String(self.iv, serializer);
+    sse_encode_String(self.k, serializer);
+    sse_encode_String(self.nonce, serializer);
     sse_encode_String(self.sha256, serializer);
     sse_encode_String(self.cipherSha256, serializer);
     sse_encode_String(self.mime, serializer);
