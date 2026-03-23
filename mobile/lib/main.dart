@@ -5062,6 +5062,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const List<String> _defaultRelays = [
     'wss://relay.damus.io',
     'wss://relay.primal.net',
+    'wss://nip17.com',
+    'wss://nip17.tomdwyer.uk',
     'wss://nos.lol',
     'wss://nostr.mom',
     'wss://relay.nostr.band',
