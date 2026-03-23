@@ -6,7 +6,7 @@ import '../bridge_generated.dart/frb_generated.dart';
 
 /// Runs blocking Rust calls off the UI isolate with short waits.
 class RustSyncWorker {
-  /// Single-flight guard so only one Rust wait runs at a time across isolates.
+  static final _dmWorker = _DmWaitWorker();
   static final _mutex = _AsyncMutex();
 
   /// Performs a bounded wait for new DMs on a background isolate.
@@ -16,22 +16,7 @@ class RustSyncWorker {
     required Duration wait,
   }) async {
     if (nsec.isEmpty) return null;
-    if (!await _mutex.tryAcquire()) return null;
-    try {
-      final seconds = wait.inSeconds.clamp(1, 3);
-      return Isolate.run(() async {
-        try {
-          await RustLib.init();
-          api.initNostr(nsec: nsec);
-          return api.waitForNewDms(timeoutSecs: BigInt.from(seconds));
-        } catch (_) {
-          // If init or wait fails, return empty to keep listener alive.
-          return '';
-        }
-      });
-    } finally {
-      _mutex.release();
-    }
+    return _dmWorker.waitForNewDms(nsec: nsec, wait: wait);
   }
 
   /// Fetches recent DMs (bounded) on a background isolate.
@@ -205,5 +190,115 @@ class _AsyncMutex {
   void release() {
     _completer?.complete();
     _completer = null;
+  }
+}
+
+class _DmWaitWorker {
+  Isolate? _isolate;
+  SendPort? _sendPort;
+  Completer<SendPort>? _ready;
+  ReceivePort? _controlPort;
+  int _nextId = 0;
+
+  Future<String?> waitForNewDms({
+    required String nsec,
+    required Duration wait,
+  }) async {
+    await _ensureStarted();
+    final port = _sendPort;
+    if (port == null) return '';
+
+    final seconds = wait.inSeconds.clamp(1, 30);
+    final id = ++_nextId;
+    final replyPort = ReceivePort();
+    port.send({
+      'id': id,
+      'cmd': 'wait_for_new_dms',
+      'nsec': nsec,
+      'timeoutSecs': seconds,
+      'replyTo': replyPort.sendPort,
+    });
+    try {
+      final response = await replyPort.first.timeout(
+        Duration(seconds: seconds + 5),
+        onTimeout: () {
+          return '';
+        },
+      );
+      if (response is Map && response['error'] != null) {
+        return '';
+      }
+      if (response is Map) {
+        return response['result']?.toString() ?? '';
+      }
+      return response?.toString() ?? '';
+    } catch (_) {
+      return '';
+    } finally {
+      replyPort.close();
+    }
+  }
+
+  Future<void> _ensureStarted() async {
+    if (_sendPort != null) return;
+    _ready ??= Completer<SendPort>();
+    if (_isolate == null) {
+      _controlPort = ReceivePort();
+      _isolate = await Isolate.spawn(_dmWaitWorkerMain, _controlPort!.sendPort);
+      _controlPort!.listen((message) {
+        if (message is SendPort) {
+          _sendPort = message;
+          _ready?.complete(message);
+          _ready = null;
+        }
+      });
+    }
+    await _ready!.future;
+  }
+}
+
+@pragma('vm:entry-point')
+Future<void> _dmWaitWorkerMain(SendPort mainSendPort) async {
+  final commandPort = ReceivePort();
+  mainSendPort.send(commandPort.sendPort);
+
+  bool rustReady = false;
+  String? currentNsec;
+
+  Future<void> ensureRust(String nsec) async {
+    if (!rustReady) {
+      await RustLib.init();
+      rustReady = true;
+    }
+    if (currentNsec != nsec) {
+      api.initNostr(nsec: nsec);
+      currentNsec = nsec;
+    }
+  }
+
+  await for (final message in commandPort) {
+    if (message is! Map) continue;
+    final replyId = message['id'];
+    final replyPort = message['replyTo'] as SendPort?;
+    final cmd = message['cmd']?.toString();
+    final nsec = message['nsec']?.toString() ?? '';
+    final timeoutSecs = (message['timeoutSecs'] as num?)?.toInt() ?? 3;
+    if (replyId is! int || replyPort == null || cmd == null) continue;
+
+    try {
+      await ensureRust(nsec);
+      switch (cmd) {
+        case 'wait_for_new_dms':
+          final result = api.waitForNewDms(
+            timeoutSecs: BigInt.from(timeoutSecs),
+          );
+          replyPort.send({'id': replyId, 'result': result});
+          break;
+        default:
+          replyPort.send({'id': replyId, 'error': 'unknown command'});
+      }
+    } catch (e) {
+      replyPort.send({'id': replyId, 'error': e.toString()});
+    }
   }
 }
