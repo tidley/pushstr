@@ -357,8 +357,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     unawaited(_persistVisibleState());
     unawaited(initLocalNotifications());
 
-    // Handle shared content from Android intents
-    _initShareListener();
+    // Handle shared content from Android intents.
+    if (Platform.isAndroid) {
+      _initShareListener();
+    }
 
     final profileList = prefs.getStringList('profiles') ?? [];
     String? profileNsec;
