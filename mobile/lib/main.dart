@@ -180,7 +180,7 @@ class PushstrApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pushstr Mobile',
+      title: 'Pushstr',
       theme: ThemeData.dark(useMaterial3: true).copyWith(
         colorScheme: const ColorScheme.dark(primary: Color(0xFF22C55E)),
         scaffoldBackgroundColor: const Color(0xFF0E0E10),
@@ -549,7 +549,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final encryption = descriptor is Map
               ? descriptor['encryption']?.toString()
               : mediaCopy['encryption']?.toString();
-          if (encryption == 'aes-gcm') {
+          if (encryption == 'aes-gcm' || encryption == 'xchacha20poly1305') {
             mediaCopy['needsDecryption'] = true;
             mediaCopy['senderPubkey'] ??= cloned['from']?.toString() ?? '';
             mediaCopy['cacheKey'] ??=
@@ -1193,6 +1193,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       descriptor ??= {
         'url': media['url'],
+        'k': media['k'],
+        'nonce': media['nonce'],
         'iv': media['iv'],
         'sha256': media['sha256'],
         'cipher_sha256': media['cipher_sha256'],
@@ -2084,8 +2086,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             '';
 
         final isEncrypted =
-            (media['encryption'] == 'aes-gcm' &&
-            (media['iv'] ?? '').toString().isNotEmpty);
+            (media['encryption'] == 'aes-gcm' ||
+                media['encryption'] == 'xchacha20poly1305') &&
+            ((media['k'] ?? '').toString().isNotEmpty ||
+                (media['nonce'] ?? '').toString().isNotEmpty ||
+                (media['iv'] ?? '').toString().isNotEmpty);
 
         // Non-encrypted link/media descriptor: show as downloadable attachment without decrypting
         if (!isEncrypted) {
@@ -2970,6 +2975,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       lastError!,
                       style: const TextStyle(fontSize: 12),
                     ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
+                    ),
+                    icon: const Icon(Icons.close, size: 16),
+                    tooltip: 'Dismiss error',
+                    onPressed: () {
+                      setState(() => lastError = null);
+                    },
                   ),
                 ],
               ),
@@ -4276,6 +4294,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final hasMeta =
         (meta?['sha256']?.toString().isNotEmpty ?? false) ||
         (meta?['cipher_sha256']?.toString().isNotEmpty ?? false) ||
+        (meta?['k']?.toString().isNotEmpty ?? false) ||
+        (meta?['nonce']?.toString().isNotEmpty ?? false) ||
         (meta?['iv']?.toString().isNotEmpty ?? false) ||
         (meta?['mime']?.toString().isNotEmpty ?? false) ||
         (meta?['size'] != null);

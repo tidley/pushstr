@@ -97,6 +97,8 @@ export interface BlossomUploadResult {
   sha256?: string;
   size?: number;
   type?: string;
+  k?: string;
+  nonce?: string;
   error?: string;
 }
 

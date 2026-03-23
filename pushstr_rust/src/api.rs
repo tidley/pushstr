@@ -120,13 +120,13 @@ pub struct MediaDescriptor {
     pub url: String,
     /// Base64-encoded 32-byte symmetric key.
     pub k: String,
-    /// Base64-encoded 24-byte XChaCha20-Poly1305 nonce.
+    /// Base64-encoded nonce (12 bytes for AES-GCM, 24 bytes for XChaCha20-Poly1305).
     pub nonce: String,
     pub sha256: String,
     pub cipher_sha256: String,
     pub mime: String,
     pub size: usize,
-    /// "xchacha20poly1305" | "none"
+    /// "aes-gcm" | "xchacha20poly1305" | "none"
     pub encryption: String,
     pub filename: Option<String>,
 }
@@ -1444,19 +1444,18 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
         Ok::<Keys, anyhow::Error>(keys_lock.as_ref().context("Not initialized")?.clone())
     })?;
 
-    // Generate random 32-byte key and 24-byte nonce for XChaCha20-Poly1305
+    // Generate random 32-byte key and 12-byte nonce for AES-GCM.
     let mut key = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key);
-    let mut nonce = [0u8; 24];
+    let mut nonce = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce);
 
-    // Encrypt with XChaCha20-Poly1305
-    use chacha20poly1305::aead::{Aead, KeyInit};
-    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    // Encrypt with AES-256-GCM
+    use aes_gcm::aead::{Aead as _, KeyInit as _};
 
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+    let cipher = Aes256Gcm::new_from_slice(&key)?;
     let ciphertext = cipher
-        .encrypt(XNonce::from_slice(&nonce), bytes.as_ref())
+        .encrypt(Nonce::from_slice(&nonce), bytes.as_ref())
         .map_err(|e| anyhow::anyhow!("Encryption failed: {e:?}"))?;
 
     // Hash plaintext and ciphertext
@@ -1475,7 +1474,7 @@ pub fn encrypt_media(bytes: Vec<u8>, recipient: String, mime: String, filename: 
         cipher_sha256: cipher_hash,
         mime,
         size: bytes.len(),
-        encryption: "xchacha20poly1305".to_string(),
+        encryption: "aes-gcm".to_string(),
         filename,
     })
 }
@@ -1615,6 +1614,30 @@ pub fn decrypt_media(
         }
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)?;
         let nonce = Nonce::from_slice(&nonce_bytes);
+
+        cipher.decrypt(nonce, ciphertext.as_ref())
+            .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?
+    } else if descriptor.encryption == "xchacha20poly1305" {
+        let key_bytes = general_purpose::STANDARD
+            .decode(&descriptor.k)
+            .context("Invalid media key")?;
+        if key_bytes.len() != 32 {
+            anyhow::bail!("Invalid media key length: expected 32 bytes, got {}", key_bytes.len());
+        }
+        let nonce_bytes = general_purpose::STANDARD
+            .decode(&descriptor.nonce)
+            .context("Invalid media nonce")?;
+        if nonce_bytes.len() != 24 {
+            anyhow::bail!(
+                "Invalid media nonce length: expected 24 bytes, got {}",
+                nonce_bytes.len()
+            );
+        }
+        use chacha20poly1305::aead::{Aead as _, KeyInit as _};
+        use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+
+        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let nonce = XNonce::from_slice(&nonce_bytes);
 
         cipher.decrypt(nonce, ciphertext.as_ref())
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?
