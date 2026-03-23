@@ -48,6 +48,8 @@ static SEND_QUEUE: Lazy<Mutex<VecDeque<SendRequest>>> =
     Lazy::new(|| Mutex::new(VecDeque::new()));
 static SEND_NOTIFY: Lazy<Notify> = Lazy::new(Notify::new);
 static SEND_WORKER_ONCE: Once = Once::new();
+static RECIPIENT_DM_RELAY_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug)]
 enum SendKind {
@@ -305,22 +307,51 @@ async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
 }
 
 async fn ensure_recipient_dm_relays(client: &Client, recipient_pk: &PublicKey) -> Result<()> {
+    let recipient_hex = recipient_pk.to_hex();
+    if let Some(cached) = {
+        let cache = RECIPIENT_DM_RELAY_CACHE.lock().await;
+        cache.get(&recipient_hex).cloned()
+    } {
+        if !cached.is_empty() {
+            eprintln!(
+                "[dm] recipient relay cache hit {} relays for {}",
+                cached.len(),
+                recipient_hex
+            );
+            for relay in cached {
+                let _ = client.add_relay(relay).await;
+            }
+        }
+        return Ok(());
+    }
+
     let filter = Filter::new()
         .kind(Kind::Custom(10050))
         .author(recipient_pk.clone())
         .limit(1);
-    let events = client
-        .fetch_events(filter, std::time::Duration::from_secs(5))
-        .await?;
+    let events = match tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        client.fetch_events(filter, std::time::Duration::from_secs(2)),
+    )
+    .await
+    {
+        Ok(res) => res?,
+        Err(_) => {
+            eprintln!("[dm] recipient relay lookup timed out for {}", recipient_hex);
+            return Ok(());
+        }
+    };
     if let Some(event) = events.first() {
         let relays = relay_tags(event);
         if !relays.is_empty() {
             eprintln!("[dm] recipient relay list detected: {:?}", relays);
+            {
+                let mut cache = RECIPIENT_DM_RELAY_CACHE.lock().await;
+                cache.insert(recipient_hex.clone(), relays.clone());
+            }
             for relay in relays {
                 let _ = client.add_relay(relay).await;
             }
-            client.connect().await;
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
     } else {
         eprintln!("[dm] no recipient relay list found");
@@ -835,7 +866,13 @@ async fn send_gift_dm_direct(
 ) -> Result<String> {
     let (client, keys) = get_client_and_keys().await?;
     let recipient_pk = parse_pubkey(&recipient)?;
-    let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
+    {
+        let client = client.clone();
+        let recipient_pk = recipient_pk.clone();
+        tokio::spawn(async move {
+            let _ = ensure_recipient_dm_relays(client.as_ref(), &recipient_pk).await;
+        });
+    }
 
     // NIP-17: Inner DM with plaintext content, signed by user - kind 14
     let seq = if is_read_receipt_content(&content) {
