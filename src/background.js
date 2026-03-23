@@ -101,6 +101,8 @@ let keepAliveRunning = false;
 const pendingReceipts = new Set();
 const sentReceipts = new Set();
 let lastConnectAt = 0;
+let connectPromise = null;
+let connectSignature = null;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -555,32 +557,56 @@ async function generateNewKey() {
 }
 
 async function connect() {
+  return connectInternal({ force: false });
+}
+
+async function connectInternal({ force = false } = {}) {
   if (!nt) return;
   const priv = currentPrivkeyHex();
   if (!priv) return;
   syncRecipientsForCurrent();
 
-  if (sub) {
-    sub.close?.();
-    sub = null;
+  const me = currentPubkey();
+  const desiredSignature = JSON.stringify({
+    pubkey: me,
+    relays: settings.relays,
+    useGiftwrap: settings.useGiftwrap
+  });
+
+  if (!force && sub && connectSignature === desiredSignature) {
+    return;
+  }
+  if (connectPromise) {
+    return connectPromise;
   }
 
-  pool = pool || new nt.SimplePool();
-  activeRelays = await resolveRelays(settings.relays);
-  const me = currentPubkey();
-  // Subscribe to: 1059 (giftwrap), 14 (NIP-17 DM), 4 (legacy DM)
-  const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
-  const filter = { kinds, "#p": [me] };
-  const relayList = activeRelays.length ? activeRelays : settings.relays;
-  if (relayList.length) {
-    sub = pool.subscribeMany(relayList, filter, {
-      onevent: handleGiftEvent
-    });
-    lastConnectAt = Date.now();
-    console.info("[pushstr] subscribed", [filter], "relays", relayList);
-  } else {
-    console.warn("[pushstr] no relays available to subscribe");
-  }
+  connectPromise = (async () => {
+    if (sub) {
+      sub.close?.();
+      sub = null;
+    }
+
+    pool = pool || new nt.SimplePool();
+    activeRelays = await resolveRelays(settings.relays);
+    const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
+    const filter = { kinds, "#p": [me] };
+    const relayList = activeRelays.length ? activeRelays : settings.relays;
+    if (relayList.length) {
+      sub = pool.subscribeMany(relayList, filter, {
+        onevent: handleGiftEvent
+      });
+      lastConnectAt = Date.now();
+      connectSignature = desiredSignature;
+      console.info("[pushstr] subscribed", [filter], "relays", relayList);
+    } else {
+      connectSignature = null;
+      console.warn("[pushstr] no relays available to subscribe");
+    }
+  })().finally(() => {
+    connectPromise = null;
+  });
+
+  return connectPromise;
 }
 
 function startKeepAlive() {
@@ -597,17 +623,17 @@ async function keepAliveTick() {
   keepAliveRunning = true;
   try {
     if (!pool) {
-      await connect();
+      await connectInternal({ force: true });
       return;
     }
     const relays = activeRelays.length ? activeRelays : settings.relays;
     if (!relays.length || !sub) {
-      await connect();
+      await connectInternal({ force: true });
       return;
     }
     const needsReconnect = Date.now() - lastConnectAt > 10 * 60 * 1000;
     if (needsReconnect) {
-      await connect();
+      await connectInternal({ force: true });
       return;
     }
     await Promise.allSettled(relays.map((url) => pool.ensureRelay(url)));
