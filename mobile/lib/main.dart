@@ -477,10 +477,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'dm_giftwrap_formats_$profileNsec';
   static const String _readReceiptKey = 'pushstr_ack';
 
-  bool _containsPushstrClientTag(String content) {
-    return content.contains(_pushstrClientTag);
-  }
-
   String _stripPushstrClientTag(String content) {
     if (!content.contains(_pushstrClientTag)) return content;
     final pattern = RegExp(r'(^|\n)\[pushstr:client\](\n|$)', multiLine: true);
@@ -488,30 +484,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return stripped;
   }
 
-  String _withPushstrClientTag(String content) {
-    if (content.contains(_pushstrClientTag)) return content;
-    if (content.isEmpty) return _pushstrClientTag;
-    return '$content\n$_pushstrClientTag';
-  }
-
   String _buildReadReceiptPayload(String messageId) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return jsonEncode({_readReceiptKey: messageId, 'ts': now});
-  }
-
-  String? _extractReadReceiptId(String content) {
-    final cleaned = _stripPushstrClientTag(content).trimLeft();
-    if (!cleaned.contains(_readReceiptKey)) return null;
-    if (!cleaned.startsWith('{')) return null;
-    try {
-      final decoded = jsonDecode(cleaned);
-      if (decoded is Map && decoded[_readReceiptKey] is String) {
-        return decoded[_readReceiptKey] as String;
-      }
-    } catch (_) {
-      // ignore parse failures
-    }
-    return null;
   }
 
   Map<String, dynamic> _normalizeIncomingMessage(Map<String, dynamic> msg) {
@@ -1104,7 +1079,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         localText = text.isNotEmpty ? text : '(attachment)';
       }
 
-      payload = _withPushstrClientTag(payload);
       final dmMode = _effectiveDmMode(selectedContact!);
       final useLegacyDm = dmMode == 'nip04';
       final modeLabel = useLegacyDm ? 'nip04' : 'nip59';
@@ -1234,7 +1208,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    payload = _withPushstrClientTag(payload);
     return {'payload': payload, 'text': localText, 'media': localMedia};
   }
 

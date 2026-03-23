@@ -861,7 +861,17 @@ async function sendReadReceipt(recipientHex, messageId, dmKind) {
 }
 
 function hasPushstrClientTag(content) {
-  return typeof content === "string" && content.includes(PUSHSTR_CLIENT_TAG);
+  if (typeof content === "string") {
+    return content.includes(PUSHSTR_CLIENT_TAG);
+  }
+  if (!Array.isArray(content)) return false;
+  return content.some(
+    (tag) =>
+      Array.isArray(tag) &&
+      tag.length >= 2 &&
+      tag[0] === "c" &&
+      tag[1] === "1"
+  );
 }
 
 function stripPushstrClientTag(content) {
@@ -871,11 +881,8 @@ function stripPushstrClientTag(content) {
   return content.replace(pattern, "\n").trim();
 }
 
-function appendPushstrClientTag(content) {
-  if (typeof content !== "string") return content;
-  if (content.includes(PUSHSTR_CLIENT_TAG)) return content;
-  if (!content.length) return PUSHSTR_CLIENT_TAG;
-  return `${content}\n${PUSHSTR_CLIENT_TAG}`;
+function pushstrClientTag() {
+  return ["c", "1"];
 }
 
 async function handleGiftEvent(event) {
@@ -998,7 +1005,10 @@ async function handleGiftEvent(event) {
 	      }
 	      return;
 	    }
-    const isPushstrClient = hasPushstrClientTag(message);
+    const isPushstrClient =
+      hasPushstrClientTag(message) ||
+      hasPushstrClientTag(targetEvent.tags) ||
+      hasPushstrClientTag(event.tags);
     const cleanedMessage = stripPushstrClientTag(message);
     await ensureContact(sender);
     const isGiftwrap = event.kind === 1059;
@@ -1086,15 +1096,14 @@ async function sendGift(recipient, content, modeOverride = null) {
   settings.lastRecipient = recipientHex;
   await persistSettings();
   const created_at = Math.floor(Date.now() / 1000);
-  const taggedContent = appendPushstrClientTag(content);
   const seq = nextSendSeq(recipientHex);
 
   if (dmMode === "nip04") {
-    const cipherText = await nt.nip04.encrypt(priv, recipientHex, taggedContent);
+    const cipherText = await nt.nip04.encrypt(priv, recipientHex, content);
     const dm = {
       kind: 4,
       created_at,
-      tags: [["p", recipientHex], ["seq", seq.toString()]],
+      tags: [["p", recipientHex], ["seq", seq.toString()], pushstrClientTag()],
       content: cipherText
     };
     const signedDm = finalizeEvent(dm, priv);
@@ -1109,7 +1118,7 @@ async function sendGift(recipient, content, modeOverride = null) {
       direction: "out",
       from: currentPubkey(),
       to: recipientHex,
-      content: taggedContent,
+      content,
       created_at,
       outerKind: 4,
       dm_kind: "nip04",
@@ -1127,9 +1136,10 @@ async function sendGift(recipient, content, modeOverride = null) {
     tags: [
       ["p", recipientHex],
       ["seq", seq.toString()],
-      ["alt", "Direct message"]
+      ["alt", "Direct message"],
+      pushstrClientTag()
     ],
-    content: taggedContent
+    content
   };
   const innerSigned = finalizeEvent(inner, priv);
   const rumor = { ...innerSigned };
@@ -1173,7 +1183,7 @@ async function sendGift(recipient, content, modeOverride = null) {
     direction: "out",
     from: senderPubkey,
     to: recipientHex,
-    content: taggedContent,
+    content,
     created_at,
     outerKind: 1059,
     dm_kind: "nip17",

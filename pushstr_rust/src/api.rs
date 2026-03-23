@@ -41,6 +41,8 @@ static RETURNED_EVENT_IDS_QUEUE: Lazy<StdMutex<VecDeque<String>>> =
 const RETURNED_EVENT_IDS_MAX: usize = 512;
 static SEND_SEQ_BY_RECIPIENT: Lazy<StdMutex<HashMap<String, u64>>> =
     Lazy::new(|| StdMutex::new(HashMap::new()));
+const PUSHSTR_CLIENT_TAG_KIND: &str = "c";
+const PUSHSTR_CLIENT_TAG_VALUE: &str = "1";
 
 static SEND_QUEUE: Lazy<Mutex<VecDeque<SendRequest>>> =
     Lazy::new(|| Mutex::new(VecDeque::new()));
@@ -178,6 +180,25 @@ fn strip_pushstr_client_tag(content: &str) -> String {
     out.join("\n").trim().to_string()
 }
 
+fn event_has_pushstr_client_tag(tags: &Tags) -> bool {
+    let tag_kind = TagKind::Custom(PUSHSTR_CLIENT_TAG_KIND.into());
+    tags.iter().any(|tag| {
+        tag.kind() == tag_kind
+            && tag
+                .content()
+                .map(|value| value.eq_ignore_ascii_case(PUSHSTR_CLIENT_TAG_VALUE))
+                .unwrap_or(false)
+    })
+}
+
+fn tag_list_has_pushstr_client_tag(tags: &[Vec<String>]) -> bool {
+    tags.iter().any(|tag| {
+        tag.len() >= 2
+            && tag[0] == PUSHSTR_CLIENT_TAG_KIND
+            && tag[1].eq_ignore_ascii_case(PUSHSTR_CLIENT_TAG_VALUE)
+    })
+}
+
 fn parse_read_receipt_id(content: &str) -> Option<String> {
     let trimmed = content.trim_start();
     if !trimmed.starts_with('{') || !trimmed.contains(READ_RECEIPT_KEY) {
@@ -195,8 +216,8 @@ fn is_read_receipt_content(content: &str) -> bool {
     parse_read_receipt_id(&stripped).is_some()
 }
 
-fn normalize_message_content(raw: &str) -> (String, bool, Option<String>) {
-    let is_pushstr_client = raw.contains(PUSHSTR_CLIENT_TAG);
+fn normalize_message_content(raw: &str, is_pushstr_client_tagged: bool) -> (String, bool, Option<String>) {
+    let is_pushstr_client = is_pushstr_client_tagged || raw.contains(PUSHSTR_CLIENT_TAG);
     let stripped = strip_pushstr_client_tag(raw);
     let receipt_for = parse_read_receipt_id(&stripped);
     (stripped, is_pushstr_client, receipt_for)
@@ -829,6 +850,10 @@ async fn send_gift_dm_direct(
             TagKind::Custom("alt".into()),
             vec!["Direct message".to_string()],
         ))
+        .tag(Tag::custom(
+            TagKind::Custom(PUSHSTR_CLIENT_TAG_KIND.into()),
+            vec![PUSHSTR_CLIENT_TAG_VALUE.to_string()],
+        ))
         .sign_with_keys(&keys)?;
 
     let gift = wrap_gift_event(&inner_event, recipient_pk, &keys)?;
@@ -993,6 +1018,10 @@ async fn send_dm_direct(recipient: String, message: String) -> Result<String> {
     if let Some(seq) = seq {
         builder = builder.tag(Tag::custom(TagKind::Custom("seq".into()), vec![seq.to_string()]));
     }
+    builder = builder.tag(Tag::custom(
+        TagKind::Custom(PUSHSTR_CLIENT_TAG_KIND.into()),
+        vec![PUSHSTR_CLIENT_TAG_VALUE.to_string()],
+    ));
     let event = builder.sign_with_keys(&keys)?;
 
     let event_id = event.id;
@@ -1105,8 +1134,10 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                         }
                     }
 
-                    let (cleaned, pushstr_client, receipt_for) =
-                        normalize_message_content(&content);
+                    let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                        &content,
+                        tag_list_has_pushstr_client_tag(&tags),
+                    );
                     messages.push(serde_json::json!({
                         "id": event_id,
                         "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
@@ -1166,8 +1197,10 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     event.content.clone()
                 });
             let seq = seq_from_event_tags(&event.tags);
-            let (cleaned, pushstr_client, receipt_for) =
-                normalize_message_content(&decrypted);
+            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                &decrypted,
+                event_has_pushstr_client_tag(&event.tags),
+            );
             messages.push(serde_json::json!({
                 "id": event_id,
                 "from": event.pubkey.to_hex(),
@@ -1198,8 +1231,10 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
                     event.content.clone()
                 });
             let seq = seq_from_event_tags(&event.tags);
-            let (cleaned, pushstr_client, receipt_for) =
-                normalize_message_content(&decrypted);
+            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                &decrypted,
+                event_has_pushstr_client_tag(&event.tags),
+            );
             messages.push(serde_json::json!({
                 "id": event_id,
                 "from": my_pubkey.to_hex(),
@@ -1298,8 +1333,10 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                         });
                                 }
                             }
-                            let (cleaned, pushstr_client, receipt_for) =
-                                normalize_message_content(&content);
+                            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                                &content,
+                                tag_list_has_pushstr_client_tag(&tags),
+                            );
                             messages.push(serde_json::json!({
                                 "id": event_id,
                                 "from": sender_hex,
@@ -1349,8 +1386,10 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                                 eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
                                 event.content.clone()
                             });
-                        let (cleaned, pushstr_client, receipt_for) =
-                            normalize_message_content(&decrypted);
+                        let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                            &decrypted,
+                            event_has_pushstr_client_tag(&event.tags),
+                        );
                         let seq = seq_from_event_tags(&event.tags);
                         messages.push(serde_json::json!({
                             "id": event_id,
