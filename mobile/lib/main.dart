@@ -3086,7 +3086,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final textColor = isOut
             ? const Color.fromARGB(255, 238, 238, 238)
             : Colors.white;
-        final fontWeight = FontWeight.w400;
+        final fontWeight =
+            (Platform.isLinux || Platform.isMacOS || Platform.isWindows)
+            ? FontWeight.w300
+            : FontWeight.w400;
         final blossomUrl = _extractBlossomUrl(m['content']);
         final dmBadge = _buildDmBadge(m);
         final attachmentBadge = _buildAttachmentBadge(m);
@@ -3817,7 +3820,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               IconButton(
                 icon: const Icon(Icons.download, size: 20),
                 color: Colors.white,
-                onPressed: () => _saveMedia(bytes, mime),
+                onPressed: () => _saveMedia(
+                  bytes,
+                  mime,
+                  filename: media['filename']?.toString(),
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.share, size: 20),
@@ -4061,14 +4068,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _saveMedia(Uint8List bytes, String mime) async {
+  Future<void> _saveMedia(
+    Uint8List bytes,
+    String mime, {
+    String? filename,
+  }) async {
     try {
       final ext = extensionFromMime(mime);
-      final filename = 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final saveName = _sanitizeAttachmentFilename(filename, mime, ext);
       if (Platform.isAndroid) {
         final uri = await _storageChannel.invokeMethod<String>(
           'saveToDownloads',
-          {'bytes': bytes, 'mime': mime, 'filename': filename},
+          {'bytes': bytes, 'mime': mime, 'filename': saveName},
         );
         if (!mounted) return;
         if (uri == null) {
@@ -4080,11 +4091,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       if (Platform.isIOS) {
-        final file = await _writeTempMediaFile(bytes, mime, filename: filename);
+        final file = await _writeTempMediaFile(
+          bytes,
+          mime,
+          filename: saveName,
+        );
         final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
           'path': file.path,
           'mime': mime,
-          'filename': filename,
+          'filename': saveName,
         });
         if (!mounted) return;
         if (ok != true) {
@@ -4106,10 +4121,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         return;
       }
-      final file = File('$selectedDir/$filename');
+      final file = File('$selectedDir/$saveName');
       await file.writeAsBytes(bytes);
       if (!mounted) return;
-      _showThemedToast('Saved to $selectedDir', preferTop: true);
+      final savedDir = selectedDir;
+      _showThemedToast(
+        'Saved to $savedDir',
+        preferTop: true,
+        onTap: () async {
+          await _openDirectory(savedDir);
+        },
+      );
     } catch (e) {
       if (!mounted) return;
       _showThemedToast('Save failed: $e', preferTop: true);
@@ -4175,6 +4197,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final file = File('${dir.path}/$finalName');
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  String _sanitizeAttachmentFilename(
+    String? filename,
+    String mime,
+    String fallbackExt,
+  ) {
+    final ext = fallbackExt.isNotEmpty ? fallbackExt : extensionFromMime(mime);
+    final rawName = (filename != null && filename.trim().isNotEmpty)
+        ? filename.trim()
+        : 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final safeName = rawName.replaceAll(RegExp(r'[\\/:]'), '_');
+    return safeName.contains('.') ? safeName : '$safeName.$ext';
+  }
+
+  Future<void> _openDirectory(String path) async {
+    try {
+      final uri = Uri.directory(path);
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        _showThemedToast('Could not open folder', preferTop: true);
+      }
+    } catch (_) {
+      if (mounted) {
+        _showThemedToast('Could not open folder', preferTop: true);
+      }
+    }
   }
 
   Future<void> _openImageViewer({
@@ -4452,6 +4501,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String message, {
     bool preferTop = false,
     Duration? duration,
+    Future<void> Function()? onTap,
   }) {
     _toastEntry?.remove();
     _toastTimer?.cancel();
@@ -4478,30 +4528,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: IntrinsicWidth(
                 child: Material(
                   color: Colors.transparent,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface.withOpacity(0.95),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: theme.colorScheme.primary.withOpacity(0.8),
+                  child: InkWell(
+                    onTap: onTap == null ? null : () => unawaited(onTap()),
+                    mouseCursor:
+                        onTap != null ? SystemMouseCursors.click : null,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.45),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface.withOpacity(0.95),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.colorScheme.primary.withOpacity(0.8),
                         ),
-                      ],
-                    ),
-                    child: Text(
-                      message,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.45),
+                            blurRadius: 12,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          message,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.white,
+                          ),
+                        ),
+                          if (onTap != null) ...[
+                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.folder_open,
+                              size: 16,
+                              color: Colors.white70,
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
