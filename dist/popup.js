@@ -10124,10 +10124,10 @@ async function showQrDialog() {
   copyBtn.textContent = "Copy";
   copyBtn.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(uri);
+      await navigator.clipboard.writeText(npub);
       flashCopyButton(copyBtn);
     } catch (err) {
-      prompt("nostr:", uri);
+      prompt("npub:", npub);
     }
   });
   wrapper.appendChild(canvas);
@@ -10182,7 +10182,7 @@ async function showEditContactDialog(contact) {
     <div style="display:flex;flex-direction:column;gap:8px;min-width:260px;">
       <label style="font-size:12px;color:#9ca3af;">Nickname</label>
       <input type="text" id="ec_nick" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#e5e7eb;">
-      <label style="font-size:12px;color:#9ca3af;">Pubkey</label>
+      <label style="font-size:12px;color:#9ca3af;">nPub</label>
       <input type="text" id="ec_pub" style="padding:6px 8px;border:1px solid #1f2937;border-radius:6px;background:#0f172a;color:#9ca3af;" disabled>
     </div>
   `;
@@ -10191,7 +10191,7 @@ async function showEditContactDialog(contact) {
   if (nickInput)
     nickInput.value = contact.nickname || "";
   if (pubInput)
-    pubInput.value = contact.id || "";
+    pubInput.value = toNpub(contact.id || "");
   const result = await showModal("Edit Contact", wrapper);
   if (!result)
     return;
@@ -10323,7 +10323,7 @@ function renderBubbleContent(container, content, senderPubkey, isOut, messageId 
       }
     );
     actionHolder.appendChild(downloadCtrl.btn);
-    const isEncrypted = (media.encryption === "aes-gcm" || media.cipher_sha256) && media.iv;
+    const isEncrypted = mediaLooksEncrypted(media);
     result.hasMedia = true;
     result.mediaEncrypted = isEncrypted;
     if (isEncrypted) {
@@ -10553,6 +10553,11 @@ function buildLockBadge(encrypted) {
   badge.textContent = encrypted ? "\u{1F512}" : "\u{1F513}";
   return badge;
 }
+function mediaLooksEncrypted(media = {}) {
+  return Boolean(
+    media && (media.encryption === "aes-gcm" || media.encryption === "xchacha20poly1305" || media.cipher_sha256) && (media.k || media.nonce || media.iv)
+  );
+}
 function attachFile() {
   if (!isPopout) {
     popout();
@@ -10726,7 +10731,7 @@ function parseFragmentMeta(frag) {
 }
 function isBlossomLink(url, meta = {}) {
   const hasMeta = Boolean(
-    meta.sha256 || meta.mime || meta.size || meta.iv || meta.cipher_sha256
+    meta.sha256 || meta.mime || meta.size || meta.k || meta.nonce || meta.iv || meta.cipher_sha256
   );
   if (!url)
     return false;
