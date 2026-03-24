@@ -11805,7 +11805,8 @@ var DEFAULT_RELAYS = [
   "wss://relay.nostr.bg",
   "wss://eden.nostr.land",
   "wss://relay.nostr.wine",
-  "wss://relay.plebstr.com"
+  "wss://relay.plebstr.com",
+  "wss://inbox.nostr.wine"
 ];
 var settings = {
   relays: [...DEFAULT_RELAYS],

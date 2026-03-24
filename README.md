@@ -67,6 +67,8 @@ npm run package
 cd ..
 cd mobile
 flutter pub get
+flutter run -d linux
+
 ```
 
 If you are also working on Linux desktop:
