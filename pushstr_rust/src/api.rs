@@ -50,6 +50,7 @@ static SEND_NOTIFY: Lazy<Notify> = Lazy::new(Notify::new);
 static SEND_WORKER_ONCE: Once = Once::new();
 static RECIPIENT_DM_RELAY_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+const NIP17_SYNC_OVERLAP_SECS: u64 = 2 * 24 * 60 * 60;
 
 #[derive(Debug)]
 enum SendKind {
@@ -1150,7 +1151,9 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 
         // Use optional watermark to bound history
         if since_timestamp > 0 {
-            filter_received = filter_received.since(Timestamp::from(since_timestamp));
+            let overlapped_since =
+                Timestamp::from(since_timestamp.saturating_sub(NIP17_SYNC_OVERLAP_SECS));
+            filter_received = filter_received.since(overlapped_since);
         }
 
         let events_received = client

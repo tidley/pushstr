@@ -1028,9 +1028,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final lastSeen = (nsec != null && nsec!.isNotEmpty)
           ? (prefs.getInt(_lastSeenKeyFor(nsec!)) ?? 0)
           : 0;
+      final fetchLimit = lastSeen > 0 ? 50 : 200;
       final dmsJson = await RustSyncWorker.fetchRecentDms(
         nsec: nsec ?? '',
-        limit: 50,
+        limit: fetchLimit,
         sinceTimestamp: lastSeen,
       );
       List<Map<String, dynamic>> fetchedMessages = [];
@@ -6611,7 +6612,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final dmsJson = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
-        limit: 50,
+        limit: 200,
         sinceTimestamp: 0,
       );
       if (dmsJson == null || dmsJson.isEmpty) return;
