@@ -447,9 +447,9 @@ struct UnwrappedGift {
 }
 
 #[derive(Default)]
-struct GiftwrapDecryptBatch {
-    count: usize,
-    gen: u64,
+pub struct GiftwrapDecryptBatch {
+    pub count: usize,
+    pub gen: u64,
 }
 
 fn note_giftwrap_decrypt() {
