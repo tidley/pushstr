@@ -3833,7 +3833,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     ? FontWeight.w300
                                     : FontWeight.w400,
                               ),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText: 'Message',
                                 filled: true,
                                 border: OutlineInputBorder(
@@ -3857,8 +3857,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     Radius.circular(12),
                                   ),
                                   borderSide: BorderSide(
-                                    color: Colors.greenAccent,
-                                    width: 1.4,
+                                    color: Colors.greenAccent.shade200,
+                                    width: 1.8,
                                   ),
                                 ),
                                 contentPadding: EdgeInsets.symmetric(
