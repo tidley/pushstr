@@ -50,6 +50,8 @@ static SEND_NOTIFY: Lazy<Notify> = Lazy::new(Notify::new);
 static SEND_WORKER_ONCE: Once = Once::new();
 static RECIPIENT_DM_RELAY_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static GIFTWRAP_DECRYPT_BATCH: Lazy<StdMutex<GiftwrapDecryptBatch>> =
+    Lazy::new(|| StdMutex::new(GiftwrapDecryptBatch::default()));
 
 #[derive(Debug)]
 enum SendKind {
@@ -225,6 +227,146 @@ fn normalize_message_content(raw: &str, is_pushstr_client_tagged: bool) -> (Stri
     (stripped, is_pushstr_client, receipt_for)
 }
 
+fn push_normalized_dm_message(
+    messages: &mut Vec<serde_json::Value>,
+    id: String,
+    from: String,
+    to: String,
+    content: String,
+    created_at: u64,
+    direction: &'static str,
+    kind: u64,
+    dm_kind: String,
+    tags_have_pushstr_client: bool,
+    seq: Option<u64>,
+) {
+    let (cleaned, pushstr_client, receipt_for) =
+        normalize_message_content(&content, tags_have_pushstr_client);
+    messages.push(serde_json::json!({
+        "id": id,
+        "from": from,
+        "to": to,
+        "content": cleaned,
+        "created_at": created_at,
+        "direction": direction,
+        "kind": kind,
+        "dm_kind": dm_kind,
+        "pushstr_client": pushstr_client,
+        "receipt_for": receipt_for,
+        "seq": seq,
+    }));
+}
+
+fn push_giftwrap_dm(
+    messages: &mut Vec<serde_json::Value>,
+    event: &Event,
+    unwrapped: UnwrappedGift,
+    keys: &Keys,
+    my_pubkey_hex: &str,
+) {
+    let event_id = event.id.to_hex();
+
+    let sender_hex = unwrapped
+        .rumor
+        .pubkey
+        .clone()
+        .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+    let direction = if sender_hex == my_pubkey_hex { "out" } else { "in" };
+    let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
+    let other = if direction == "out" {
+        tags.iter()
+            .find(|t| t.first().map(|v| v == "p").unwrap_or(false))
+            .and_then(|t| t.get(1))
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        sender_hex.clone()
+    };
+    let seq = seq_from_tag_list(&tags);
+    let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
+    if direction == "in" && !content.is_empty() {
+        if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
+            content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
+                .unwrap_or(content);
+        }
+    } else if direction == "out" && !content.is_empty() {
+        if let Ok(recipient_pk) = PublicKey::from_hex(&other) {
+            content = nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &content)
+                .unwrap_or(content);
+        }
+    }
+
+    push_normalized_dm_message(
+        messages,
+        event_id,
+        if direction == "out" { my_pubkey_hex.to_string() } else { sender_hex },
+        if direction == "out" { other } else { my_pubkey_hex.to_string() },
+        content,
+        unwrapped.created_at,
+        direction,
+        1059,
+        unwrapped.format,
+        tag_list_has_pushstr_client_tag(&tags),
+        seq,
+    );
+}
+
+fn push_nip04_dm(
+    messages: &mut Vec<serde_json::Value>,
+    event: &Event,
+    keys: &Keys,
+    my_pubkey_hex: &str,
+    inbound: bool,
+) {
+    let event_id = event.id.to_hex();
+    if inbound {
+        let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
+            .unwrap_or_else(|e| {
+                eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
+                event.content.clone()
+            });
+        let seq = seq_from_event_tags(&event.tags);
+        push_normalized_dm_message(
+            messages,
+            event_id,
+            event.pubkey.to_hex(),
+            my_pubkey_hex.to_string(),
+            decrypted,
+            event.created_at.as_u64(),
+            "in",
+            4,
+            "nip04".to_string(),
+            event_has_pushstr_client_tag(&event.tags),
+            seq,
+        );
+        return;
+    }
+
+    let recipient_pk = match event_p_tag_pubkey(event) {
+        Some(pk) => pk,
+        None => return,
+    };
+    let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
+        .unwrap_or_else(|e| {
+            eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
+            event.content.clone()
+        });
+    let seq = seq_from_event_tags(&event.tags);
+    push_normalized_dm_message(
+        messages,
+        event_id,
+        my_pubkey_hex.to_string(),
+        recipient_pk.to_hex(),
+        decrypted,
+        event.created_at.as_u64(),
+        "out",
+        4,
+        "nip04".to_string(),
+        event_has_pushstr_client_tag(&event.tags),
+        seq,
+    );
+}
+
 fn derive_contact_name(metadata: &serde_json::Value) -> Option<String> {
     for key in ["display_name", "name"] {
         if let Some(value) = metadata.get(key).and_then(|v| v.as_str()).map(str::trim) {
@@ -302,6 +444,30 @@ struct UnwrappedGift {
     sender_pubkey: String,
     created_at: u64,
     format: String,
+}
+
+#[derive(Default)]
+struct GiftwrapDecryptBatch {
+    count: usize,
+    gen: u64,
+}
+
+fn note_giftwrap_decrypt() {
+    let token = {
+        let mut st = GIFTWRAP_DECRYPT_BATCH.lock().unwrap();
+        st.count += 1;
+        st.gen += 1;
+        st.gen
+    };
+
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let mut st = GIFTWRAP_DECRYPT_BATCH.lock().unwrap();
+        if st.gen == token && st.count > 0 {
+            eprintln!("[dm] giftwrap decrypt batch: {} message(s)", st.count);
+            st.count = 0;
+        }
+    });
 }
 
 fn random_timestamp_within_two_days() -> Timestamp {
@@ -629,14 +795,7 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
         anyhow::bail!("Event is not kind 1059");
     }
 
-    // Debug: Log conversation key
-    let conv_key = get_nip44_conversation_key(keys.secret_key(), &gift_event.pubkey)
-        .map(|k| hex::encode(k))
-        .unwrap_or_else(|_| "ERROR".to_string());
-    eprintln!("[mobile] Giftwrap decrypt - myPriv: {}... wrapperPub: {}...",
-        hex::encode(keys.secret_key().secret_bytes()).chars().take(8).collect::<String>(),
-        gift_event.pubkey.to_hex().chars().take(16).collect::<String>());
-    eprintln!("[mobile] Giftwrap decrypt - convKey: {}...", conv_key.chars().take(16).collect::<String>());
+    note_giftwrap_decrypt();
 
     // Try custom NIP-44 first (matches WASM exactly)
     // Fall back to NIP-04 for old messages
@@ -1159,62 +1318,22 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 
         let mut messages = Vec::new();
         let mut seen_ids: StdHashSet<String> = StdHashSet::new();
+        let my_pubkey_hex = my_pubkey.to_hex();
 
         for event in events_received.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id) {
+                continue;
+            }
             match unwrap_gift_event(event, &keys) {
                 Ok(unwrapped) => {
-                    let event_id = event.id.to_hex();
-                    if !seen_ids.insert(event_id.clone()) {
-                        continue;
-                    }
-                    let sender_hex = unwrapped
-                        .rumor
-                        .pubkey
-                        .clone()
-                        .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
-                    let direction = if sender_hex == my_pubkey.to_hex() { "out" } else { "in" };
-                    let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
-                    let other = if direction == "out" {
-                        tags
-                            .iter()
-                            .find(|t| t.first().map(|v| v == "p").unwrap_or(false))
-                            .and_then(|t| t.get(1))
-                            .cloned()
-                            .unwrap_or_default()
-                    } else {
-                        sender_hex.clone()
-                    };
-                    let seq = seq_from_tag_list(&tags);
-                    let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
-                    if direction == "in" && !content.is_empty() {
-                        if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
-                            content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
-                                .unwrap_or(content);
-                        }
-                    } else if direction == "out" && !content.is_empty() {
-                        if let Ok(recipient_pk) = PublicKey::from_hex(&other) {
-                            content = nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &content)
-                                .unwrap_or(content);
-                        }
-                    }
-
-                    let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                        &content,
-                        tag_list_has_pushstr_client_tag(&tags),
+                    push_giftwrap_dm(
+                        &mut messages,
+                        event,
+                        unwrapped,
+                        &keys,
+                        &my_pubkey_hex,
                     );
-                    messages.push(serde_json::json!({
-                        "id": event_id,
-                        "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
-                        "to": if direction == "out" { other } else { my_pubkey.to_hex() },
-                        "content": cleaned,
-                        "created_at": unwrapped.created_at,
-                        "direction": direction,
-                        "kind": 1059,
-                        "dm_kind": unwrapped.format,
-                        "pushstr_client": pushstr_client,
-                        "receipt_for": receipt_for,
-                        "seq": seq,
-                    }));
                 }
                 Err(e) => {
                     eprintln!("[dm] Failed to unwrap gift {}: {}", event.id, e);
@@ -1252,66 +1371,30 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 
         for event in events_nip04_in.iter() {
             let event_id = event.id.to_hex();
-            if !seen_ids.insert(event_id.clone()) {
+            if !seen_ids.insert(event_id) {
                 continue;
             }
-            let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
-                .unwrap_or_else(|e| {
-                    eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
-                    event.content.clone()
-                });
-            let seq = seq_from_event_tags(&event.tags);
-            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                &decrypted,
-                event_has_pushstr_client_tag(&event.tags),
+            push_nip04_dm(
+                &mut messages,
+                event,
+                &keys,
+                &my_pubkey_hex,
+                true,
             );
-            messages.push(serde_json::json!({
-                "id": event_id,
-                "from": event.pubkey.to_hex(),
-                "to": my_pubkey.to_hex(),
-                "content": cleaned,
-                "created_at": event.created_at.as_u64(),
-                "direction": "in",
-                "kind": 4,
-                "dm_kind": "nip04",
-                "pushstr_client": pushstr_client,
-                "receipt_for": receipt_for,
-                "seq": seq,
-            }));
         }
 
         for event in events_nip04_out.iter() {
             let event_id = event.id.to_hex();
-            if !seen_ids.insert(event_id.clone()) {
+            if !seen_ids.insert(event_id) {
                 continue;
             }
-            let recipient_pk = match event_p_tag_pubkey(event) {
-                Some(pk) => pk,
-                None => continue,
-            };
-            let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
-                .unwrap_or_else(|e| {
-                    eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
-                    event.content.clone()
-                });
-            let seq = seq_from_event_tags(&event.tags);
-            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                &decrypted,
-                event_has_pushstr_client_tag(&event.tags),
+            push_nip04_dm(
+                &mut messages,
+                event,
+                &keys,
+                &my_pubkey_hex,
+                false,
             );
-            messages.push(serde_json::json!({
-                "id": event_id,
-                "from": my_pubkey.to_hex(),
-                "to": recipient_pk.to_hex(),
-                "content": cleaned,
-                "created_at": event.created_at.as_u64(),
-                "direction": "out",
-                "kind": 4,
-                "dm_kind": "nip04",
-                "pushstr_client": pushstr_client,
-                "receipt_for": receipt_for,
-                "seq": seq,
-            }));
         }
 
         // Sort by timestamp
@@ -1403,6 +1486,7 @@ pub fn fetch_older_dms(limit: u64, until_timestamp: u64) -> Result<String> {
         let (client, keys) = get_client_and_keys().await?;
 
         let my_pubkey = keys.public_key();
+        let my_pubkey_hex = my_pubkey.to_hex();
 
         let mut filter_received = Filter::new()
             .kind(Kind::GiftWrap)
@@ -1421,60 +1505,19 @@ pub fn fetch_older_dms(limit: u64, until_timestamp: u64) -> Result<String> {
         let mut seen_ids: StdHashSet<String> = StdHashSet::new();
 
         for event in events_received.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id) {
+                continue;
+            }
             match unwrap_gift_event(event, &keys) {
                 Ok(unwrapped) => {
-                    let event_id = event.id.to_hex();
-                    if !seen_ids.insert(event_id.clone()) {
-                        continue;
-                    }
-                    let sender_hex = unwrapped
-                        .rumor
-                        .pubkey
-                        .clone()
-                        .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
-                    let direction = if sender_hex == my_pubkey.to_hex() { "out" } else { "in" };
-                    let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
-                    let other = if direction == "out" {
-                        tags
-                            .iter()
-                            .find(|t| t.first().map(|v| v == "p").unwrap_or(false))
-                            .and_then(|t| t.get(1))
-                            .cloned()
-                            .unwrap_or_default()
-                    } else {
-                        sender_hex.clone()
-                    };
-                    let seq = seq_from_tag_list(&tags);
-                    let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
-                    if direction == "in" && !content.is_empty() {
-                        if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
-                            content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
-                                .unwrap_or(content);
-                        }
-                    } else if direction == "out" && !content.is_empty() {
-                        if let Ok(recipient_pk) = PublicKey::from_hex(&other) {
-                            content = nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &content)
-                                .unwrap_or(content);
-                        }
-                    }
-
-                    let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                        &content,
-                        tag_list_has_pushstr_client_tag(&tags),
+                    push_giftwrap_dm(
+                        &mut messages,
+                        event,
+                        unwrapped,
+                        &keys,
+                        &my_pubkey_hex,
                     );
-                    messages.push(serde_json::json!({
-                        "id": event_id,
-                        "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
-                        "to": if direction == "out" { other } else { my_pubkey.to_hex() },
-                        "content": cleaned,
-                        "created_at": unwrapped.created_at,
-                        "direction": direction,
-                        "kind": 1059,
-                        "dm_kind": unwrapped.format,
-                        "pushstr_client": pushstr_client,
-                        "receipt_for": receipt_for,
-                        "seq": seq,
-                    }));
                 }
                 Err(e) => {
                     eprintln!("[dm] Failed to unwrap older gift {}: {}", event.id, e);
@@ -1506,66 +1549,30 @@ pub fn fetch_older_dms(limit: u64, until_timestamp: u64) -> Result<String> {
 
         for event in events_nip04_in.iter() {
             let event_id = event.id.to_hex();
-            if !seen_ids.insert(event_id.clone()) {
+            if !seen_ids.insert(event_id) {
                 continue;
             }
-            let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
-                .unwrap_or_else(|e| {
-                    eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
-                    event.content.clone()
-                });
-            let seq = seq_from_event_tags(&event.tags);
-            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                &decrypted,
-                event_has_pushstr_client_tag(&event.tags),
+            push_nip04_dm(
+                &mut messages,
+                event,
+                &keys,
+                &my_pubkey_hex,
+                true,
             );
-            messages.push(serde_json::json!({
-                "id": event_id,
-                "from": event.pubkey.to_hex(),
-                "to": my_pubkey.to_hex(),
-                "content": cleaned,
-                "created_at": event.created_at.as_u64(),
-                "direction": "in",
-                "kind": 4,
-                "dm_kind": "nip04",
-                "pushstr_client": pushstr_client,
-                "receipt_for": receipt_for,
-                "seq": seq,
-            }));
         }
 
         for event in events_nip04_out.iter() {
             let event_id = event.id.to_hex();
-            if !seen_ids.insert(event_id.clone()) {
+            if !seen_ids.insert(event_id) {
                 continue;
             }
-            let recipient_pk = match event_p_tag_pubkey(event) {
-                Some(pk) => pk,
-                None => continue,
-            };
-            let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
-                .unwrap_or_else(|e| {
-                    eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
-                    event.content.clone()
-                });
-            let seq = seq_from_event_tags(&event.tags);
-            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                &decrypted,
-                event_has_pushstr_client_tag(&event.tags),
+            push_nip04_dm(
+                &mut messages,
+                event,
+                &keys,
+                &my_pubkey_hex,
+                false,
             );
-            messages.push(serde_json::json!({
-                "id": event_id,
-                "from": my_pubkey.to_hex(),
-                "to": recipient_pk.to_hex(),
-                "content": cleaned,
-                "created_at": event.created_at.as_u64(),
-                "direction": "out",
-                "kind": 4,
-                "dm_kind": "nip04",
-                "pushstr_client": pushstr_client,
-                "receipt_for": receipt_for,
-                "seq": seq,
-            }));
         }
 
         messages.sort_by(|a, b| {
@@ -1633,40 +1640,13 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                         }
 
                         if let Ok(unwrapped) = unwrap_gift_event(&event, &keys) {
-                            let sender_hex = unwrapped
-                                .rumor
-                                .pubkey
-                                .clone()
-                                .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
-                            let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
-                            let seq = seq_from_tag_list(&tags);
-                            let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
-                            if !content.is_empty() {
-                                if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
-                                    content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
-                                        .unwrap_or_else(|e| {
-                                            eprintln!("[dm] NIP-44 inner decrypt failed {}: {}", event_id, e);
-                                            content
-                                        });
-                                }
-                            }
-                            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                                &content,
-                                tag_list_has_pushstr_client_tag(&tags),
+                            push_giftwrap_dm(
+                                &mut messages,
+                                &event,
+                                unwrapped,
+                                &keys,
+                                &my_pubkey.to_hex(),
                             );
-                            messages.push(serde_json::json!({
-                                "id": event_id,
-                                "from": sender_hex,
-                                "to": my_pubkey.to_hex(),
-                                "content": cleaned,
-                                "created_at": unwrapped.created_at,
-                                "direction": "in",
-                                "kind": 1059,
-                                "dm_kind": unwrapped.format,
-                                "pushstr_client": pushstr_client,
-                                "receipt_for": receipt_for,
-                                "seq": seq,
-                            }));
                         } else {
                             eprintln!("[dm] Giftwrap event ignored (could not unwrap) {}", event_id);
                         }
@@ -1697,30 +1677,13 @@ pub fn wait_for_new_dms(timeout_secs: u64) -> Result<String> {
                         if recipient_pk != my_pubkey {
                             continue;
                         }
-
-                        let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
-                            .unwrap_or_else(|e| {
-                                eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
-                                event.content.clone()
-                            });
-                        let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
-                            &decrypted,
-                            event_has_pushstr_client_tag(&event.tags),
+                        push_nip04_dm(
+                            &mut messages,
+                            &event,
+                            &keys,
+                            &my_pubkey.to_hex(),
+                            true,
                         );
-                        let seq = seq_from_event_tags(&event.tags);
-                        messages.push(serde_json::json!({
-                            "id": event_id,
-                            "from": event.pubkey.to_hex(),
-                            "to": my_pubkey.to_hex(),
-                            "content": cleaned,
-                            "created_at": event.created_at.as_u64(),
-                            "direction": "in",
-                            "kind": 4,
-                            "dm_kind": "nip04",
-                            "pushstr_client": pushstr_client,
-                            "receipt_for": receipt_for,
-                            "seq": seq,
-                        }));
                     } else {
                         eprintln!(
                             "[dm] notif ignored kind={} id={}",
