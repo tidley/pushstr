@@ -1045,7 +1045,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _updateDmModesFromMessages(fetchedMessages);
       }
 
-      if (existingLen == 0 && (lastSeen == 0) && fetchedMessages.isNotEmpty) {
+      if (lastSeen == 0 && fetchedMessages.isNotEmpty) {
         final backfill = await _backfillInitialDmHistory(
           nsec: nsec ?? '',
           seedMessages: fetchedMessages,
@@ -6694,23 +6694,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       if (dmsJson == null || dmsJson.isEmpty) return;
       await prefs.setString(_messagesKeyFor(nsec), dmsJson);
-      final List<dynamic> dmsList = jsonDecode(dmsJson);
-      final messages = dmsList.cast<Map<String, dynamic>>();
-      final maxSeen = messages.fold<int>(0, (acc, m) {
-        final raw = m['created_at'];
-        if (raw is int && raw > acc) return raw;
-        if (raw is double && raw > acc) return raw.round();
-        if (raw is String) {
-          final parsed = int.tryParse(raw);
-          if (parsed != null && parsed > acc) return parsed;
-        }
-        return acc;
-      });
-      if (maxSeen > 0) {
-        await prefs.setInt(_lastSeenKeyFor(nsec), maxSeen);
-      }
       final contactSet = <String>{};
       final contactsList = <String>[];
+      final List<dynamic> dmsList = jsonDecode(dmsJson);
+      final messages = dmsList.cast<Map<String, dynamic>>();
       for (final message in messages) {
         final direction = message['direction']?.toString();
         final pubkey = (direction == 'out')
