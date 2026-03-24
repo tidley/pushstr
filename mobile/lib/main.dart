@@ -1045,6 +1045,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _updateDmModesFromMessages(fetchedMessages);
       }
 
+      if (existingLen == 0 && (lastSeen == 0) && fetchedMessages.isNotEmpty) {
+        final backfill = await _backfillInitialDmHistory(
+          nsec: nsec ?? '',
+          seedMessages: fetchedMessages,
+        );
+        if (backfill.isNotEmpty) {
+          fetchedMessages = _mergeMessages([...fetchedMessages, ...backfill]);
+          _updateDmModesFromMessages(backfill);
+          debugPrint('[dm] Backfilled ${backfill.length} older messages');
+        }
+      }
+
       // Merge any pending background-cached messages
       try {
         final pendingKey = nsec != null
@@ -1143,6 +1155,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = 'Fetch failed: $e';
       });
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _backfillInitialDmHistory({
+    required String nsec,
+    required List<Map<String, dynamic>> seedMessages,
+  }) async {
+    if (nsec.isEmpty || seedMessages.isEmpty) return const [];
+
+    final collected = <Map<String, dynamic>>[];
+    final seenIds = seedMessages
+        .map((m) => m['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    var oldestTs = seedMessages
+        .map(_createdAtSeconds)
+        .where((ts) => ts > 0)
+        .fold<int>(0, (acc, ts) => acc == 0 || ts < acc ? ts : acc);
+    if (oldestTs <= 0) return const [];
+
+    for (var page = 0; page < 50; page++) {
+      final olderJson = await RustSyncWorker.fetchOlderDms(
+        nsec: nsec,
+        limit: 100,
+        untilTimestamp: oldestTs - 1,
+      );
+      if (olderJson == null || olderJson.isEmpty || olderJson == '[]') {
+        break;
+      }
+
+      final decoded = jsonDecode(olderJson) as List<dynamic>;
+      var olderMessages = decoded.cast<Map<String, dynamic>>();
+      olderMessages = await _decodeMessages(olderMessages);
+      if (olderMessages.isEmpty) break;
+
+      var added = 0;
+      for (final message in olderMessages) {
+        final id = message['id']?.toString() ?? '';
+        if (id.isNotEmpty && seenIds.contains(id)) {
+          continue;
+        }
+        if (id.isNotEmpty) seenIds.add(id);
+        collected.add(message);
+        added++;
+      }
+      if (added == 0) break;
+
+      final nextOldest = olderMessages
+          .map(_createdAtSeconds)
+          .where((ts) => ts > 0)
+          .fold<int>(0, (acc, ts) => acc == 0 || ts < acc ? ts : acc);
+      if (nextOldest <= 0 || nextOldest >= oldestTs) break;
+      oldestTs = nextOldest;
+    }
+
+    return collected;
   }
 
   Future<void> _sendMessage() async {
