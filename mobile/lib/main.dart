@@ -3110,6 +3110,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         toolbarHeight: 74,
         backgroundColor: _conversationHeaderGreen,
         foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         leading: Builder(
           builder: (context) => Transform.translate(
             offset: const Offset(0, -2),
@@ -5552,6 +5556,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'wss://eden.nostr.land',
     'wss://relay.nostr.wine',
     'wss://relay.plebstr.com',
+    'wss://inbox.nostr.wine',
   ];
   List<Map<String, String>> profiles = [];
   List<String> profileNpubs = [];

@@ -702,6 +702,7 @@ const DM_RELAYS: &[&str] = &[
     "wss://nip17.tomdwyer.uk",
     "wss://auth.nostr1.com",
     "wss://relay.0xchat.com",
+    "wss://inbox.nostr.wine",
 ];
 
 /// Initialize the Nostr service with a secret key (nsec)
