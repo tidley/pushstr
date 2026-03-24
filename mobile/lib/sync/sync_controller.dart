@@ -48,13 +48,14 @@ class SyncController {
       Duration remaining() => budget - DateTime.now().difference(start);
       if (remaining().isNegative) return;
 
-      // Fetch messages since last seen timestamp (fallback to last 10 minutes)
+      // Fetch messages since last seen timestamp (fallback to a deeper initial window).
       final sinceTs = lastSeenTs > 0
           ? lastSeenTs
-          : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 600;
+          : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 24 * 60 * 60;
+      final fetchLimit = lastSeenTs > 0 ? 50 : 200;
       final result = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
-        limit: 50,
+        limit: fetchLimit,
         sinceTimestamp: sinceTs,
       );
       if (result == null || result.isEmpty || result == '[]') {
@@ -71,13 +72,7 @@ class SyncController {
       final incomingAll = decoded.whereType<Map<String, dynamic>>().map(_normalizedIncoming).toList();
       debugPrint('[sync] decoded ${incomingAll.length} messages, lastSeenTs=$lastSeenTs');
 
-      final newMessages = incomingAll.where((m) {
-        final createdAt = _createdAtSeconds(m);
-        if (createdAt > 0 && createdAt <= lastSeenTs) {
-          return false;
-        }
-        return true;
-      }).toList();
+      final newMessages = incomingAll;
 
       if (newMessages.isEmpty) {
         debugPrint('[sync] no new incoming messages');
@@ -96,7 +91,6 @@ class SyncController {
         final id = msg['id']?.toString();
         if (id != null && seenSet.contains(id)) continue;
         final createdAt = _createdAtSeconds(msg);
-        if (createdAt > 0 && createdAt <= lastNotifiedTs) continue; // don't notify old items
         if (appVisible && visibleContact.isNotEmpty) {
           final from = (msg['from'] ?? '').toString();
           final to = (msg['to'] ?? '').toString();
