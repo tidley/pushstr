@@ -3761,9 +3761,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (inAppBar) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: SizedBox(height: 46, child: dropdown),
+        child: Transform.translate(
+          offset: const Offset(0, 2),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SizedBox(height: 46, child: dropdown),
+          ),
         ),
       );
     }
