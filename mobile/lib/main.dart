@@ -3507,7 +3507,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         color: textColor,
                         fontWeight: fontWeight,
                       ),
-                      child: _buildMessageContent(m, isOut: isOut),
+                      child: SelectionArea(
+                        child: _buildMessageContent(m, isOut: isOut),
+                      ),
                     ),
                   ),
                   if (actions != null) ...[const SizedBox(width: 6), actions],
