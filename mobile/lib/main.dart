@@ -3863,7 +3863,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.primary,
-                                    width: 2.0,
+                                    width: 1.2,
                                   ),
                                 ),
                                 contentPadding: EdgeInsets.symmetric(
