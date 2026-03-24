@@ -229,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   static const String _pushstrClientTag = '[pushstr:client]';
   static const Color _historyAccentGreen = Color(0xFF2F8F62);
-  static const Color _conversationHeaderGreen = Color(0xFF162722);
+  static const Color _conversationHeaderGreen = Color(0xFF1A2026);
   // Color.fromARGB(255, 18, 113, 53);
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
