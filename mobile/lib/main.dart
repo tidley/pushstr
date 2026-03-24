@@ -229,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   static const String _pushstrClientTag = '[pushstr:client]';
   static const Color _historyAccentGreen = Color(0xFF2F8F62);
-  static const Color _conversationHeaderGreen = Color.fromARGB(255, 10, 25, 20);
+  static const Color _conversationHeaderGreen = Color(0xFF162722);
   // Color.fromARGB(255, 18, 113, 53);
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -1029,10 +1029,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final lastSeen = (nsec != null && nsec!.isNotEmpty)
           ? (prefs.getInt(_lastSeenKeyFor(nsec!)) ?? 0)
           : 0;
-      final fetchLimit = lastSeen > 0 ? 50 : 200;
       final dmsJson = await RustSyncWorker.fetchRecentDms(
         nsec: nsec ?? '',
-        limit: fetchLimit,
+        limit: 100,
         sinceTimestamp: lastSeen,
       );
       List<Map<String, dynamic>> fetchedMessages = [];
@@ -6618,7 +6617,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final dmsJson = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
-        limit: 200,
+        limit: 100,
         sinceTimestamp: 0,
       );
       if (dmsJson == null || dmsJson.isEmpty) return;

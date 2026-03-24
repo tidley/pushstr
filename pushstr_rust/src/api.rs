@@ -50,7 +50,6 @@ static SEND_NOTIFY: Lazy<Notify> = Lazy::new(Notify::new);
 static SEND_WORKER_ONCE: Once = Once::new();
 static RECIPIENT_DM_RELAY_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-const NIP17_SYNC_OVERLAP_SECS: u64 = 2 * 24 * 60 * 60;
 
 #[derive(Debug)]
 enum SendKind {
@@ -306,12 +305,7 @@ struct UnwrappedGift {
 }
 
 fn random_timestamp_within_two_days() -> Timestamp {
-    let now = Timestamp::now();
-    let two_days_secs = 2 * 24 * 60 * 60;
-    let earliest = now.as_u64().saturating_sub(two_days_secs);
-    let span = now.as_u64().saturating_sub(earliest).max(1);
-    let random_offset = rand::random::<u64>() % span;
-    Timestamp::from(earliest + random_offset)
+    Timestamp::now()
 }
 
 async fn get_client_and_keys() -> Result<(Arc<Client>, Keys)> {
@@ -1151,9 +1145,7 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
 
         // Use optional watermark to bound history
         if since_timestamp > 0 {
-            let overlapped_since =
-                Timestamp::from(since_timestamp.saturating_sub(NIP17_SYNC_OVERLAP_SECS));
-            filter_received = filter_received.since(overlapped_since);
+            filter_received = filter_received.since(Timestamp::from(since_timestamp));
         }
 
         let events_received = client

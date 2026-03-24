@@ -48,14 +48,13 @@ class SyncController {
       Duration remaining() => budget - DateTime.now().difference(start);
       if (remaining().isNegative) return;
 
-      // Fetch messages since last seen timestamp (fallback to a deeper initial window).
+      // Fetch messages since last seen timestamp (fallback to last 10 minutes).
       final sinceTs = lastSeenTs > 0
           ? lastSeenTs
-          : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 24 * 60 * 60;
-      final fetchLimit = lastSeenTs > 0 ? 50 : 200;
+          : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 600;
       final result = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
-        limit: fetchLimit,
+        limit: 100,
         sinceTimestamp: sinceTs,
       );
       if (result == null || result.isEmpty || result == '[]') {
