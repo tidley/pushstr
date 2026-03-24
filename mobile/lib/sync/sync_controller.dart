@@ -48,10 +48,9 @@ class SyncController {
       Duration remaining() => budget - DateTime.now().difference(start);
       if (remaining().isNegative) return;
 
-      // Fetch messages since last seen timestamp (fallback to last 10 minutes).
-      final sinceTs = lastSeenTs > 0
-          ? lastSeenTs
-          : (DateTime.now().millisecondsSinceEpoch ~/ 1000) - 600;
+      // Fetch messages since the stored watermark. When there is no watermark
+      // yet, start from 0 so cold-start sync can backfill the full window.
+      final sinceTs = lastSeenTs > 0 ? lastSeenTs : 0;
       final result = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
         limit: 100,

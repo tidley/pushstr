@@ -1997,3 +1997,93 @@ pub fn clear_returned_events_cache() -> Result<()> {
         (_, Err(e)) => Err(anyhow::anyhow!("Failed to clear cache queue: {}", e)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::{sleep, timeout, Duration};
+
+    async fn make_client(keys: &Keys, relays: &[&str]) -> Result<Client> {
+        let client = Client::new(keys.clone());
+        for relay in relays {
+            let _ = client.add_relay((*relay).to_string()).await;
+        }
+        client.connect().await;
+        Ok(client)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore]
+    async fn nip17_websocket_roundtrip_smoke() -> Result<()> {
+        let sender_keys = Keys::generate();
+        let recipient_keys = Keys::generate();
+        let recipient_hex = recipient_keys.public_key().to_hex();
+        let sender_hex = sender_keys.public_key().to_hex();
+
+        let recipient_client = make_client(&recipient_keys, DM_RELAYS).await?;
+        let sender_client = make_client(&sender_keys, DM_RELAYS).await?;
+
+        let mut relay_builder = EventBuilder::new(Kind::Custom(10050), "");
+        for relay in DM_RELAYS {
+            relay_builder = relay_builder.tag(Tag::custom(
+                TagKind::Custom("relay".into()),
+                vec![relay.to_string()],
+            ));
+        }
+        relay_builder = relay_builder.tag(Tag::custom(
+            TagKind::Custom("alt".into()),
+            vec!["Relay list to receive private messages".to_string()],
+        ));
+        let relay_event = relay_builder.sign_with_keys(&recipient_keys)?;
+        recipient_client.send_event(&relay_event).await?;
+
+        sleep(Duration::from_secs(2)).await;
+        ensure_recipient_dm_relays(&sender_client, &recipient_keys.public_key()).await?;
+
+        let inner_event = EventBuilder::new(Kind::Custom(14), "relay smoke test")
+            .tag(Tag::custom(
+                TagKind::Custom("p".into()),
+                vec![recipient_hex.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom("alt".into()),
+                vec!["Direct message".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(PUSHSTR_CLIENT_TAG_KIND.into()),
+                vec![PUSHSTR_CLIENT_TAG_VALUE.to_string()],
+            ))
+            .sign_with_keys(&sender_keys)?;
+
+        let gift = wrap_gift_event(&inner_event, recipient_keys.public_key(), &sender_keys)?;
+        let filter = Filter::new()
+            .kind(Kind::GiftWrap)
+            .custom_tag(
+                SingleLetterTag::lowercase(Alphabet::P),
+                recipient_hex.clone(),
+            );
+        recipient_client.subscribe(filter, None).await?;
+        let mut notifications = recipient_client.notifications();
+
+        sender_client.send_event(&gift).await?;
+
+        let got_event = timeout(Duration::from_secs(20), async {
+            loop {
+                match notifications.recv().await {
+                    Ok(RelayPoolNotification::Event { event, .. }) if event.kind == Kind::GiftWrap => {
+                        return event;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => continue,
+                }
+            }
+        })
+        .await
+        .context("timed out waiting for giftwrap notification")?;
+
+        let unwrapped = unwrap_gift_event(&got_event, &recipient_keys)?;
+        assert_eq!(unwrapped.rumor.content.as_deref(), Some("relay smoke test"));
+        assert_eq!(unwrapped.rumor.pubkey.as_deref(), Some(sender_hex.as_str()));
+        Ok(())
+    }
+}
