@@ -3836,6 +3836,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               decoration: InputDecoration(
                                 hintText: 'Message',
                                 filled: true,
+                                focusColor: Theme.of(
+                                  context,
+                                ).colorScheme.primary,
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.all(
                                     Radius.circular(12),
@@ -3857,8 +3860,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     Radius.circular(12),
                                   ),
                                   borderSide: BorderSide(
-                                    color: Colors.greenAccent.shade200,
-                                    width: 1.8,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    width: 2.0,
                                   ),
                                 ),
                                 contentPadding: EdgeInsets.symmetric(
