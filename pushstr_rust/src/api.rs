@@ -225,6 +225,25 @@ fn normalize_message_content(raw: &str, is_pushstr_client_tagged: bool) -> (Stri
     (stripped, is_pushstr_client, receipt_for)
 }
 
+fn derive_contact_name(metadata: &serde_json::Value) -> Option<String> {
+    for key in ["display_name", "name"] {
+        if let Some(value) = metadata.get(key).and_then(|v| v.as_str()).map(str::trim) {
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    if let Some(nip05) = metadata.get("nip05").and_then(|v| v.as_str()).map(str::trim) {
+        if let Some(local) = nip05.split('@').next() {
+            let local = local.trim();
+            if !local.is_empty() {
+                return Some(local.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn relay_tags(event: &Event) -> Vec<String> {
     let relay_kind = TagKind::Custom("relay".into());
     event
@@ -642,9 +661,13 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
             })?;
         let rumor: RumorData = serde_json::from_str(&rumor_json)?;
         let created_at = rumor.created_at.unwrap_or_else(|| sealed_event.created_at.as_u64());
+        let sender_pubkey = rumor
+            .pubkey
+            .clone()
+            .unwrap_or_else(|| sealed_event.pubkey.to_hex());
         Ok(UnwrappedGift {
             rumor,
-            sender_pubkey: sealed_event.pubkey.to_hex(),
+            sender_pubkey,
             created_at,
             format: "nip59".to_string(),
         })
@@ -655,9 +678,13 @@ fn unwrap_gift_event(gift_event: &Event, keys: &Keys) -> Result<UnwrappedGift> {
         }
         let rumor: RumorData = serde_json::from_value(event_value)?;
         let created_at = rumor.created_at.unwrap_or_else(|| sealed_event.created_at.as_u64());
+        let sender_pubkey = rumor
+            .pubkey
+            .clone()
+            .unwrap_or_else(|| sealed_event.pubkey.to_hex());
         Ok(UnwrappedGift {
             rumor,
-            sender_pubkey: sealed_event.pubkey.to_hex(),
+            sender_pubkey,
             created_at,
             format: "legacy_giftwrap".to_string(),
         })
@@ -1292,6 +1319,259 @@ pub fn fetch_recent_dms(limit: u64, since_timestamp: u64) -> Result<String> {
         }
 
         // Sort by timestamp
+        messages.sort_by(|a, b| {
+            let a_time = a["created_at"].as_u64().unwrap_or(0);
+            let b_time = b["created_at"].as_u64().unwrap_or(0);
+            a_time.cmp(&b_time)
+        });
+
+        Ok(serde_json::to_string(&messages)?)
+    })
+}
+
+/// Fetch contact display names for pubkeys from kind 0 profile metadata.
+/// Returns a JSON object keyed by hex pubkey with `name` and `nip05`.
+#[frb(sync)]
+pub fn fetch_contact_names(pubkeys: Vec<String>) -> Result<String> {
+    run_block_on(async {
+        let (client, _) = get_client_and_keys().await?;
+        let mut parsed = Vec::new();
+        for pk in pubkeys {
+            if let Ok(pubkey) = PublicKey::from_hex(&pk) {
+                parsed.push((pk, pubkey));
+            }
+        }
+        if parsed.is_empty() {
+            return Ok("{}".to_string());
+        }
+
+        let filter = Filter::new()
+            .kind(Kind::Metadata)
+            .authors(parsed.iter().map(|(_, pubkey)| *pubkey).collect::<Vec<_>>())
+            .limit(parsed.len());
+        let events = client
+            .fetch_events(filter, std::time::Duration::from_secs(5))
+            .await?;
+
+        let wanted: StdHashSet<String> = parsed.into_iter().map(|(hex, _)| hex).collect();
+        let mut best: HashMap<String, (u64, serde_json::Value)> = HashMap::new();
+        for event in events.iter() {
+            let hex = event.pubkey.to_hex();
+            if !wanted.contains(&hex) {
+                continue;
+            }
+            let created = event.created_at.as_u64();
+            let entry = best.entry(hex).or_insert_with(|| (0, serde_json::Value::Null));
+            if created >= entry.0 {
+                let parsed = serde_json::from_str::<serde_json::Value>(&event.content)
+                    .unwrap_or(serde_json::Value::Null);
+                entry.0 = created;
+                entry.1 = parsed;
+            }
+        }
+
+        let mut output = serde_json::Map::new();
+        for pubkey in wanted {
+            let (name, nip05) = best
+                .get(&pubkey)
+                .map(|(_, metadata)| {
+                    let name = derive_contact_name(metadata).unwrap_or_default();
+                    let nip05 = metadata
+                        .get("nip05")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    (name, nip05)
+                })
+                .unwrap_or_else(|| (String::new(), String::new()));
+            output.insert(
+                pubkey,
+                serde_json::json!({
+                    "name": name,
+                    "nip05": nip05,
+                }),
+            );
+        }
+
+        Ok(serde_json::Value::Object(output).to_string())
+    })
+}
+
+/// Fetch older DMs before a timestamp and return as JSON array.
+/// Fetches kind 1059 addressed to us, unwraps inner event.
+/// Each message contains: id, from, to, content (plaintext), created_at, direction.
+#[frb(sync)]
+pub fn fetch_older_dms(limit: u64, until_timestamp: u64) -> Result<String> {
+    run_block_on(async {
+        let (client, keys) = get_client_and_keys().await?;
+
+        let my_pubkey = keys.public_key();
+
+        let mut filter_received = Filter::new()
+            .kind(Kind::GiftWrap)
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), my_pubkey.to_hex())
+            .limit(limit as usize);
+
+        if until_timestamp > 0 {
+            filter_received = filter_received.until(Timestamp::from(until_timestamp));
+        }
+
+        let events_received = client
+            .fetch_events(filter_received, std::time::Duration::from_secs(5))
+            .await?;
+
+        let mut messages = Vec::new();
+        let mut seen_ids: StdHashSet<String> = StdHashSet::new();
+
+        for event in events_received.iter() {
+            match unwrap_gift_event(event, &keys) {
+                Ok(unwrapped) => {
+                    let event_id = event.id.to_hex();
+                    if !seen_ids.insert(event_id.clone()) {
+                        continue;
+                    }
+                    let sender_hex = unwrapped
+                        .rumor
+                        .pubkey
+                        .clone()
+                        .unwrap_or_else(|| unwrapped.sender_pubkey.clone());
+                    let direction = if sender_hex == my_pubkey.to_hex() { "out" } else { "in" };
+                    let tags = unwrapped.rumor.tags.clone().unwrap_or_default();
+                    let other = if direction == "out" {
+                        tags
+                            .iter()
+                            .find(|t| t.first().map(|v| v == "p").unwrap_or(false))
+                            .and_then(|t| t.get(1))
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        sender_hex.clone()
+                    };
+                    let seq = seq_from_tag_list(&tags);
+                    let mut content = unwrapped.rumor.content.clone().unwrap_or_default();
+                    if direction == "in" && !content.is_empty() {
+                        if let Ok(sender_pk) = PublicKey::from_hex(&sender_hex) {
+                            content = nip44_decrypt_custom(keys.secret_key(), &sender_pk, &content)
+                                .unwrap_or(content);
+                        }
+                    } else if direction == "out" && !content.is_empty() {
+                        if let Ok(recipient_pk) = PublicKey::from_hex(&other) {
+                            content = nip44_decrypt_custom(keys.secret_key(), &recipient_pk, &content)
+                                .unwrap_or(content);
+                        }
+                    }
+
+                    let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                        &content,
+                        tag_list_has_pushstr_client_tag(&tags),
+                    );
+                    messages.push(serde_json::json!({
+                        "id": event_id,
+                        "from": if direction == "out" { my_pubkey.to_hex() } else { sender_hex },
+                        "to": if direction == "out" { other } else { my_pubkey.to_hex() },
+                        "content": cleaned,
+                        "created_at": unwrapped.created_at,
+                        "direction": direction,
+                        "kind": 1059,
+                        "dm_kind": unwrapped.format,
+                        "pushstr_client": pushstr_client,
+                        "receipt_for": receipt_for,
+                        "seq": seq,
+                    }));
+                }
+                Err(e) => {
+                    eprintln!("[dm] Failed to unwrap older gift {}: {}", event.id, e);
+                }
+            }
+        }
+
+        let mut filter_nip04_in = Filter::new()
+            .kind(Kind::EncryptedDirectMessage)
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), my_pubkey.to_hex())
+            .limit(limit as usize);
+        let mut filter_nip04_out = Filter::new()
+            .kind(Kind::EncryptedDirectMessage)
+            .author(my_pubkey)
+            .limit(limit as usize);
+
+        if until_timestamp > 0 {
+            let until = Timestamp::from(until_timestamp);
+            filter_nip04_in = filter_nip04_in.until(until);
+            filter_nip04_out = filter_nip04_out.until(until);
+        }
+
+        let events_nip04_in = client
+            .fetch_events(filter_nip04_in, std::time::Duration::from_secs(5))
+            .await?;
+        let events_nip04_out = client
+            .fetch_events(filter_nip04_out, std::time::Duration::from_secs(5))
+            .await?;
+
+        for event in events_nip04_in.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id.clone()) {
+                continue;
+            }
+            let decrypted = nip04::decrypt(keys.secret_key(), &event.pubkey, &event.content)
+                .unwrap_or_else(|e| {
+                    eprintln!("[dm] NIP-04 inbound decrypt failed {}: {}", event_id, e);
+                    event.content.clone()
+                });
+            let seq = seq_from_event_tags(&event.tags);
+            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                &decrypted,
+                event_has_pushstr_client_tag(&event.tags),
+            );
+            messages.push(serde_json::json!({
+                "id": event_id,
+                "from": event.pubkey.to_hex(),
+                "to": my_pubkey.to_hex(),
+                "content": cleaned,
+                "created_at": event.created_at.as_u64(),
+                "direction": "in",
+                "kind": 4,
+                "dm_kind": "nip04",
+                "pushstr_client": pushstr_client,
+                "receipt_for": receipt_for,
+                "seq": seq,
+            }));
+        }
+
+        for event in events_nip04_out.iter() {
+            let event_id = event.id.to_hex();
+            if !seen_ids.insert(event_id.clone()) {
+                continue;
+            }
+            let recipient_pk = match event_p_tag_pubkey(event) {
+                Some(pk) => pk,
+                None => continue,
+            };
+            let decrypted = nip04::decrypt(keys.secret_key(), &recipient_pk, &event.content)
+                .unwrap_or_else(|e| {
+                    eprintln!("[dm] NIP-04 outbound decrypt failed {}: {}", event_id, e);
+                    event.content.clone()
+                });
+            let seq = seq_from_event_tags(&event.tags);
+            let (cleaned, pushstr_client, receipt_for) = normalize_message_content(
+                &decrypted,
+                event_has_pushstr_client_tag(&event.tags),
+            );
+            messages.push(serde_json::json!({
+                "id": event_id,
+                "from": my_pubkey.to_hex(),
+                "to": recipient_pk.to_hex(),
+                "content": cleaned,
+                "created_at": event.created_at.as_u64(),
+                "direction": "out",
+                "kind": 4,
+                "dm_kind": "nip04",
+                "pushstr_client": pushstr_client,
+                "receipt_for": receipt_for,
+                "seq": seq,
+            }));
+        }
+
         messages.sort_by(|a, b| {
             let a_time = a["created_at"].as_u64().unwrap_or(0);
             let b_time = b["created_at"].as_u64().unwrap_or(0);

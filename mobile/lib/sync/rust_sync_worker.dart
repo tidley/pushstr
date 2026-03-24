@@ -45,6 +45,54 @@ class RustSyncWorker {
     }
   }
 
+  /// Fetches older DMs on a background isolate.
+  static Future<String?> fetchOlderDms({
+    required String nsec,
+    int limit = 50,
+    int untilTimestamp = 0,
+  }) async {
+    if (nsec.isEmpty) return null;
+    if (!await _mutex.tryAcquire()) return null;
+    try {
+      return Isolate.run(() async {
+        try {
+          await RustLib.init();
+          api.initNostr(nsec: nsec);
+          return api.fetchOlderDms(
+            limit: BigInt.from(limit),
+            untilTimestamp: BigInt.from(untilTimestamp),
+          );
+        } catch (_) {
+          return null;
+        }
+      });
+    } finally {
+      _mutex.release();
+    }
+  }
+
+  /// Fetches contact names from profile metadata on a background isolate.
+  static Future<String?> fetchContactNames({
+    required String nsec,
+    required List<String> pubkeys,
+  }) async {
+    if (nsec.isEmpty || pubkeys.isEmpty) return null;
+    if (!await _mutex.tryAcquire()) return null;
+    try {
+      return Isolate.run(() async {
+        try {
+          await RustLib.init();
+          api.initNostr(nsec: nsec);
+          return api.fetchContactNames(pubkeys: pubkeys);
+        } catch (_) {
+          return null;
+        }
+      });
+    } finally {
+      _mutex.release();
+    }
+  }
+
   static Future<void> clearReturnedCache() async {
     try {
       await RustLib.init();
