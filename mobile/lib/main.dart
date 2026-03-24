@@ -31,6 +31,29 @@ import 'profile_storage.dart';
 import 'sync/rust_sync_worker.dart';
 import 'sync/sync_controller.dart';
 
+Map<String, dynamic> _deserializeContactEntry(String entry) {
+  final parts = entry.split('|');
+  if (parts.length >= 3) {
+    return <String, dynamic>{
+      'nickname': parts[0],
+      'name': parts[1],
+      'pubkey': parts.sublist(2).join('|'),
+    };
+  }
+  if (parts.length == 2) {
+    return <String, dynamic>{
+      'nickname': parts[0],
+      'name': '',
+      'pubkey': parts[1],
+    };
+  }
+  return <String, dynamic>{
+    'nickname': '',
+    'name': '',
+    'pubkey': entry,
+  };
+}
+
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
   final double progress;
@@ -256,6 +279,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, int> _relayResendAttempts = {};
   bool _showScrollToBottom = false;
   bool _hasNewMessages = false;
+  bool _loadingOlderMessages = false;
+  bool _olderMessagesExhausted = false;
   bool _encryptPendingAttachment = true;
   bool _isRecordingAudio = false;
   Timer? _recordingTimer;
@@ -422,14 +447,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         isConnected = false;
         messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
         contacts = _dedupeContacts(
-          savedContacts
-              .map((c) {
-                final parts = c.split('|');
-                return <String, dynamic>{
-                  'nickname': parts[0],
-                  'pubkey': parts.length > 1 ? parts[1] : '',
-                };
-              })
+          savedContacts.map(_deserializeContactEntry)
               .where((c) => c['pubkey']!.isNotEmpty)
               .toList(),
         );
@@ -618,9 +636,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final key = nsec != null ? _contactsKeyFor(nsec!) : 'contacts';
       await prefs.setStringList(
         key,
-        contacts
-            .map((c) => '${c['nickname'] ?? ''}|${c['pubkey'] ?? ''}')
-            .toList(),
+        contacts.map(_serializeContact).toList(),
       );
       if (nsec != null) {
         await prefs.remove('contacts');
@@ -676,6 +692,99 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (raw is double) return raw.round();
     if (raw is String) return int.tryParse(raw);
     return null;
+  }
+
+  int _createdAtSeconds(Map<String, dynamic> message) {
+    final raw = message['created_at'];
+    if (raw is int) return raw;
+    if (raw is double) return raw.round();
+    if (raw is String) return int.tryParse(raw) ?? 0;
+    return 0;
+  }
+
+  String _contactPubkey(Map<String, dynamic> contact) {
+    return contact['pubkey']?.toString().trim() ?? '';
+  }
+
+  String _contactNickname(Map<String, dynamic> contact) {
+    return contact['nickname']?.toString().trim() ?? '';
+  }
+
+  String _contactName(Map<String, dynamic> contact) {
+    return contact['name']?.toString().trim() ?? '';
+  }
+
+  String _contactLabel(Map<String, dynamic> contact) {
+    final nickname = _contactNickname(contact);
+    if (nickname.isNotEmpty) return nickname;
+    final name = _contactName(contact);
+    if (name.isNotEmpty) return name;
+    return _short(_contactPubkey(contact));
+  }
+
+  String _contactSubtitle(Map<String, dynamic> contact) {
+    final name = _contactName(contact);
+    final pubkey = _contactPubkey(contact);
+    if (name.isNotEmpty && pubkey.isNotEmpty) {
+      return '$name · ${_short(pubkey)}';
+    }
+    if (name.isNotEmpty) return name;
+    return _short(pubkey);
+  }
+
+  String _serializeContact(Map<String, dynamic> contact) {
+    return '${_contactNickname(contact)}|${_contactName(contact)}|${_contactPubkey(contact)}';
+  }
+
+  Map<String, dynamic> _deserializeContactEntry(String entry) {
+    final parts = entry.split('|');
+    if (parts.length >= 3) {
+      return <String, dynamic>{
+        'nickname': parts[0],
+        'name': parts[1],
+        'pubkey': parts.sublist(2).join('|'),
+      };
+    }
+    if (parts.length == 2) {
+      return <String, dynamic>{
+        'nickname': parts[0],
+        'name': '',
+        'pubkey': parts[1],
+      };
+    }
+    return <String, dynamic>{
+      'nickname': '',
+      'name': '',
+      'pubkey': entry,
+    };
+  }
+
+  String _selectedProfileHex() {
+    final profileNpub = _selectedProfileNpub();
+    if (profileNpub.isEmpty) return '';
+    try {
+      return api.npubToHex(npub: profileNpub);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Map<String, dynamic> _normalizeMessageForLocalView(
+    Map<String, dynamic> message,
+  ) {
+    final normalized = Map<String, dynamic>.from(message);
+    final myHex = _selectedProfileHex();
+    final from = normalized['from']?.toString() ?? '';
+    final direction = normalized['direction']?.toString().toLowerCase() ?? '';
+
+    if (myHex.isNotEmpty && from == myHex) {
+      normalized['direction'] = 'out';
+    } else if (direction == 'incoming') {
+      normalized['direction'] = 'in';
+    } else if (direction == 'outgoing') {
+      normalized['direction'] = 'out';
+    }
+    return normalized;
   }
 
   bool _messageHasReadReceipt(Map<String, dynamic> message) {
@@ -916,7 +1025,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           : 0;
       final dmsJson = await RustSyncWorker.fetchRecentDms(
         nsec: nsec ?? '',
-        limit: 100,
+        limit: 50,
         sinceTimestamp: lastSeen,
       );
       List<Map<String, dynamic>> fetchedMessages = [];
@@ -1001,6 +1110,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // Save messages to persist them
       await _saveMessages();
       await _saveContacts();
+      await _refreshContactNames();
       if (nsec != null && nsec!.isNotEmpty) {
         final maxSeen = messages.fold<int>(0, (acc, m) {
           final raw = m['created_at'];
@@ -1433,6 +1543,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               setState(() {
                 contacts.add(<String, dynamic>{
                   'nickname': nickname,
+                  'name': '',
                   'pubkey': pubkey,
                 });
                 contacts = _dedupeContacts(contacts);
@@ -1442,6 +1553,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _persistVisibleState();
 
               await _saveContacts();
+              unawaited(_refreshContactNames(pubkeys: [pubkey]));
               Navigator.pop(context);
             },
             child: const Text('Add'),
@@ -1495,17 +1607,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
     if (confirmed != true) return;
     final updatedNick = nicknameCtrl.text.trim();
-    setState(() {
+      setState(() {
       for (final c in contacts) {
         if (c['pubkey'] == contact['pubkey']) {
-          c['nickname'] = updatedNick.isEmpty
-              ? _short(c['pubkey'] ?? '')
-              : updatedNick;
+          c['nickname'] = updatedNick;
           break;
         }
       }
     });
-    await _saveContacts();
+      await _saveContacts();
   }
 
   Future<void> _scanContactQr() async {
@@ -1648,7 +1758,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           for (final pubkey in incomingPubkeys) {
             if (!contacts.any((c) => c['pubkey'] == pubkey)) {
-              final newContact = {'pubkey': pubkey!, 'nickname': ''};
+              final newContact = {'pubkey': pubkey!, 'nickname': '', 'name': ''};
               contacts.add(newContact);
             }
           }
@@ -1664,6 +1774,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _ensureSelectedContact();
           await _saveMessages();
           await _saveContacts();
+          unawaited(
+            _refreshContactNames(
+              pubkeys: incomingPubkeys.whereType<String>().toList(),
+            ),
+          );
           try {
             if (nsec != null && nsec!.isNotEmpty) {
               final prefs = await SharedPreferences.getInstance();
@@ -1763,6 +1878,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     final deduped = seen.values.toList().reversed.toList();
     return deduped;
+  }
+
+  Future<void> _refreshContactNames({List<String>? pubkeys}) async {
+    final currentNsec = nsec ?? '';
+    if (currentNsec.isEmpty) return;
+    final targets = (pubkeys ?? contacts.map(_contactPubkey).toList())
+        .map((pk) => pk.trim())
+        .where((pk) => pk.isNotEmpty)
+        .toSet()
+        .toList();
+    if (targets.isEmpty) return;
+    try {
+      final namesJson = await RustSyncWorker.fetchContactNames(
+        nsec: currentNsec,
+        pubkeys: targets,
+      );
+      if (!mounted || namesJson == null || namesJson.isEmpty) return;
+      final decoded = jsonDecode(namesJson);
+      if (decoded is! Map) return;
+      final updates = <String, Map<String, String>>{};
+      decoded.forEach((key, value) {
+        if (value is Map) {
+          updates[key.toString()] = {
+            'name': (value['name']?.toString() ?? '').trim(),
+            'nip05': (value['nip05']?.toString() ?? '').trim(),
+          };
+        }
+      });
+      if (updates.isEmpty) return;
+      var changed = false;
+      setState(() {
+        for (final contact in contacts) {
+          final pubkey = _contactPubkey(contact);
+          final update = updates[pubkey];
+          if (update == null) continue;
+          final fetchedName = update['name'] ?? '';
+          final fetchedNip05 = update['nip05'] ?? '';
+          final currentName = _contactName(contact);
+          final nextName = fetchedName.isNotEmpty
+              ? fetchedName
+              : (currentName.isEmpty && fetchedNip05.isNotEmpty
+                    ? fetchedNip05.split('@').first
+                    : currentName);
+          if (nextName != currentName) {
+            contact['name'] = nextName;
+            changed = true;
+          }
+        }
+      });
+      if (changed) {
+        await _saveContacts();
+      }
+    } catch (e) {
+      debugPrint('[contacts] refresh names failed: $e');
+    }
   }
 
   Future<void> _loadLocalProfileData({
@@ -1912,6 +2082,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     _updateDmModesFromMessages(messages);
     _ensureSelectedContact();
+    unawaited(_refreshContactNames());
     await prefs.remove(pendingKey);
   }
 
@@ -1921,19 +2092,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final existingIds = <String>{};
     final merged = <Map<String, dynamic>>[];
     for (final m in messages) {
-      final id = m['id'] as String?;
+      final normalized = _normalizeMessageForLocalView(m);
+      final id = normalized['id'] as String?;
       if (id != null) {
         existingIds.add(id);
       }
-      merged.add(m);
+      merged.add(normalized);
     }
     for (final m in incoming) {
-      final id = m['id'] as String?;
+      final normalized = _normalizeMessageForLocalView(m);
+      final id = normalized['id'] as String?;
       if (id != null) {
         if (existingIds.contains(id)) continue;
         existingIds.add(id);
       }
-      merged.add(m);
+      merged.add(normalized);
     }
     merged.sort(
       (a, b) => (a['created_at'] ?? 0).compareTo(b['created_at'] ?? 0),
@@ -1956,11 +2129,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final senderPubkey = m['from']?.toString() ?? npub ?? '';
       final messageId = m['id'] as String?;
       final processed = await _decodeContent(content, senderPubkey, messageId);
-      final normalized = {
+      final normalized = _normalizeMessageForLocalView({
         ...m,
         'content': processed['text'],
         'media': processed['media'],
-      };
+      });
       decoded.add(normalized);
       if (isPushstrClient) {
         unawaited(_maybeSendReadReceipt(normalized));
@@ -2251,6 +2424,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _handleScroll() {
     if (!_scrollController.hasClients || !mounted) return;
+    if (_scrollController.offset <= 120) {
+      unawaited(_loadOlderMessages());
+    }
     final nearBottom = _isNearBottom();
     if (nearBottom) {
       if (_showScrollToBottom || _hasNewMessages) {
@@ -2265,6 +2441,113 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _showScrollToBottom = true;
       });
+    }
+  }
+
+  int _oldestConversationTimestamp(String contact) {
+    var oldest = 0;
+    for (final message in messages) {
+      final other = message['direction'] == 'out'
+          ? (message['to']?.toString() ?? '')
+          : (message['from']?.toString() ?? '');
+      if (other != contact) continue;
+      final createdAt = _createdAtSeconds(message);
+      if (createdAt <= 0) continue;
+      if (oldest == 0 || createdAt < oldest) {
+        oldest = createdAt;
+      }
+    }
+    return oldest;
+  }
+
+  Future<void> _loadOlderMessages() async {
+    final contact = selectedContact;
+    final profileNsec = nsec;
+    if (contact == null ||
+        contact.isEmpty ||
+        profileNsec == null ||
+        profileNsec.isEmpty ||
+        _loadingOlderMessages ||
+        _olderMessagesExhausted) {
+      return;
+    }
+    if (!_scrollController.hasClients) return;
+    final oldestTs = _oldestConversationTimestamp(contact);
+    if (oldestTs <= 0) return;
+
+    final previousOffset = _scrollController.offset;
+    final previousMax = _scrollController.position.maxScrollExtent;
+    setState(() {
+      _loadingOlderMessages = true;
+    });
+
+    try {
+      final olderJson = await RustSyncWorker.fetchOlderDms(
+        nsec: profileNsec,
+        limit: 50,
+        untilTimestamp: oldestTs - 1,
+      );
+      if (!mounted || selectedContact != contact || nsec != profileNsec) {
+        return;
+      }
+      if (olderJson == null || olderJson.isEmpty || olderJson == '[]') {
+        _olderMessagesExhausted = true;
+        return;
+      }
+
+      final decoded = jsonDecode(olderJson) as List<dynamic>;
+      var olderMessages = decoded.cast<Map<String, dynamic>>();
+      olderMessages = await _decodeMessages(olderMessages);
+      if (!mounted || selectedContact != contact || nsec != profileNsec) {
+        return;
+      }
+      if (olderMessages.isEmpty) {
+        _olderMessagesExhausted = true;
+        return;
+      }
+
+      _updateDmModesFromMessages(olderMessages);
+      final existingIds = messages
+          .map((message) => message['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      final uniqueOlder = olderMessages.where((message) {
+        final id = message['id']?.toString() ?? '';
+        return id.isNotEmpty && !existingIds.contains(id);
+      }).toList();
+      if (uniqueOlder.isEmpty) {
+        _olderMessagesExhausted = true;
+        return;
+      }
+
+      setState(() {
+        messages = [...uniqueOlder, ...messages];
+      });
+      await _saveMessages();
+      if (!mounted || !_scrollController.hasClients || selectedContact != contact) {
+        return;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !_scrollController.hasClients ||
+            selectedContact != contact) {
+          return;
+        }
+        final newMax = _scrollController.position.maxScrollExtent;
+        final delta = newMax - previousMax;
+        final target = (previousOffset + delta).clamp(0.0, newMax);
+        _scrollController.jumpTo(target);
+      });
+    } catch (e) {
+      debugPrint('[dm] lazy fetch older failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingOlderMessages = false;
+        });
+      } else {
+        _loadingOlderMessages = false;
+      }
     }
   }
 
@@ -2933,16 +3216,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             for (final contact in contacts)
               ListTile(
                 key: ValueKey(contact['pubkey'] ?? ''),
-                title: Text(() {
-                  final nickname = (contact['nickname'] ?? '')
-                      .toString()
-                      .trim();
-                  return nickname.isNotEmpty
-                      ? nickname
-                      : _short(contact['pubkey'] ?? '');
-                }()),
+                title: Text(_contactLabel(contact)),
                 subtitle: Text(
-                  _short(contact['pubkey'] ?? ''),
+                  _contactSubtitle(contact),
                   style: const TextStyle(fontSize: 11),
                 ),
                 selected: selectedContact == contact['pubkey'],
@@ -3124,7 +3400,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final isOut = m['direction'] == 'out';
         final bubbleColor = isOut
             ? const Color(0xFF223E63)
-            : const Color(0xFF282830);
+            : const Color(0xFF21212A);
         final textColor = isOut
             ? const Color.fromARGB(255, 238, 238, 238)
             : Colors.white;
@@ -3359,16 +3635,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _buildSendToDropdown({bool inAppBar = false}) {
     final showDetails = !inAppBar;
     final contactItems = contacts.map((c) {
-      final nickname = c['nickname'] ?? '';
-      final pubkey = c['pubkey'] ?? '';
-      final primary = _short(pubkey);
-      final label = nickname.trim().isNotEmpty
-          ? '$nickname · $primary'
-          : primary;
+      final pubkey = _contactPubkey(c);
+      final label = _contactLabel(c);
+      final secondary = _contactName(c);
 
       return DropdownMenuItem<String>(
         value: pubkey,
-        child: Text(label, overflow: TextOverflow.ellipsis),
+        child: Text(
+          secondary.isNotEmpty && _contactNickname(c).isEmpty
+              ? '$label · ${_short(pubkey)}'
+              : label,
+          overflow: TextOverflow.ellipsis,
+        ),
       );
     }).toList();
     final selectedValue = contacts.any((c) => c['pubkey'] == selectedContact)
@@ -3412,9 +3690,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
       selectedItemBuilder: (_) => contacts.map((c) {
-        final pubkey = c['pubkey'] ?? '';
-        final nickname = (c['nickname'] ?? '').toString().trim();
-        final label = nickname.isNotEmpty ? nickname : _short(pubkey);
+        final pubkey = _contactPubkey(c);
+        final label = _contactLabel(c);
         return Align(
           alignment: Alignment.centerLeft,
           child: Text(label, overflow: TextOverflow.ellipsis),
@@ -3591,6 +3868,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         selectedContact = null;
         messages = [];
         contacts = [];
+        _loadingOlderMessages = false;
+        _olderMessagesExhausted = false;
       });
     }
 
@@ -5623,11 +5902,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final savedContacts = prefs.getStringList(contactsKey) ?? [];
     final contacts = savedContacts
         .map((entry) {
-          final parts = entry.split('|');
-          return {
-            'nickname': parts.isNotEmpty ? parts[0] : '',
-            'pubkey': parts.length > 1 ? parts[1] : '',
-          };
+          return _deserializeContactEntry(entry);
         })
         .where((c) => (c['pubkey'] ?? '').toString().isNotEmpty)
         .toList();
@@ -5706,11 +5981,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final savedContacts = prefs.getStringList(contactsKey) ?? [];
       final contacts = savedContacts
           .map((entry) {
-            final parts = entry.split('|');
-            return {
-              'nickname': parts.isNotEmpty ? parts[0] : '',
-              'pubkey': parts.length > 1 ? parts[1] : '',
-            };
+            return _deserializeContactEntry(entry);
           })
           .where((c) => (c['pubkey'] ?? '').toString().isNotEmpty)
           .toList();
@@ -6215,7 +6486,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (pubkey.isEmpty || seen.contains(pubkey)) continue;
             seen.add(pubkey);
             final nick = contact['nickname']?.toString() ?? '';
-            entries.add('$nick|$pubkey');
+            final name = contact['name']?.toString() ?? '';
+            entries.add('$nick|$name|$pubkey');
           }
           if (entries.isNotEmpty) {
             await prefs.setStringList(_contactsKeyFor(nsec), entries);
@@ -6265,7 +6537,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final dmsJson = await RustSyncWorker.fetchRecentDms(
         nsec: nsec,
-        limit: 100,
+        limit: 50,
         sinceTimestamp: 0,
       );
       if (dmsJson == null || dmsJson.isEmpty) return;
