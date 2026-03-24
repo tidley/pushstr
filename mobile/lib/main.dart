@@ -6693,23 +6693,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
         sinceTimestamp: 0,
       );
       if (dmsJson == null || dmsJson.isEmpty) return;
-      await prefs.setString(_messagesKeyFor(nsec), dmsJson);
-      final contactSet = <String>{};
-      final contactsList = <String>[];
       final List<dynamic> dmsList = jsonDecode(dmsJson);
-      final messages = dmsList.cast<Map<String, dynamic>>();
-      for (final message in messages) {
+      final contactsKey = _contactsKeyFor(nsec);
+      final existingContacts = prefs.getStringList(contactsKey) ?? [];
+      final mergedContacts = <String>{...existingContacts};
+      final knownPubkeys = <String>{};
+      for (final entry in existingContacts) {
+        final contact = _deserializeContactEntry(entry);
+        final pubkey = contact['pubkey']?.toString() ?? '';
+        if (pubkey.isEmpty) continue;
+        knownPubkeys.add(pubkey);
+      }
+      for (final message in dmsList.cast<Map<String, dynamic>>()) {
         final direction = message['direction']?.toString();
         final pubkey = (direction == 'out')
             ? message['to']?.toString()
             : message['from']?.toString();
-        if (pubkey == null || pubkey.isEmpty) continue;
-        if (contactSet.add(pubkey)) {
-          contactsList.add('|$pubkey');
+        if (pubkey == null || pubkey.isEmpty || knownPubkeys.contains(pubkey)) {
+          continue;
         }
+        knownPubkeys.add(pubkey);
+        mergedContacts.add('|$pubkey');
       }
-      if (contactsList.isNotEmpty) {
-        await prefs.setStringList(_contactsKeyFor(nsec), contactsList);
+      if (mergedContacts.length != existingContacts.length) {
+        await prefs.setStringList(contactsKey, mergedContacts.toList());
       }
     } catch (e) {
       print('Failed to prime profile data: $e');
