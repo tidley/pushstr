@@ -3553,6 +3553,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Stack(
       children: [
         listView,
+        if (_loadingOlderMessages)
+          Positioned(
+            top: 12,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    'Loading older messages...',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade200,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (_showScrollToBottom && canScroll)
           Positioned(
             right: 12,
@@ -3796,7 +3834,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               decoration: const InputDecoration(
                                 hintText: 'Message',
                                 filled: true,
-                                border: OutlineInputBorder(),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(12),
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(12),
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(12),
+                                  ),
+                                ),
                                 contentPadding: EdgeInsets.symmetric(
                                   horizontal: 12,
                                   vertical: 10,
