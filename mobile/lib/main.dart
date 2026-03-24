@@ -3840,15 +3840,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   borderRadius: BorderRadius.all(
                                     Radius.circular(12),
                                   ),
+                                  borderSide: BorderSide(
+                                    color: Colors.white24,
+                                  ),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.all(
                                     Radius.circular(12),
                                   ),
+                                  borderSide: BorderSide(
+                                    color: Colors.white24,
+                                  ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.all(
                                     Radius.circular(12),
+                                  ),
+                                  borderSide: BorderSide(
+                                    color: Colors.greenAccent,
+                                    width: 1.4,
                                   ),
                                 ),
                                 contentPadding: EdgeInsets.symmetric(
