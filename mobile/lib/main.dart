@@ -229,6 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const int _maxAttachmentBytes = 20 * 1024 * 1024;
   static const String _pushstrClientTag = '[pushstr:client]';
   static const Color _historyAccentGreen = Color(0xFF2F8F62);
+  static const Color _conversationHeaderGreen = Color(0xFF1E4337);
   // Color.fromARGB(255, 18, 113, 53);
   final TextEditingController messageCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -3108,6 +3109,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 74,
+        backgroundColor: _conversationHeaderGreen,
+        foregroundColor: Colors.white,
         leading: Builder(
           builder: (context) => Transform.translate(
             offset: const Offset(0, -2),
@@ -3133,9 +3136,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
               decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.1),
+                color: _conversationHeaderGreen,
               ),
               child: SafeArea(
                 bottom: false,
@@ -3707,6 +3708,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       decoration: inAppBar
           ? InputDecoration(
               isDense: true,
+              filled: true,
+              fillColor: _conversationHeaderGreen,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 10,
                 vertical: 8,
