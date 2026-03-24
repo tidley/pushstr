@@ -456,21 +456,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_finishInit(savedNsec: savedNsec, profileIndex: profileIndex));
+      unawaited(
+        _finishInit(
+          savedNsec: savedNsec,
+          profileIndex: profileIndex,
+          profileNsec: profileNsec ?? '',
+        ),
+      );
     });
   }
 
   Future<void> _finishInit({
     required String savedNsec,
     required int profileIndex,
+    required String profileNsec,
   }) async {
     unawaited(_checkPrefsBackup());
     try {
-      final initResult = await _initRustClientInBackground(savedNsec);
+      final activeNsec = profileNsec.isNotEmpty ? profileNsec : savedNsec;
+      String activeNpub = '';
+      if (activeNsec.isNotEmpty) {
+        try {
+          final derived = api.deriveNpubs(nsecs: [activeNsec]);
+          if (derived.isNotEmpty) {
+            activeNpub = derived.first;
+          }
+        } catch (e) {
+          debugPrint('Failed to derive npub during init: $e');
+        }
+      }
       if (!mounted) return;
-      nsec = initResult['nsec'];
+      nsec = activeNsec;
       setState(() {
-        npub = initResult['npub'];
+        npub = activeNpub;
         isConnected = true;
       });
       unawaited(
@@ -496,19 +514,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         isConnected = false;
       });
     }
-  }
-
-  Future<Map<String, String>> _initRustClientInBackground(
-    String savedNsec,
-  ) async {
-    return Isolate.run(() async {
-      try {
-        await RustLib.init();
-      } catch (_) {}
-      final npub = api.initNostr(nsec: savedNsec);
-      final nsec = savedNsec.isNotEmpty ? savedNsec : api.getNsec();
-      return {'npub': npub, 'nsec': nsec};
-    });
   }
 
   String _contactsKeyFor(String profileNsec) => 'contacts_$profileNsec';
