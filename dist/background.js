@@ -11840,6 +11840,8 @@ var keepAliveRunning = false;
 var pendingReceipts = /* @__PURE__ */ new Set();
 var sentReceipts = /* @__PURE__ */ new Set();
 var lastConnectAt = 0;
+var connectPromise = null;
+var connectSignature = null;
 var textEncoder = new TextEncoder();
 var textDecoder = new TextDecoder();
 var ready = (async () => {
@@ -12261,31 +12263,52 @@ async function generateNewKey() {
   return { pubkey: getPublicKey(priv), nsec: settings.nsec };
 }
 async function connect() {
+  return connectInternal({ force: false });
+}
+async function connectInternal({ force = false } = {}) {
   if (!esm_exports)
     return;
   const priv = currentPrivkeyHex();
   if (!priv)
     return;
   syncRecipientsForCurrent();
-  if (sub) {
-    sub.close?.();
-    sub = null;
-  }
-  pool = pool || new SimplePool();
-  activeRelays = await resolveRelays(settings.relays);
   const me = currentPubkey();
-  const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
-  const filter = { kinds, "#p": [me] };
-  const relayList = activeRelays.length ? activeRelays : settings.relays;
-  if (relayList.length) {
-    sub = pool.subscribeMany(relayList, filter, {
-      onevent: handleGiftEvent
-    });
-    lastConnectAt = Date.now();
-    console.info("[pushstr] subscribed", [filter], "relays", relayList);
-  } else {
-    console.warn("[pushstr] no relays available to subscribe");
+  const desiredSignature = JSON.stringify({
+    pubkey: me,
+    relays: settings.relays,
+    useGiftwrap: settings.useGiftwrap
+  });
+  if (!force && sub && connectSignature === desiredSignature) {
+    return;
   }
+  if (connectPromise) {
+    return connectPromise;
+  }
+  connectPromise = (async () => {
+    if (sub) {
+      sub.close?.();
+      sub = null;
+    }
+    pool = pool || new SimplePool();
+    activeRelays = await resolveRelays(settings.relays);
+    const kinds = settings.useGiftwrap ? [1059, 14, 4] : [14, 4];
+    const filter = { kinds, "#p": [me] };
+    const relayList = activeRelays.length ? activeRelays : settings.relays;
+    if (relayList.length) {
+      sub = pool.subscribeMany(relayList, filter, {
+        onevent: handleGiftEvent
+      });
+      lastConnectAt = Date.now();
+      connectSignature = desiredSignature;
+      console.info("[pushstr] subscribed", [filter], "relays", relayList);
+    } else {
+      connectSignature = null;
+      console.warn("[pushstr] no relays available to subscribe");
+    }
+  })().finally(() => {
+    connectPromise = null;
+  });
+  return connectPromise;
 }
 function startKeepAlive() {
   if (keepAliveTimer)
@@ -12302,17 +12325,17 @@ async function keepAliveTick() {
   keepAliveRunning = true;
   try {
     if (!pool) {
-      await connect();
+      await connectInternal({ force: true });
       return;
     }
     const relays = activeRelays.length ? activeRelays : settings.relays;
     if (!relays.length || !sub) {
-      await connect();
+      await connectInternal({ force: true });
       return;
     }
     const needsReconnect = Date.now() - lastConnectAt > 10 * 60 * 1e3;
     if (needsReconnect) {
-      await connect();
+      await connectInternal({ force: true });
       return;
     }
     await Promise.allSettled(relays.map((url) => pool.ensureRelay(url)));
@@ -13060,14 +13083,8 @@ function deriveConversationKey(privHex, otherPubHex) {
   return CryptoWasm.nip44_get_conversation_key(priv, otherPub);
 }
 async function decryptMediaDescriptor(descriptor, senderPubkey) {
-  const priv = currentPrivkeyHex();
-  if (!priv)
-    return { error: "No key configured" };
   if (!descriptor?.url)
     return { error: "Missing URL" };
-  if (!descriptor?.iv)
-    return { error: "Missing IV" };
-  const sender = senderPubkey || currentPubkey();
   try {
     const resp = await fetch(descriptor.url);
     if (!resp.ok) {
@@ -13080,10 +13097,29 @@ async function decryptMediaDescriptor(descriptor, senderPubkey) {
         throw new Error(`cipher hash mismatch (got ${fetchedHash}, expected ${descriptor.cipher_sha256})`);
       }
     }
-    const conversationKey = deriveConversationKey(priv, sender);
-    const keyBytes = conversationKey instanceof Uint8Array ? conversationKey : hexToBytes4(conversationKey);
-    const iv = fromBase64(descriptor.iv);
-    const plainBytes = new Uint8Array(CryptoWasm.decrypt_aes_gcm(keyBytes, iv, cipherBytes));
+    let plainBytes;
+    if (descriptor.k && descriptor.nonce) {
+      const keyBytes = fromBase64(descriptor.k);
+      const nonceBytes = fromBase64(descriptor.nonce);
+      if (keyBytes.length !== 32) {
+        throw new Error(`Invalid media key length: expected 32 bytes, got ${keyBytes.length}`);
+      }
+      if (nonceBytes.length !== 12) {
+        throw new Error(`Invalid media nonce length: expected 12 bytes, got ${nonceBytes.length}`);
+      }
+      plainBytes = new Uint8Array(CryptoWasm.decrypt_aes_gcm(keyBytes, nonceBytes, cipherBytes));
+    } else if (descriptor.iv) {
+      const priv = currentPrivkeyHex();
+      if (!priv)
+        return { error: "No key configured" };
+      const sender = senderPubkey || currentPubkey();
+      const conversationKey = deriveConversationKey(priv, sender);
+      const keyBytes = conversationKey instanceof Uint8Array ? conversationKey : hexToBytes4(conversationKey);
+      const iv = fromBase64(descriptor.iv);
+      plainBytes = new Uint8Array(CryptoWasm.decrypt_aes_gcm(keyBytes, iv, cipherBytes));
+    } else {
+      return { error: "Missing media key/nonce" };
+    }
     if (descriptor.sha256) {
       const hash3 = await sha256Hex(plainBytes);
       if (hash3 !== descriptor.sha256) {
@@ -13313,37 +13349,18 @@ function syncRecipientsForCurrent() {
   }
 }
 async function uploadToBlossom(arrayBuffer, recipientOverride, mimeOverride, filename) {
-  const priv = currentPrivkeyHex();
-  if (!priv)
-    return { error: "No key configured" };
   try {
     const bytes4 = new Uint8Array(arrayBuffer);
     const origSize = bytes4.length;
-    const recipient = normalizePubkey(recipientOverride || settings.lastRecipient || settings.recipients[0] && settings.recipients[0].pubkey);
-    const conversationKey = deriveConversationKey(priv, recipient);
-    const keyBytes = conversationKey instanceof Uint8Array ? conversationKey : hexToBytes4(conversationKey);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const cipherBytes = new Uint8Array(CryptoWasm.encrypt_aes_gcm(keyBytes, iv, bytes4));
+    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(12));
+    const cipherBytes = new Uint8Array(CryptoWasm.encrypt_aes_gcm(keyBytes, nonceBytes, bytes4));
     const plainHashHex = await sha256Hex(bytes4);
     const hashHex = await sha256Hex(cipherBytes);
-    const created_at = Math.floor(Date.now() / 1e3);
-    const expiration = created_at + 300;
-    const authEvent = finalizeEvent2(
-      {
-        kind: 24242,
-        created_at,
-        tags: [
-          ["t", "upload"],
-          ["expiration", expiration.toString()],
-          ["x", hashHex]
-        ],
-        content: "Upload file"
-      },
-      priv
-    );
-    const authHeader = "Nostr " + btoa(unescape(encodeURIComponent(JSON.stringify(authEvent))));
-    const base = BLOSSOM_SERVER.replace(/\/$/, "");
-    const url = `${base}/${BLOSSOM_UPLOAD_PATH}`;
+    const auth = await buildBlossomAuth(hashHex);
+    if (!auth.ok)
+      return { error: auth.error || "upload failed" };
+    const { authHeader, url } = auth;
     const resp = await fetch(url, {
       method: "PUT",
       headers: {
@@ -13372,12 +13389,37 @@ async function uploadToBlossom(arrayBuffer, recipientOverride, mimeOverride, fil
       size: origSize,
       mime: mimeOverride || "application/octet-stream",
       encryption: "aes-gcm",
-      iv: toBase64(iv),
+      k: toBase64(keyBytes),
+      nonce: toBase64(nonceBytes),
       filename: filename || defaultFilename(hashHex, mimeOverride)
     };
   } catch (err2) {
     return { error: err2.message || "upload failed" };
   }
+}
+async function buildBlossomAuth(hashHex) {
+  const priv = currentPrivkeyHex();
+  if (!priv)
+    return { ok: false, error: "No key configured" };
+  const created_at = Math.floor(Date.now() / 1e3);
+  const expiration = created_at + 300;
+  const authEvent = finalizeEvent2(
+    {
+      kind: 24242,
+      created_at,
+      tags: [
+        ["t", "upload"],
+        ["expiration", expiration.toString()],
+        ["x", hashHex]
+      ],
+      content: "Upload file"
+    },
+    priv
+  );
+  const authHeader = "Nostr " + btoa(unescape(encodeURIComponent(JSON.stringify(authEvent))));
+  const base = BLOSSOM_SERVER.replace(/\/$/, "");
+  const url = `${base}/${BLOSSOM_UPLOAD_PATH}`;
+  return { ok: true, authHeader, url };
 }
 async function sha256Hex(bytes4) {
   const hashBytes = CryptoWasm.sha256_bytes(bytes4);
