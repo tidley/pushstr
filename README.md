@@ -97,6 +97,26 @@ cd ..
 tar -czf pushstr-linux-x64-v0.1.0.tar.gz bundle
 ```
 
+#### Make it work using new version
+
+From the repo root:
+
+cd /home/tom/Documents/code/nostr/pushstr
+
+cd pushstr_rust
+cargo build --release
+
+cd ../mobile
+/home/tom/flutter/bin/flutter build linux --release
+Install the new release cleanly:
+
+sudo rm -rf /opt/pushstr
+sudo mkdir -p /opt/pushstr
+sudo cp -a /home/tom/Documents/code/nostr/pushstr/mobile/build/linux/x64/release/bundle/. /opt/pushstr/
+/opt/pushstr/pushstr
+
+
+
 To run it locally:
 ```bash
 sudo mkdir -p /opt/pushstr
