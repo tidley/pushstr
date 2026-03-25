@@ -47,11 +47,7 @@ Map<String, dynamic> _deserializeContactEntry(String entry) {
       'pubkey': parts[1],
     };
   }
-  return <String, dynamic>{
-    'nickname': '',
-    'name': '',
-    'pubkey': entry,
-  };
+  return <String, dynamic>{'nickname': '', 'name': '', 'pubkey': entry};
 }
 
 class _HoldDeleteIcon extends StatelessWidget {
@@ -174,8 +170,9 @@ void main() async {
     final exeDir = File(Platform.resolvedExecutable).parent;
     final bundleLib = File('${exeDir.path}/lib/libpushstr_rust.so');
     final sourceDebug = File('../pushstr_rust/target/debug/libpushstr_rust.so');
-    final sourceRelease =
-        File('../pushstr_rust/target/release/libpushstr_rust.so');
+    final sourceRelease = File(
+      '../pushstr_rust/target/release/libpushstr_rust.so',
+    );
     final candidate = bundleLib.existsSync()
         ? bundleLib
         : (sourceDebug.existsSync()
@@ -280,8 +277,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, int> _relayResendAttempts = {};
   bool _showScrollToBottom = false;
   bool _hasNewMessages = false;
-  bool _loadingOlderMessages = false;
-  bool _olderMessagesExhausted = false;
   bool _encryptPendingAttachment = true;
   bool _isRecordingAudio = false;
   Timer? _recordingTimer;
@@ -414,8 +409,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final savedContacts = hasProfileNsec
         ? (prefs.getStringList(contactsKey) ?? [])
         : (prefs.getStringList(contactsKey) ??
-            prefs.getStringList('contacts') ??
-            []);
+              prefs.getStringList('contacts') ??
+              []);
     final savedMessages = hasProfileNsec
         ? prefs.getString(messagesKey)
         : (prefs.getString(messagesKey) ?? prefs.getString('messages'));
@@ -448,7 +443,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         isConnected = false;
         messages = _mergeMessages([...loadedMessages, ...pendingMessages]);
         contacts = _dedupeContacts(
-          savedContacts.map(_deserializeContactEntry)
+          savedContacts
+              .map(_deserializeContactEntry)
               .where((c) => c['pubkey']!.isNotEmpty)
               .toList(),
         );
@@ -560,12 +556,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return msg;
   }
 
-  Future<void> _saveMessages() async {
+  Future<void> _saveMessages({String? profileNsec}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = nsec != null ? _messagesKeyFor(nsec!) : 'messages';
+      final scopeNsec = profileNsec ?? nsec;
+      final key = scopeNsec != null ? _messagesKeyFor(scopeNsec) : 'messages';
       await prefs.setString(key, jsonEncode(_messagesForStorage(messages)));
-      if (nsec != null) {
+      if (scopeNsec != null) {
         // Clear legacy shared storage to avoid cross-profile bleed
         await prefs.remove('messages');
       }
@@ -636,15 +633,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return shouldContinue ?? false;
   }
 
-  Future<void> _saveContacts() async {
+  Future<void> _saveContacts({String? profileNsec}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = nsec != null ? _contactsKeyFor(nsec!) : 'contacts';
-      await prefs.setStringList(
-        key,
-        contacts.map(_serializeContact).toList(),
-      );
-      if (nsec != null) {
+      final scopeNsec = profileNsec ?? nsec;
+      final key = scopeNsec != null ? _contactsKeyFor(scopeNsec) : 'contacts';
+      await prefs.setStringList(key, contacts.map(_serializeContact).toList());
+      if (scopeNsec != null) {
         await prefs.remove('contacts');
       }
     } catch (e) {
@@ -652,31 +647,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _saveDmModes() async {
+  Future<void> _saveDmModes({String? profileNsec}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = nsec != null ? _dmModesKeyFor(nsec!) : 'dm_modes';
+      final scopeNsec = profileNsec ?? nsec;
+      final key = scopeNsec != null ? _dmModesKeyFor(scopeNsec) : 'dm_modes';
       await prefs.setString(key, jsonEncode(_dmModes));
     } catch (e) {
       print('Failed to save DM modes: $e');
     }
   }
 
-  Future<void> _saveDmOverrides() async {
+  Future<void> _saveDmOverrides({String? profileNsec}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = nsec != null ? _dmOverridesKeyFor(nsec!) : 'dm_overrides';
+      final scopeNsec = profileNsec ?? nsec;
+      final key = scopeNsec != null
+          ? _dmOverridesKeyFor(scopeNsec)
+          : 'dm_overrides';
       await prefs.setString(key, jsonEncode(_dmOverrides));
     } catch (e) {
       print('Failed to save DM overrides: $e');
     }
   }
 
-  Future<void> _saveGiftwrapFormats() async {
+  Future<void> _saveGiftwrapFormats({String? profileNsec}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = nsec != null
-          ? _dmGiftwrapKeyFor(nsec!)
+      final scopeNsec = profileNsec ?? nsec;
+      final key = scopeNsec != null
+          ? _dmGiftwrapKeyFor(scopeNsec)
           : 'dm_giftwrap_formats';
       await prefs.setString(key, jsonEncode(_giftwrapFormats));
     } catch (e) {
@@ -698,14 +698,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (raw is double) return raw.round();
     if (raw is String) return int.tryParse(raw);
     return null;
-  }
-
-  int _createdAtSeconds(Map<String, dynamic> message) {
-    final raw = message['created_at'];
-    if (raw is int) return raw;
-    if (raw is double) return raw.round();
-    if (raw is String) return int.tryParse(raw) ?? 0;
-    return 0;
   }
 
   String _contactPubkey(Map<String, dynamic> contact) {
@@ -758,11 +750,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'pubkey': parts[1],
       };
     }
-    return <String, dynamic>{
-      'nickname': '',
-      'name': '',
-      'pubkey': entry,
-    };
+    return <String, dynamic>{'nickname': '', 'name': '', 'pubkey': entry};
   }
 
   String _selectedProfileHex() {
@@ -805,7 +793,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     unawaited(_fetchMessages());
   }
 
-  void _updateDmModesFromMessages(List<Map<String, dynamic>> incoming) {
+  void _updateDmModesFromMessages(
+    List<Map<String, dynamic>> incoming, {
+    String? profileNsec,
+  }) {
     bool changed = false;
     bool giftwrapChanged = false;
     for (final msg in incoming) {
@@ -856,10 +847,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     if (changed) {
-      unawaited(_saveDmModes());
+      unawaited(_saveDmModes(profileNsec: profileNsec));
     }
     if (giftwrapChanged) {
-      unawaited(_saveGiftwrapFormats());
+      unawaited(_saveGiftwrapFormats(profileNsec: profileNsec));
     }
   }
 
@@ -1023,14 +1014,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _fetchMessages() async {
     try {
+      final profileNsec = nsec ?? '';
+      if (profileNsec.isEmpty) return;
       await _ensureRustInitialized();
       final existingLen = messages.length;
       final prefs = await SharedPreferences.getInstance();
-      final lastSeen = (nsec != null && nsec!.isNotEmpty)
-          ? (prefs.getInt(_lastSeenKeyFor(nsec!)) ?? 0)
-          : 0;
+      final lastSeen = prefs.getInt(_lastSeenKeyFor(profileNsec)) ?? 0;
       final dmsJson = await RustSyncWorker.fetchRecentDms(
-        nsec: nsec ?? '',
+        nsec: profileNsec,
         limit: 100,
         sinceTimestamp: lastSeen,
       );
@@ -1040,36 +1031,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } else {
         final List<dynamic> dmsList = jsonDecode(dmsJson);
         fetchedMessages = dmsList.cast<Map<String, dynamic>>();
-        fetchedMessages = await _decodeMessages(fetchedMessages);
-        debugPrint('[dm] Fetch received ${fetchedMessages.length} messages');
-        _updateDmModesFromMessages(fetchedMessages);
-      }
-
-      if (lastSeen == 0 && fetchedMessages.isNotEmpty) {
-        final backfill = await _backfillInitialDmHistory(
-          nsec: nsec ?? '',
-          seedMessages: fetchedMessages,
+        fetchedMessages = await _decodeMessages(
+          fetchedMessages,
+          profileNsec: profileNsec,
         );
-        if (backfill.isNotEmpty) {
-          fetchedMessages = _mergeMessages([...fetchedMessages, ...backfill]);
-          _updateDmModesFromMessages(backfill);
-          debugPrint('[dm] Backfilled ${backfill.length} older messages');
-        }
+        debugPrint('[dm] Fetch received ${fetchedMessages.length} messages');
+        _updateDmModesFromMessages(fetchedMessages, profileNsec: profileNsec);
       }
 
       // Merge any pending background-cached messages
       try {
-        final pendingKey = nsec != null
-            ? _pendingDmsKeyFor(nsec!)
-            : 'pending_dms';
+        final pendingKey = _pendingDmsKeyFor(profileNsec);
         final pendingJson = prefs.getString(pendingKey);
         if (pendingJson != null && pendingJson.isNotEmpty) {
           final pendingList = (jsonDecode(pendingJson) as List<dynamic>)
               .map((e) => Map<String, dynamic>.from(e as Map))
               .map(_normalizeIncomingMessage)
               .toList();
-          final decodedPending = await _decodeMessages(pendingList);
-          _updateDmModesFromMessages(decodedPending);
+          final decodedPending = await _decodeMessages(
+            pendingList,
+            profileNsec: profileNsec,
+          );
+          _updateDmModesFromMessages(decodedPending, profileNsec: profileNsec);
           fetchedMessages = _mergeMessages([
             ...fetchedMessages,
             ...decodedPending,
@@ -1101,22 +1084,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
 
-      // Merge fetched messages with local messages (keep local messages that aren't in fetched)
-      final fetchedIds = fetchedMessages
-          .map((m) => m['id'] as String?)
-          .where((id) => id != null)
-          .toSet();
-      final localOnly = messages.where((m) {
-        final id = m['id'] as String?;
-        return id != null &&
-            id.startsWith('local_') &&
-            !fetchedIds.contains(id);
-      }).toList();
-
-      final merged = _mergeMessages([...fetchedMessages, ...localOnly]);
+      // Preserve already-loaded history when refresh returns a partial window.
+      // fetchRecentDms only returns a bounded slice, so replacing state with it
+      // would drop older cached messages on profile switch.
+      final merged = _mergeMessages([...messages, ...fetchedMessages]);
       _applyPendingReceiptsToList(merged);
       _markRelaySeen(merged, relaySeenIds);
       final added = merged.length > existingLen;
+      if (!mounted || nsec != profileNsec) return;
       setState(() {
         messages = merged;
         lastError = null;
@@ -1126,10 +1101,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _ensureSelectedContact();
 
       // Save messages to persist them
-      await _saveMessages();
-      await _saveContacts();
-      await _refreshContactNames();
-      if (nsec != null && nsec!.isNotEmpty) {
+      await _saveMessages(profileNsec: profileNsec);
+      await _saveContacts(profileNsec: profileNsec);
+      await _refreshContactNames(profileNsec: profileNsec);
+      if (nsec == profileNsec && profileNsec.isNotEmpty) {
         final maxSeen = messages.fold<int>(0, (acc, m) {
           final raw = m['created_at'];
           if (raw is int && raw > acc) return raw;
@@ -1140,8 +1115,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
           return acc;
         });
-        await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
-        await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
+        await prefs.setInt(_lastSeenKeyFor(profileNsec), maxSeen);
+        await prefs.setInt('last_notified_ts_$profileNsec', maxSeen);
       }
       if (added) {
         if (_isNearBottom()) {
@@ -1155,61 +1130,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = 'Fetch failed: $e';
       });
     }
-  }
-
-  Future<List<Map<String, dynamic>>> _backfillInitialDmHistory({
-    required String nsec,
-    required List<Map<String, dynamic>> seedMessages,
-  }) async {
-    if (nsec.isEmpty || seedMessages.isEmpty) return const [];
-
-    final collected = <Map<String, dynamic>>[];
-    final seenIds = seedMessages
-        .map((m) => m['id']?.toString() ?? '')
-        .where((id) => id.isNotEmpty)
-        .toSet();
-    var oldestTs = seedMessages
-        .map(_createdAtSeconds)
-        .where((ts) => ts > 0)
-        .fold<int>(0, (acc, ts) => acc == 0 || ts < acc ? ts : acc);
-    if (oldestTs <= 0) return const [];
-
-    for (var page = 0; page < 50; page++) {
-      final olderJson = await RustSyncWorker.fetchOlderDms(
-        nsec: nsec,
-        limit: 100,
-        untilTimestamp: oldestTs - 1,
-      );
-      if (olderJson == null || olderJson.isEmpty || olderJson == '[]') {
-        break;
-      }
-
-      final decoded = jsonDecode(olderJson) as List<dynamic>;
-      var olderMessages = decoded.cast<Map<String, dynamic>>();
-      olderMessages = await _decodeMessages(olderMessages);
-      if (olderMessages.isEmpty) break;
-
-      var added = 0;
-      for (final message in olderMessages) {
-        final id = message['id']?.toString() ?? '';
-        if (id.isNotEmpty && seenIds.contains(id)) {
-          continue;
-        }
-        if (id.isNotEmpty) seenIds.add(id);
-        collected.add(message);
-        added++;
-      }
-      if (added == 0) break;
-
-      final nextOldest = olderMessages
-          .map(_createdAtSeconds)
-          .where((ts) => ts > 0)
-          .fold<int>(0, (acc, ts) => acc == 0 || ts < acc ? ts : acc);
-      if (nextOldest <= 0 || nextOldest >= oldestTs) break;
-      oldestTs = nextOldest;
-    }
-
-    return collected;
   }
 
   Future<void> _sendMessage() async {
@@ -1227,6 +1147,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     try {
+      final profileNsec = nsec ?? '';
       await _ensureRustInitialized();
       final attachment = _pendingAttachment;
       String payload = text;
@@ -1306,7 +1227,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _sessionMessages.add(localId); // Mark as session message
       final displayContent = localMedia != null
           ? {'text': localText, 'media': localMedia}
-          : await _decodeContent(payload, npub ?? '', localId);
+          : await _decodeContent(
+              payload,
+              npub ?? '',
+              localId,
+              profileNsec: profileNsec,
+            );
       setState(() {
         messages.add(<String, dynamic>{
           'id': localId,
@@ -1327,7 +1253,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _scrollToBottom(force: true);
 
       // Persist and fire off the send in the background; we optimistically assume success.
-      unawaited(_saveMessages());
+      unawaited(_saveMessages(profileNsec: profileNsec));
       unawaited(
         Future(() async {
           try {
@@ -1336,18 +1262,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               eventId = await RustSyncWorker.sendLegacyDm(
                 recipient: selectedContact!,
                 message: payload,
-                nsec: nsec!,
+                nsec: profileNsec,
               );
             } else {
               eventId = await RustSyncWorker.sendGiftDm(
                 recipient: selectedContact!,
                 content: payload,
-                nsec: nsec!,
+                nsec: profileNsec,
                 useNip44: true,
               );
             }
             if (eventId != null) {
-              _replaceLocalMessageId(localId, eventId);
+              if (!mounted || (nsec ?? '') != profileNsec) return;
+              _replaceLocalMessageId(
+                localId,
+                eventId,
+                profileNsec: profileNsec,
+              );
             }
           } catch (e) {
             if (!mounted) return;
@@ -1429,7 +1360,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _resendMessage(Map<String, dynamic> message) async {
-    if (nsec == null || nsec!.isEmpty) {
+    final profileNsec = nsec ?? '';
+    if (profileNsec.isEmpty) {
       setState(() {
         lastError = 'Missing profile key; please re-import or pick a profile.';
       });
@@ -1461,7 +1393,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _sessionMessages.add(localId);
       final displayContent = localMedia != null
           ? {'text': localText, 'media': localMedia}
-          : await _decodeContent(payload, npub ?? '', localId);
+          : await _decodeContent(
+              payload,
+              npub ?? '',
+              localId,
+              profileNsec: profileNsec,
+            );
       setState(() {
         messages.add(<String, dynamic>{
           'id': localId,
@@ -1478,26 +1415,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
 
       _scrollToBottom(force: true);
-      unawaited(_saveMessages());
+      unawaited(_saveMessages(profileNsec: profileNsec));
 
       if (useLegacyDm) {
         final eventId = await RustSyncWorker.sendLegacyDm(
           recipient: recipient,
           message: payload,
-          nsec: nsec!,
+          nsec: profileNsec,
         );
         if (eventId != null) {
-          _replaceLocalMessageId(localId, eventId);
+          if (!mounted || (nsec ?? '') != profileNsec) return;
+          _replaceLocalMessageId(localId, eventId, profileNsec: profileNsec);
         }
       } else {
         final eventId = await RustSyncWorker.sendGiftDm(
           recipient: recipient,
           content: payload,
-          nsec: nsec!,
+          nsec: profileNsec,
           useNip44: true,
         );
         if (eventId != null) {
-          _replaceLocalMessageId(localId, eventId);
+          if (!mounted || (nsec ?? '') != profileNsec) return;
+          _replaceLocalMessageId(localId, eventId, profileNsec: profileNsec);
         }
       }
       if (!mounted) return;
@@ -1625,8 +1564,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               });
               _persistVisibleState();
 
-              await _saveContacts();
-              unawaited(_refreshContactNames(pubkeys: [pubkey]));
+              final profileNsec = nsec ?? '';
+              await _saveContacts(profileNsec: profileNsec);
+              unawaited(
+                _refreshContactNames(
+                  pubkeys: [pubkey],
+                  profileNsec: profileNsec,
+                ),
+              );
               Navigator.pop(context);
             },
             child: const Text('Add'),
@@ -1680,7 +1625,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
     if (confirmed != true) return;
     final updatedNick = nicknameCtrl.text.trim();
-      setState(() {
+    final profileNsec = nsec ?? '';
+    setState(() {
       for (final c in contacts) {
         if (c['pubkey'] == contact['pubkey']) {
           c['nickname'] = updatedNick;
@@ -1688,7 +1634,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       }
     });
-      await _saveContacts();
+    await _saveContacts(profileNsec: profileNsec);
   }
 
   Future<void> _scanContactQr() async {
@@ -1770,7 +1716,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       selectedContact = input;
     });
     _persistVisibleState();
-    await _saveContacts();
+    final profileNsec = nsec ?? '';
+    await _saveContacts(profileNsec: profileNsec);
     if (mounted) {
       _showThemedToast('Contact added', preferTop: true);
     }
@@ -1801,8 +1748,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _listening = true;
     while (mounted) {
       try {
+        final profileNsec = nsec ?? '';
+        if (profileNsec.isEmpty) {
+          await Future.delayed(_dmListenerEmptyDelay);
+          continue;
+        }
         final result = await RustSyncWorker.waitForNewDms(
-          nsec: nsec ?? '',
+          nsec: profileNsec,
           wait: _dmListenerWait,
         );
         // If the call short-circuited (mutex busy, init failure, or no data), avoid a tight loop.
@@ -1812,9 +1764,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         final List<dynamic> list = jsonDecode(result);
         var newMessages = list.cast<Map<String, dynamic>>();
-        newMessages = await _decodeMessages(newMessages);
+        newMessages = await _decodeMessages(
+          newMessages,
+          profileNsec: profileNsec,
+        );
         debugPrint('[dm] Listener received ${newMessages.length} messages');
-        _updateDmModesFromMessages(newMessages);
+        if (!mounted || nsec != profileNsec) {
+          await Future.delayed(_dmListenerEmptyDelay);
+          continue;
+        }
+        _updateDmModesFromMessages(newMessages, profileNsec: profileNsec);
         if (newMessages.isNotEmpty && mounted) {
           // Mark new messages as session messages
           for (final msg in newMessages) {
@@ -1831,7 +1790,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           for (final pubkey in incomingPubkeys) {
             if (!contacts.any((c) => c['pubkey'] == pubkey)) {
-              final newContact = {'pubkey': pubkey!, 'nickname': '', 'name': ''};
+              final newContact = {
+                'pubkey': pubkey!,
+                'nickname': '',
+                'name': '',
+              };
               contacts.add(newContact);
             }
           }
@@ -1845,15 +1808,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _sortContactsByActivity();
           });
           _ensureSelectedContact();
-          await _saveMessages();
-          await _saveContacts();
+          await _saveMessages(profileNsec: profileNsec);
+          await _saveContacts(profileNsec: profileNsec);
           unawaited(
             _refreshContactNames(
               pubkeys: incomingPubkeys.whereType<String>().toList(),
+              profileNsec: profileNsec,
             ),
           );
           try {
-            if (nsec != null && nsec!.isNotEmpty) {
+            if (profileNsec.isNotEmpty) {
               final prefs = await SharedPreferences.getInstance();
               final maxSeen = messages.fold<int>(0, (acc, m) {
                 final raw = m['created_at'];
@@ -1865,8 +1829,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
                 return acc;
               });
-              await prefs.setInt(_lastSeenKeyFor(nsec!), maxSeen);
-              await prefs.setInt('last_notified_ts_${nsec!}', maxSeen);
+              await prefs.setInt(_lastSeenKeyFor(profileNsec), maxSeen);
+              await prefs.setInt('last_notified_ts_$profileNsec', maxSeen);
             }
           } catch (_) {}
           if (_isNearBottom()) {
@@ -1953,8 +1917,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return deduped;
   }
 
-  Future<void> _refreshContactNames({List<String>? pubkeys}) async {
-    final currentNsec = nsec ?? '';
+  Future<void> _refreshContactNames({
+    List<String>? pubkeys,
+    String? profileNsec,
+  }) async {
+    final currentNsec = profileNsec ?? nsec ?? '';
     if (currentNsec.isEmpty) return;
     final targets = (pubkeys ?? contacts.map(_contactPubkey).toList())
         .map((pk) => pk.trim())
@@ -2000,8 +1967,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
         }
       });
+      if (!mounted || (nsec ?? '') != currentNsec) return;
       if (changed) {
-        await _saveContacts();
+        await _saveContacts(profileNsec: currentNsec);
       }
     } catch (e) {
       debugPrint('[contacts] refresh names failed: $e');
@@ -2037,7 +2005,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'pending_dms',
       _pendingDmsKeyFor,
     );
-    final dmModesKey = profileScopedKey(profileNsec, 'dm_modes', _dmModesKeyFor);
+    final dmModesKey = profileScopedKey(
+      profileNsec,
+      'dm_modes',
+      _dmModesKeyFor,
+    );
     final dmOverridesKey = profileScopedKey(
       profileNsec,
       'dm_overrides',
@@ -2052,8 +2024,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final savedContacts = hasProfileNsec
         ? (prefs.getStringList(contactsKey) ?? [])
         : (prefs.getStringList(contactsKey) ??
-            prefs.getStringList('contacts') ??
-            []);
+              prefs.getStringList('contacts') ??
+              []);
     final savedMessages = hasProfileNsec
         ? prefs.getString(messagesKey)
         : (prefs.getString(messagesKey) ?? prefs.getString('messages'));
@@ -2153,9 +2125,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
       _sortContactsByActivity();
     });
-    _updateDmModesFromMessages(messages);
+    _updateDmModesFromMessages(messages, profileNsec: profileNsec);
     _ensureSelectedContact();
-    unawaited(_refreshContactNames());
+    unawaited(_refreshContactNames(profileNsec: profileNsec));
     await prefs.remove(pendingKey);
   }
 
@@ -2188,20 +2160,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<List<Map<String, dynamic>>> _decodeMessages(
-    List<Map<String, dynamic>> msgs,
-  ) async {
+    List<Map<String, dynamic>> msgs, {
+    String? profileNsec,
+  }) async {
     final decoded = <Map<String, dynamic>>[];
     for (final m in msgs) {
       final receiptId = m['receipt_for']?.toString();
       if (receiptId != null && receiptId.isNotEmpty) {
-        _handleIncomingReceipt(receiptId);
+        _handleIncomingReceipt(receiptId, profileNsec: profileNsec);
         continue;
       }
       final isPushstrClient = m['pushstr_client'] == true;
       final content = m['content']?.toString() ?? '';
       final senderPubkey = m['from']?.toString() ?? npub ?? '';
       final messageId = m['id'] as String?;
-      final processed = await _decodeContent(content, senderPubkey, messageId);
+      final processed = await _decodeContent(
+        content,
+        senderPubkey,
+        messageId,
+        profileNsec: profileNsec,
+      );
       final normalized = _normalizeMessageForLocalView({
         ...m,
         'content': processed['text'],
@@ -2209,18 +2187,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       decoded.add(normalized);
       if (isPushstrClient) {
-        unawaited(_maybeSendReadReceipt(normalized));
+        unawaited(_maybeSendReadReceipt(normalized, profileNsec: profileNsec));
       }
     }
     return decoded;
   }
 
-  void _handleIncomingReceipt(String receiptId) {
-    if (_applyReceiptToMessages(receiptId)) return;
+  void _handleIncomingReceipt(String receiptId, {String? profileNsec}) {
+    if (_applyReceiptToMessages(receiptId, profileNsec: profileNsec)) return;
     _pendingReceipts.add(receiptId);
   }
 
-  bool _applyReceiptToMessages(String receiptId) {
+  bool _applyReceiptToMessages(String receiptId, {String? profileNsec}) {
+    if (profileNsec != null && profileNsec.isNotEmpty && nsec != profileNsec) {
+      return false;
+    }
     bool updated = false;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     for (final message in messages) {
@@ -2236,7 +2217,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {});
     }
     if (updated) {
-      unawaited(_saveMessages());
+      unawaited(_saveMessages(profileNsec: profileNsec));
     }
     return updated;
   }
@@ -2279,7 +2260,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _replaceLocalMessageId(String localId, String eventId) {
+  void _replaceLocalMessageId(
+    String localId,
+    String eventId, {
+    String? profileNsec,
+  }) {
     bool updated = false;
     for (final message in messages) {
       if (message['id'] == localId) {
@@ -2301,12 +2286,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {});
       }
-      unawaited(_saveMessages());
+      unawaited(_saveMessages(profileNsec: profileNsec));
     }
     // Automatic relay resend is disabled for now to avoid duplicate sends.
   }
 
-  Future<void> _maybeSendReadReceipt(Map<String, dynamic> message) async {
+  Future<void> _maybeSendReadReceipt(
+    Map<String, dynamic> message, {
+    String? profileNsec,
+  }) async {
     if (message['direction'] != 'in') return;
     final sender = message['from']?.toString() ?? '';
     final messageId = message['id']?.toString() ?? '';
@@ -2319,19 +2307,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final payload = _buildReadReceiptPayload(messageId);
     unawaited(
       Future(() async {
-        if (nsec == null || nsec!.isEmpty) return;
+        final activeNsec = profileNsec ?? nsec ?? '';
+        if (activeNsec.isEmpty) return;
         try {
           if (useLegacyDm) {
             await RustSyncWorker.sendLegacyDm(
               recipient: sender,
               message: payload,
-              nsec: nsec!,
+              nsec: activeNsec,
             );
           } else {
             await RustSyncWorker.sendGiftDm(
               recipient: sender,
               content: payload,
-              nsec: nsec!,
+              nsec: activeNsec,
               useNip44: true,
             );
           }
@@ -2345,8 +2334,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<Map<String, dynamic>> _decodeContent(
     String raw,
     String senderPubkey,
-    String? messageId,
-  ) async {
+    String? messageId, {
+    String? profileNsec,
+  }) async {
     raw = _stripPushstrClientTag(raw);
     final extracted = _extractPushstrMedia(raw);
     final cleanedText = (extracted['text'] ?? '').trim();
@@ -2444,7 +2434,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           api.decryptMedia(
             descriptorJson: descriptorJson,
             senderPubkey: senderPubkey,
-            myNsec: nsec,
+            myNsec: profileNsec ?? nsec,
           ),
         );
 
@@ -2497,9 +2487,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _handleScroll() {
     if (!_scrollController.hasClients || !mounted) return;
-    if (_scrollController.offset <= 120) {
-      unawaited(_loadOlderMessages());
-    }
     final nearBottom = _isNearBottom();
     if (nearBottom) {
       if (_showScrollToBottom || _hasNewMessages) {
@@ -2514,113 +2501,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _showScrollToBottom = true;
       });
-    }
-  }
-
-  int _oldestConversationTimestamp(String contact) {
-    var oldest = 0;
-    for (final message in messages) {
-      final other = message['direction'] == 'out'
-          ? (message['to']?.toString() ?? '')
-          : (message['from']?.toString() ?? '');
-      if (other != contact) continue;
-      final createdAt = _createdAtSeconds(message);
-      if (createdAt <= 0) continue;
-      if (oldest == 0 || createdAt < oldest) {
-        oldest = createdAt;
-      }
-    }
-    return oldest;
-  }
-
-  Future<void> _loadOlderMessages() async {
-    final contact = selectedContact;
-    final profileNsec = nsec;
-    if (contact == null ||
-        contact.isEmpty ||
-        profileNsec == null ||
-        profileNsec.isEmpty ||
-        _loadingOlderMessages ||
-        _olderMessagesExhausted) {
-      return;
-    }
-    if (!_scrollController.hasClients) return;
-    final oldestTs = _oldestConversationTimestamp(contact);
-    if (oldestTs <= 0) return;
-
-    final previousOffset = _scrollController.offset;
-    final previousMax = _scrollController.position.maxScrollExtent;
-    setState(() {
-      _loadingOlderMessages = true;
-    });
-
-    try {
-      final olderJson = await RustSyncWorker.fetchOlderDms(
-        nsec: profileNsec,
-        limit: 50,
-        untilTimestamp: oldestTs - 1,
-      );
-      if (!mounted || selectedContact != contact || nsec != profileNsec) {
-        return;
-      }
-      if (olderJson == null || olderJson.isEmpty || olderJson == '[]') {
-        _olderMessagesExhausted = true;
-        return;
-      }
-
-      final decoded = jsonDecode(olderJson) as List<dynamic>;
-      var olderMessages = decoded.cast<Map<String, dynamic>>();
-      olderMessages = await _decodeMessages(olderMessages);
-      if (!mounted || selectedContact != contact || nsec != profileNsec) {
-        return;
-      }
-      if (olderMessages.isEmpty) {
-        _olderMessagesExhausted = true;
-        return;
-      }
-
-      _updateDmModesFromMessages(olderMessages);
-      final existingIds = messages
-          .map((message) => message['id']?.toString() ?? '')
-          .where((id) => id.isNotEmpty)
-          .toSet();
-      final uniqueOlder = olderMessages.where((message) {
-        final id = message['id']?.toString() ?? '';
-        return id.isNotEmpty && !existingIds.contains(id);
-      }).toList();
-      if (uniqueOlder.isEmpty) {
-        _olderMessagesExhausted = true;
-        return;
-      }
-
-      setState(() {
-        messages = [...uniqueOlder, ...messages];
-      });
-      await _saveMessages();
-      if (!mounted || !_scrollController.hasClients || selectedContact != contact) {
-        return;
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted ||
-            !_scrollController.hasClients ||
-            selectedContact != contact) {
-          return;
-        }
-        final newMax = _scrollController.position.maxScrollExtent;
-        final delta = newMax - previousMax;
-        final target = (previousOffset + delta).clamp(0.0, newMax);
-        _scrollController.jumpTo(target);
-      });
-    } catch (e) {
-      debugPrint('[dm] lazy fetch older failed: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loadingOlderMessages = false;
-        });
-      } else {
-        _loadingOlderMessages = false;
-      }
     }
   }
 
@@ -3205,9 +3085,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-              decoration: BoxDecoration(
-                color: _conversationHeaderGreen,
-              ),
+              decoration: BoxDecoration(color: _conversationHeaderGreen),
               child: SafeArea(
                 bottom: false,
                 child: Row(
@@ -3336,7 +3214,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               }
                             });
                             _persistVisibleState();
-                            await _saveContacts();
+                            final profileNsec = nsec ?? '';
+                            await _saveContacts(profileNsec: profileNsec);
                             _cancelHoldActionHome(
                               'delete_contact_${contact['pubkey']}',
                             );
@@ -3627,44 +3506,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Stack(
       children: [
         listView,
-        if (_loadingOlderMessages)
-          Positioned(
-            top: 12,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.72),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.35),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    'Loading older messages...',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade200,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
         if (_showScrollToBottom && canScroll)
           Positioned(
             right: 12,
@@ -3891,7 +3732,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     if (event is KeyDownEvent &&
                                         event.logicalKey ==
                                             LogicalKeyboardKey.enter &&
-                                        !HardwareKeyboard.instance.isShiftPressed &&
+                                        !HardwareKeyboard
+                                            .instance
+                                            .isShiftPressed &&
                                         canSend) {
                                       unawaited(_sendMessage());
                                       return KeyEventResult.handled;
@@ -3904,7 +3747,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               focusNode: _messageFocus,
                               keyboardType: TextInputType.multiline,
                               minLines: 1,
-                              maxLines: null, // allow scrolling inside the field
+                              maxLines:
+                                  null, // allow scrolling inside the field
                               style: TextStyle(
                                 fontWeight: Platform.isLinux
                                     ? FontWeight.w300
@@ -3920,17 +3764,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   borderRadius: BorderRadius.all(
                                     Radius.circular(12),
                                   ),
-                                  borderSide: BorderSide(
-                                    color: Colors.white24,
-                                  ),
+                                  borderSide: BorderSide(color: Colors.white24),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.all(
                                     Radius.circular(12),
                                   ),
-                                  borderSide: BorderSide(
-                                    color: Colors.white24,
-                                  ),
+                                  borderSide: BorderSide(color: Colors.white24),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.all(
@@ -4019,8 +3859,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         selectedContact = null;
         messages = [];
         contacts = [];
-        _loadingOlderMessages = false;
-        _olderMessagesExhausted = false;
       });
     }
 
@@ -4504,6 +4342,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (media == null || media['descriptor'] == null) return;
 
     try {
+      final profileNsec = nsec ?? '';
       final descriptor = media['descriptor'] as Map<String, dynamic>;
       final senderPubkey = media['senderPubkey'] as String;
       final cacheKey = media['cacheKey'] as String;
@@ -4518,10 +4357,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         api.decryptMedia(
           descriptorJson: descriptorJson,
           senderPubkey: senderPubkey,
-          myNsec: nsec,
+          myNsec: profileNsec,
         ),
       );
 
+      if (!mounted || (nsec ?? '') != profileNsec) return;
       // Cache the decrypted bytes
       _decryptedMediaCache[cacheKey] = bytes;
 
@@ -4532,7 +4372,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         lastError = null;
       });
 
-      await _saveMessages();
+      await _saveMessages(profileNsec: profileNsec);
     } catch (e) {
       setState(() {
         lastError = 'Decrypt failed: $e';
@@ -4563,11 +4403,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       if (Platform.isIOS) {
-        final file = await _writeTempMediaFile(
-          bytes,
-          mime,
-          filename: saveName,
-        );
+        final file = await _writeTempMediaFile(bytes, mime, filename: saveName);
         final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
           'path': file.path,
           'mime': mime,
@@ -4616,11 +4452,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     String? filename,
   }) async {
     try {
-      final file = await _writeTempMediaFile(
-        bytes,
-        mime,
-        filename: filename,
-      );
+      final file = await _writeTempMediaFile(bytes, mime, filename: filename);
       final ok = await _storageChannel.invokeMethod<bool>('shareFile', {
         'path': file.path,
         'mime': mime,
@@ -4664,8 +4496,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ? filename.trim()
         : 'pushstr_${DateTime.now().millisecondsSinceEpoch}.$ext';
     final safeName = rawName.replaceAll(RegExp(r'[\\/:]'), '_');
-    final finalName =
-        safeName.contains('.') ? safeName : '$safeName.$ext';
+    final finalName = safeName.contains('.') ? safeName : '$safeName.$ext';
     final file = File('${dir.path}/$finalName');
     await file.writeAsBytes(bytes, flush: true);
     return file;
@@ -5002,8 +4833,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   color: Colors.transparent,
                   child: InkWell(
                     onTap: onTap == null ? null : () => unawaited(onTap()),
-                    mouseCursor:
-                        onTap != null ? SystemMouseCursors.click : null,
+                    mouseCursor: onTap != null
+                        ? SystemMouseCursors.click
+                        : null,
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -5024,18 +4856,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                         ],
                       ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          message,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: Colors.white,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            message,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: Colors.white,
+                            ),
                           ),
-                        ),
                           if (onTap != null) ...[
                             const SizedBox(width: 8),
                             const Icon(
@@ -5785,20 +5617,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     // Load cached npubs to avoid recomputing on every load
     final cachedNpubs = prefs.getStringList('profile_npubs_cache') ?? [];
-    final npub = cachedNpubs.length > selectedIndex && cachedNpubs[selectedIndex].isNotEmpty
+    final npub =
+        cachedNpubs.length > selectedIndex &&
+            cachedNpubs[selectedIndex].isNotEmpty
         ? cachedNpubs[selectedIndex]
         : (loadedProfiles.isNotEmpty && selectedIndex < loadedProfiles.length
-            ? (() {
-                final nsec = loadedProfiles[selectedIndex]['nsec'] ?? '';
-                if (nsec.isEmpty) return '';
-                try {
-                  final derived = api.deriveNpubs(nsecs: [nsec]);
-                  return derived.isNotEmpty ? derived.first : '';
-                } catch (_) {
-                  return '';
-                }
-              })()
-            : '');
+              ? (() {
+                  final nsec = loadedProfiles[selectedIndex]['nsec'] ?? '';
+                  if (nsec.isEmpty) return '';
+                  try {
+                    final derived = api.deriveNpubs(nsecs: [nsec]);
+                    return derived.isNotEmpty ? derived.first : '';
+                  } catch (_) {
+                    return '';
+                  }
+                })()
+              : '');
     _foregroundEnabled = prefs.getBool('foreground_service_enabled') ?? false;
 
     setState(() {
