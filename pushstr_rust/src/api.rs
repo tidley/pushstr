@@ -52,6 +52,8 @@ static RECIPIENT_DM_RELAY_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static GIFTWRAP_DECRYPT_BATCH: Lazy<StdMutex<GiftwrapDecryptBatch>> =
     Lazy::new(|| StdMutex::new(GiftwrapDecryptBatch::default()));
+static FIPS_MOBILE_CLIENT: Lazy<Mutex<Option<fips::mobile::FipsMobileClient>>> =
+    Lazy::new(|| Mutex::new(None));
 
 #[derive(Debug)]
 enum SendKind {
@@ -1959,6 +1961,158 @@ pub fn clear_returned_events_cache() -> Result<()> {
         (Err(e), _) => Err(anyhow::anyhow!("Failed to clear cache set: {}", e)),
         (_, Err(e)) => Err(anyhow::anyhow!("Failed to clear cache queue: {}", e)),
     }
+}
+
+async fn fips_mobile_status_json(client: &fips::mobile::FipsMobileClient) -> Result<String> {
+    let status = client.status().await?;
+    serde_json::to_string(&status).context("failed to serialize FIPS mobile status")
+}
+
+/// Build a default embedded-FIPS YAML config for the Android Dropbox PoC.
+#[frb(sync)]
+pub fn fips_mobile_default_config_yaml(nsec: Option<String>) -> Result<String> {
+    let identity = match nsec
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(secret) => format!("    persistent: false\n    nsec: \"{secret}\"\n"),
+        None => "    persistent: false\n".to_string(),
+    };
+    Ok(format!(
+        r#"node:
+  identity:
+{identity}  discovery:
+    nostr:
+      enabled: true
+      policy: configured_only
+      advertise: true
+      advert_relays:
+        - "wss://relay.damus.io"
+        - "wss://nos.lol"
+        - "wss://offchain.pub"
+      dm_relays:
+        - "wss://relay.damus.io"
+        - "wss://nos.lol"
+        - "wss://offchain.pub"
+      stun_servers:
+        - "stun:stun.l.google.com:19302"
+        - "stun:stun.cloudflare.com:3478"
+        - "stun:global.stun.twilio.com:3478"
+
+tun:
+  enabled: false
+
+dns:
+  enabled: false
+
+transports:
+  udp:
+    bind_addr: "0.0.0.0:0"
+    advertise_on_nostr: true
+    public: false
+
+peers: []
+"#
+    ))
+}
+
+/// Start the embedded FIPS mobile runtime and return a JSON status snapshot.
+#[frb(sync)]
+pub fn fips_mobile_start(config_yaml: String, response_port: Option<u16>) -> Result<String> {
+    run_block_on(async move {
+        let existing = {
+            let mut lock = FIPS_MOBILE_CLIENT.lock().await;
+            lock.take()
+        };
+        if let Some(client) = existing {
+            let _ = client.stop().await;
+        }
+
+        let port = response_port.unwrap_or(fips::mobile::MOBILE_RESPONSE_PORT);
+        let client = fips::mobile::FipsMobileClient::start_from_yaml(&config_yaml, port).await?;
+        let status = fips_mobile_status_json(&client).await?;
+
+        let mut lock = FIPS_MOBILE_CLIENT.lock().await;
+        *lock = Some(client);
+        Ok(status)
+    })
+}
+
+/// Queue Nostr NAT traversal to a known FIPS peer npub.
+#[frb(sync)]
+pub fn fips_mobile_connect_peer(npub: String) -> Result<String> {
+    run_block_on(async move {
+        let lock = FIPS_MOBILE_CLIENT.lock().await;
+        let client = lock
+            .as_ref()
+            .context("FIPS mobile runtime is not started")?;
+        client.queue_connect_npub(npub).await?;
+        fips_mobile_status_json(client).await
+    })
+}
+
+/// Wait for a service session to a known FIPS peer npub.
+#[frb(sync)]
+pub fn fips_mobile_wait_for_peer(npub: String, timeout_ms: u64) -> Result<String> {
+    run_block_on(async move {
+        let lock = FIPS_MOBILE_CLIENT.lock().await;
+        let client = lock
+            .as_ref()
+            .context("FIPS mobile runtime is not started")?;
+        client.ensure_session_npub(&npub).await?;
+        client
+            .wait_for_session_npub(&npub, std::time::Duration::from_millis(timeout_ms))
+            .await?;
+        fips_mobile_status_json(client).await
+    })
+}
+
+/// Send a single blob to a Pi4ssd Dropbox receiver over FIPS service port 4242.
+#[frb(sync)]
+pub fn fips_mobile_send_dropbox_blob(
+    target_npub: String,
+    name: String,
+    mime: Option<String>,
+    bytes: Vec<u8>,
+) -> Result<String> {
+    run_block_on(async move {
+        let lock = FIPS_MOBILE_CLIENT.lock().await;
+        let client = lock
+            .as_ref()
+            .context("FIPS mobile runtime is not started")?;
+        client
+            .send_dropbox_blob_to_npub(&target_npub, &name, mime, &bytes)
+            .await?;
+        fips_mobile_status_json(client).await
+    })
+}
+
+/// Return a JSON status snapshot for the embedded FIPS mobile runtime.
+#[frb(sync)]
+pub fn fips_mobile_status() -> Result<String> {
+    run_block_on(async move {
+        let lock = FIPS_MOBILE_CLIENT.lock().await;
+        let client = lock
+            .as_ref()
+            .context("FIPS mobile runtime is not started")?;
+        fips_mobile_status_json(client).await
+    })
+}
+
+/// Stop the embedded FIPS mobile runtime.
+#[frb(sync)]
+pub fn fips_mobile_stop() -> Result<String> {
+    run_block_on(async move {
+        let existing = {
+            let mut lock = FIPS_MOBILE_CLIENT.lock().await;
+            lock.take()
+        };
+        if let Some(client) = existing {
+            client.stop().await?;
+        }
+        Ok("{\"state\":\"stopped\"}".to_string())
+    })
 }
 
 #[cfg(test)]

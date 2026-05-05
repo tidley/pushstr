@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `derive_contact_name`, `enqueue_send`, `ensure_recipient_dm_relays`, `event_has_pushstr_client_tag`, `event_p_tag_pubkey`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `is_read_receipt_content`, `next_send_seq`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `normalize_message_content`, `normalize_relay_list`, `parse_pubkey`, `parse_read_receipt_id`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `send_dm_direct`, `send_gift_dm_direct`, `seq_from_event_tags`, `seq_from_tag_list`, `sha256_hex`, `start_send_worker`, `strip_pushstr_client_tag`, `tag_list_has_pushstr_client_tag`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
+// These functions are ignored because they are not marked as `pub`: `derive_contact_name`, `enqueue_send`, `ensure_recipient_dm_relays`, `event_has_pushstr_client_tag`, `event_p_tag_pubkey`, `fips_mobile_status_json`, `get_client_and_keys`, `get_nip44_conversation_key`, `hmac_sha256`, `is_read_receipt_content`, `next_send_seq`, `nip44_calc_padded_len`, `nip44_decrypt_custom`, `nip44_encrypt_custom`, `nip44_fast_expand`, `nip44_hmac_aad`, `nip44_pad`, `nip44_unpad`, `normalize_message_content`, `normalize_relay_list`, `note_giftwrap_decrypt`, `parse_pubkey`, `parse_read_receipt_id`, `push_giftwrap_dm`, `push_nip04_dm`, `push_normalized_dm_message`, `random_timestamp_within_two_days`, `relay_tags`, `run_block_on`, `send_dm_direct`, `send_gift_dm_direct`, `seq_from_event_tags`, `seq_from_tag_list`, `sha256_hex`, `start_send_worker`, `strip_pushstr_client_tag`, `tag_list_has_pushstr_client_tag`, `timestamp`, `unwrap_gift_event`, `upload_to_blossom`, `wrap_gift_event`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Nip44MessageKeys`, `RumorData`, `SendKind`, `SendRequest`, `UnwrappedGift`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
@@ -105,6 +105,57 @@ Uint8List decryptMedia({required String descriptorJson, required String senderPu
 
 /// Clear the cache of returned event IDs
 void clearReturnedEventsCache() => RustLib.instance.api.crateApiClearReturnedEventsCache();
+
+/// Build a default embedded-FIPS YAML config for the Android Dropbox PoC.
+String fipsMobileDefaultConfigYaml({String? nsec}) =>
+    RustLib.instance.api.crateApiFipsMobileDefaultConfigYaml(nsec: nsec);
+
+/// Start the embedded FIPS mobile runtime and return a JSON status snapshot.
+String fipsMobileStart({required String configYaml, int? responsePort}) =>
+    RustLib.instance.api.crateApiFipsMobileStart(configYaml: configYaml, responsePort: responsePort);
+
+/// Queue Nostr NAT traversal to a known FIPS peer npub.
+String fipsMobileConnectPeer({required String npub}) => RustLib.instance.api.crateApiFipsMobileConnectPeer(npub: npub);
+
+/// Wait for a service session to a known FIPS peer npub.
+String fipsMobileWaitForPeer({required String npub, required BigInt timeoutMs}) =>
+    RustLib.instance.api.crateApiFipsMobileWaitForPeer(npub: npub, timeoutMs: timeoutMs);
+
+/// Send a single blob to a Pi4ssd Dropbox receiver over FIPS service port 4242.
+String fipsMobileSendDropboxBlob({
+  required String targetNpub,
+  required String name,
+  String? mime,
+  required List<int> bytes,
+}) => RustLib.instance.api.crateApiFipsMobileSendDropboxBlob(
+  targetNpub: targetNpub,
+  name: name,
+  mime: mime,
+  bytes: bytes,
+);
+
+/// Return a JSON status snapshot for the embedded FIPS mobile runtime.
+String fipsMobileStatus() => RustLib.instance.api.crateApiFipsMobileStatus();
+
+/// Stop the embedded FIPS mobile runtime.
+String fipsMobileStop() => RustLib.instance.api.crateApiFipsMobileStop();
+
+class GiftwrapDecryptBatch {
+  final BigInt count;
+  final BigInt gen;
+
+  const GiftwrapDecryptBatch({required this.count, required this.gen});
+
+  static Future<GiftwrapDecryptBatch> default_() => RustLib.instance.api.crateApiGiftwrapDecryptBatchDefault();
+
+  @override
+  int get hashCode => count.hashCode ^ gen.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GiftwrapDecryptBatch && runtimeType == other.runtimeType && count == other.count && gen == other.gen;
+}
 
 class MediaDescriptor {
   final String url;

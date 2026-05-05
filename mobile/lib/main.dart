@@ -50,6 +50,243 @@ Map<String, dynamic> _deserializeContactEntry(String entry) {
   return <String, dynamic>{'nickname': '', 'name': '', 'pubkey': entry};
 }
 
+class FipsDropScreen extends StatefulWidget {
+  final String? initialNsec;
+
+  const FipsDropScreen({super.key, this.initialNsec});
+
+  @override
+  State<FipsDropScreen> createState() => _FipsDropScreenState();
+}
+
+class _FipsDropScreenState extends State<FipsDropScreen> {
+  final TextEditingController _targetCtrl = TextEditingController();
+  late final TextEditingController _configCtrl;
+  bool _busy = false;
+  String _status = 'stopped';
+  String? _error;
+  String? _fileName;
+  String? _mime;
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _configCtrl = TextEditingController(
+      text: api.fipsMobileDefaultConfigYaml(nsec: widget.initialNsec),
+    );
+  }
+
+  @override
+  void dispose() {
+    _targetCtrl.dispose();
+    _configCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(String label, String Function() action) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final raw = await Future<String>(action);
+      setState(() => _status = _statusLabel(raw, fallback: label));
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  String _statusLabel(String raw, {String fallback = 'ok'}) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        final state = decoded['state'] ?? fallback;
+        final peers = decoded['peer_count'];
+        final links = decoded['link_count'];
+        final sessions = decoded['session_count'];
+        if (peers != null && links != null && sessions != null) {
+          return '$state · peers $peers · links $links · sessions $sessions';
+        }
+        return '$state';
+      }
+    } catch (_) {}
+    return raw.isEmpty ? fallback : raw;
+  }
+
+  Future<void> _pickFile() async {
+    final picked = await FilePicker.platform.pickFiles(withData: true);
+    if (picked == null || picked.files.isEmpty) return;
+
+    final file = picked.files.single;
+    Uint8List? bytes = file.bytes;
+    if (bytes == null && file.path != null) {
+      bytes = await File(file.path!).readAsBytes();
+    }
+    if (bytes == null) {
+      setState(() => _error = 'Unable to read selected file');
+      return;
+    }
+
+    setState(() {
+      _fileName = file.name;
+      _mime = lookupMimeType(file.name, headerBytes: bytes);
+      _bytes = bytes;
+      _error = null;
+    });
+  }
+
+  String _targetNpub() {
+    final npub = _targetCtrl.text.trim();
+    if (npub.isEmpty) {
+      throw Exception('Pi4ssd npub is required');
+    }
+    return npub;
+  }
+
+  Future<void> _startFips() {
+    return _run(
+      'started',
+      () => api.fipsMobileStart(configYaml: _configCtrl.text),
+    );
+  }
+
+  Future<void> _connectPeer() {
+    return _run(
+      'connect queued',
+      () => api.fipsMobileConnectPeer(npub: _targetNpub()),
+    );
+  }
+
+  Future<void> _sendFile() {
+    return _run('sent', () {
+      final bytes = _bytes;
+      final name = _fileName;
+      if (bytes == null || name == null) {
+        throw Exception('Select a file first');
+      }
+      final npub = _targetNpub();
+      api.fipsMobileWaitForPeer(
+        npub: npub,
+        timeoutMs: BigInt.from(15000),
+      );
+      return api.fipsMobileSendDropboxBlob(
+        targetNpub: npub,
+        name: name,
+        mime: _mime,
+        bytes: bytes,
+      );
+    });
+  }
+
+  Future<void> _stopFips() {
+    return _run('stopped', api.fipsMobileStop);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fileLabel = _fileName == null
+        ? 'No file selected'
+        : '$_fileName · ${_bytes?.length ?? 0} bytes';
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('FIPS Drop'),
+        backgroundColor: const Color(0xFF1A2026),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            TextField(
+              controller: _targetCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Pi4ssd npub',
+                prefixIcon: Icon(Icons.hub_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : _startFips,
+                    icon: const Icon(Icons.power_settings_new),
+                    label: const Text('Start'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: _busy ? null : _connectPeer,
+                    icon: const Icon(Icons.link),
+                    label: const Text('Connect'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _pickFile,
+              icon: const Icon(Icons.attach_file),
+              label: Text(fileLabel, overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : _sendFile,
+              icon: const Icon(Icons.cloud_upload),
+              label: const Text('Send'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _busy ? null : _stopFips,
+              icon: const Icon(Icons.stop_circle_outlined),
+              label: const Text('Stop FIPS'),
+            ),
+            const SizedBox(height: 16),
+            if (_busy) const LinearProgressIndicator(),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Colors.redAccent.shade100),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                _status,
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Config'),
+              children: [
+                TextField(
+                  controller: _configCtrl,
+                  maxLines: 18,
+                  minLines: 8,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HoldDeleteIcon extends StatelessWidget {
   final bool active;
   final double progress;
@@ -3138,6 +3375,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cloud_upload_outlined),
+              title: const Text('FIPS Drop'),
+              subtitle: const Text('Send a file to Pi4ssd'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => FipsDropScreen(initialNsec: nsec),
+                  ),
+                );
+              },
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
